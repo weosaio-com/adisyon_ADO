@@ -18,23 +18,13 @@ import type {
   UpdatePrinterDto,
   CreatePrintRouteDto,
 } from './dto/printing.schemas';
-
-type PrintItem = {
-  name?: string;
-  quantity?: number;
-  price?: number;
-  total?: number;
-};
-
-type PrintPayload = {
-  text?: string;
-  title?: string;
-  orderNo?: string;
-  date?: string;
-  items?: PrintItem[];
-  discount?: number;
-  grandTotal?: number;
-};
+import {
+  encodeForPowerShell,
+  POWERSHELL_PRINT_SCRIPT,
+  PRINTER_ENV,
+  printText,
+  type PrintPayload,
+} from './print-text';
 
 type DiscoveredPrinter = { id: string; name: string };
 type PrintableOrder = Prisma.OrderGetPayload<{
@@ -64,37 +54,21 @@ class MockPrinterDriver implements PrinterDriver {
   }
 }
 
-function printText(payload: PrintPayload): string {
-  if (payload.text) return `${payload.text}\r\n\r\n`;
-  const lines = [String(payload.title ?? ''), `Adisyon: ${payload.orderNo ?? '-'}`, ''];
-  for (const item of payload.items ?? []) {
-    const quantity = item.quantity ?? 1;
-    const total = item.total === undefined ? '' : `  ${Number(item.total).toFixed(2)} TL`;
-    lines.push(`${quantity} x ${item.name ?? ''}${total}`);
-  }
-  if (payload.discount) lines.push(`Indirim: ${Number(payload.discount).toFixed(2)} TL`);
-  if (payload.grandTotal !== undefined) {
-    lines.push('', `TOPLAM: ${Number(payload.grandTotal).toFixed(2)} TL`);
-  }
-  return `${lines.join('\r\n')}\r\n\r\n`;
-}
-
 class WindowsSpoolerDriver implements PrinterDriver {
   async print(payload: PrintPayload, connection: string, address: string | null): Promise<void> {
     if (process.platform !== 'win32' || connection !== 'windows_spooler' || !address) {
       throw new Error('Windows spooler yazici adi tanimli degil.');
     }
     await new Promise<void>((resolve, reject) => {
+      // Yazici adi env ile (bosluk/Turkce karakter guvenli); metin stdin'den base64.
       const child = spawn(
         'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          '$input | Out-Printer -Name $args[0]',
-          address,
-        ],
-        { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
+        ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_PRINT_SCRIPT],
+        {
+          env: { ...process.env, [PRINTER_ENV]: address },
+          stdio: ['pipe', 'ignore', 'pipe'],
+          windowsHide: true,
+        },
       );
       let error = '';
       child.stderr.setEncoding('utf8');
@@ -103,7 +77,8 @@ class WindowsSpoolerDriver implements PrinterDriver {
       child.on('close', (code) =>
         code === 0 ? resolve() : reject(new Error(error.trim() || `Print exit ${code}`)),
       );
-      child.stdin.end(printText(payload), 'utf8');
+      // Base64: PowerShell stdin'i OEM kod sayfasiyla okur; Turkce karakterler bozulmasin.
+      child.stdin.end(encodeForPowerShell(printText(payload)), 'ascii');
     });
   }
 
