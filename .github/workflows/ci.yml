@@ -49,8 +49,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit tests (saf hesap self-check)
-        run: pnpm --filter @ado/backend run test:unit
+      # Tum paketlerin self-check'leri (backend + frontend + desktop).
+      - name: Unit tests (self-check)
+        run: pnpm test
 
   # Kritik para yollari e2e: sunucu + seed + smoke (merge/split/iade/idempotency).
   e2e:
