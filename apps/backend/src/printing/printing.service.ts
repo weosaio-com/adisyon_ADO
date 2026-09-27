@@ -27,10 +27,13 @@ import {
   PRINTER_ENV,
   printSummary,
   printText,
+  type PrintPaymentLine,
   type PrintPayload,
 } from './print-text';
 
 const execFileAsync = promisify(execFile);
+// Adisyon/bilgi fisi mali belge degildir; ÖKC fisi/e-Arsiv ayrica duzenlenir.
+const FISCAL_NOTE = 'Bilgi fişidir — mali değeri yoktur.';
 // Basarisiz fis listesi (ve masa ekranindaki uyari) bu pencereye bakar.
 const JOB_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -309,6 +312,29 @@ export class PrintingService implements OnModuleInit {
     });
   }
 
+  // Test sayfası: işletme başlığı + Türkçe karakter satırı (kod sayfası sorununu gösterir).
+  async printTestPage(user: AuthUser, printerId: string): Promise<string> {
+    const printer = await this.prisma.printer.findFirst({
+      where: { id: printerId, branchId: user.branchId, deletedAt: null },
+    });
+    if (!printer) throw new NotFoundException('Yazıcı bulunamadı.');
+    return this.enqueuePrintJob(
+      user.branchId,
+      printer.id,
+      'test_page',
+      {
+        header: await this.businessHeader(user.branchId),
+        title: 'YAZICI TEST SAYFASI',
+        date: new Date().toISOString(),
+        footer: [
+          'Türkçe karakter testi: ÇĞİÖŞÜ çğıöşü',
+          'Bu sayfa düzgün okunuyorsa yazıcı hazır.',
+        ],
+      },
+      user.userId,
+    );
+  }
+
   // Kurulum ekrani: suruculerin buldugu yazicilar. Bir surucu hata verirse
   // (PowerShell yok/zaman asimi) digerleri yine listelenir; yazici adi elle de girilebilir.
   async discoverPrinters() {
@@ -582,7 +608,7 @@ export class PrintingService implements OnModuleInit {
       return;
     }
 
-    const printDoc = this.buildCustomerDoc(order, 'MÜŞTERİ FİŞİ — ÖDENDİ');
+    const printDoc = await this.buildCustomerDoc(order, 'MÜŞTERİ FİŞİ — ÖDENDİ', true);
     await this.enqueuePrintJob(
       event.branchId,
       printerId,
@@ -611,12 +637,19 @@ export class PrintingService implements OnModuleInit {
     return defaultPrinter?.id;
   }
 
-  // Soyut PrintDocument (müşteri fişi / hesap fişi ortak gövde). Başlık ayırt eder.
-  private buildCustomerDoc(order: PrintableOrder, title: string): PrintPayload {
+  // Soyut PrintDocument (müşteri fişi / hesap fişi ortak gövde). Başlık ayırt eder;
+  // ödenmiş fişte geçerli tahsilatlar ve nakit para üstü de basılır.
+  private async buildCustomerDoc(
+    order: PrintableOrder,
+    title: string,
+    paid: boolean,
+  ): Promise<PrintPayload> {
     return {
+      header: await this.businessHeader(order.branchId),
       title,
+      table: await this.tableLabel(order),
       orderNo: order.orderNo,
-      date: order.openedAt.toISOString(),
+      date: ((paid && order.closedAt) || new Date()).toISOString(),
       items: order.items.map((item) => ({
         name: item.productNameSnapshot || item.product.name,
         quantity: item.quantity / 1000,
@@ -625,7 +658,49 @@ export class PrintingService implements OnModuleInit {
       })),
       discount: (order.discountTotal || 0) / 100,
       grandTotal: (order.grandTotal || 0) / 100,
+      ...(paid ? { payments: await this.paymentLines(order.id) } : {}),
+      footer: [FISCAL_NOTE],
     };
+  }
+
+  // Fiş başlığı: işletme adı, adres, telefon (Ayarlar › İşletme bilgileri).
+  private async businessHeader(branchId: string): Promise<string[]> {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { name: true, address: true, phone: true },
+    });
+    if (!branch) return [];
+    return [branch.name, branch.address, branch.phone ? `Tel: ${branch.phone}` : null].filter(
+      (line): line is string => !!line?.trim(),
+    );
+  }
+
+  // "Salon · Masa 5"; masasız adisyonda sipariş türü.
+  private async tableLabel(order: { tableId: string | null; type: string }): Promise<string> {
+    if (order.tableId) {
+      const table = await this.prisma.table.findUnique({
+        where: { id: order.tableId },
+        select: { name: true, hall: { select: { name: true } } },
+      });
+      if (table) return `${table.hall.name} · ${table.name}`;
+    }
+    return order.type === 'delivery' ? 'Paket' : 'Gel-al';
+  }
+
+  // Geçerli tahsilatlar: iade edilen ödemeler (ve iade satırları) fişe girmez.
+  private async paymentLines(orderId: string): Promise<PrintPaymentLine[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { orderId, deletedAt: null },
+      orderBy: { paidAt: 'asc' },
+    });
+    const reversed = new Set(rows.map((row) => row.reversesPaymentId).filter(Boolean));
+    return rows
+      .filter((row) => row.direction === 'charge' && !reversed.has(row.id))
+      .map((row) => ({
+        method: row.method,
+        amount: row.amount / 100,
+        ...(row.change ? { change: row.change / 100 } : {}),
+      }));
   }
 
   // Ödeme ÖNCESİ hesap/adisyon fişi (talep üzerine). Ödeme almaz; fiş
@@ -652,7 +727,7 @@ export class PrintingService implements OnModuleInit {
       });
     }
 
-    const printDoc = this.buildCustomerDoc(order, '*** HESAP *** (Ödeme alınmadı)');
+    const printDoc = await this.buildCustomerDoc(order, '*** HESAP *** (Ödeme alınmadı)', false);
     await this.enqueuePrintJob(
       user.branchId,
       printerId,
@@ -747,15 +822,37 @@ export class PrintingService implements OnModuleInit {
       return;
     }
 
+    // Mutfak masayı, gönderen garsonu ve kalem notlarını görsün.
+    const [table, waiter, notes] = await Promise.all([
+      this.tableLabel(order),
+      event.actorId
+        ? this.prisma.user.findUnique({
+            where: { id: event.actorId },
+            select: { displayName: true },
+          })
+        : null,
+      this.prisma.orderItemNote.findMany({
+        where: { orderItemId: { in: items.map((i) => i.orderItemId) }, deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+    const noteOf = new Map<string, string>();
+    for (const n of notes) {
+      const prev = noteOf.get(n.orderItemId);
+      noteOf.set(n.orderItemId, prev ? `${prev}; ${n.note}` : n.note);
+    }
+
     for (const g of groups.values()) {
-      const printDoc = {
+      const printDoc: PrintPayload = {
         title: g.documentType === DocumentType.Bar ? 'BAR FİŞİ' : 'MUTFAK FİŞİ',
+        table,
+        ...(waiter?.displayName ? { waiter: waiter.displayName } : {}),
         orderNo: order.orderNo,
         date: new Date().toISOString(),
-        items: g.items.map((i: { productName: string; quantity: number }) => ({
-          name: i.productName,
-          quantity: i.quantity / 1000,
-        })),
+        items: g.items.map((i) => {
+          const note = noteOf.get(i.orderItemId);
+          return { name: i.productName, quantity: i.quantity / 1000, ...(note ? { note } : {}) };
+        }),
       };
       await this.enqueuePrintJob(
         event.branchId,

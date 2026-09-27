@@ -5,31 +5,87 @@ export type PrintItem = {
   quantity?: number;
   price?: number;
   total?: number;
+  note?: string; // garson notu (mutfak fisinde)
+};
+
+export type PrintPaymentLine = {
+  method: string; // cash | card | transfer | qr | debt
+  amount: number; // TL
+  change?: number; // nakit para ustu (TL)
 };
 
 export type PrintPayload = {
   text?: string;
+  header?: string[]; // isletme adi, adres, telefon
   title?: string;
+  table?: string; // "Bahçe · Masa 5" | "Gel-al"
+  waiter?: string;
   orderNo?: string;
-  date?: string;
+  date?: string; // ISO; yerel saatle basilir
   items?: PrintItem[];
   discount?: number;
   grandTotal?: number;
+  payments?: PrintPaymentLine[];
+  footer?: string[];
 };
+
+const METHOD_LABELS: Record<string, string> = {
+  cash: 'Nakit',
+  card: 'Kart',
+  transfer: 'Havale',
+  qr: 'QR',
+  debt: 'Veresiye',
+};
+// 58 mm rulo ~32 karakter: ayirici her iki genislikte tek satir kalir.
+const RULE = '-'.repeat(32);
+
+/** TL tutari Turk bicimiyle ("1.234,50 TL"). */
+export function formatTl(value: number): string {
+  return `${Number(value).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
+}
+
+function formatQty(quantity: number): string {
+  return Number.isInteger(quantity)
+    ? String(quantity)
+    : quantity.toLocaleString('tr-TR', { maximumFractionDigits: 3 });
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString('tr-TR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 /** Soyut fis -> yaziciya gidecek duz metin (tutarlar TL, miktarlar birim). */
 export function printText(payload: PrintPayload): string {
   if (payload.text) return `${payload.text}\r\n\r\n`;
-  const lines = [String(payload.title ?? ''), `Adisyon: ${payload.orderNo ?? '-'}`, ''];
-  for (const item of payload.items ?? []) {
-    const quantity = item.quantity ?? 1;
-    const total = item.total === undefined ? '' : `  ${Number(item.total).toFixed(2)} TL`;
-    lines.push(`${quantity} x ${item.name ?? ''}${total}`);
+  const lines: string[] = [];
+  if (payload.header?.length) lines.push(...payload.header, '');
+  if (payload.title) lines.push(payload.title);
+  if (payload.table) lines.push(`Masa: ${payload.table}`);
+  if (payload.waiter) lines.push(`Garson: ${payload.waiter}`);
+  if (payload.orderNo) lines.push(`Adisyon: ${payload.orderNo}`);
+  if (payload.date) lines.push(`Tarih: ${formatDate(payload.date)}`);
+  if (payload.items?.length) {
+    lines.push(RULE);
+    for (const item of payload.items) {
+      const total = item.total === undefined ? '' : `  ${formatTl(item.total)}`;
+      lines.push(`${formatQty(item.quantity ?? 1)} x ${item.name ?? ''}${total}`);
+      if (item.note) lines.push(`   Not: ${item.note}`);
+    }
+    lines.push(RULE);
   }
-  if (payload.discount) lines.push(`İndirim: ${Number(payload.discount).toFixed(2)} TL`);
-  if (payload.grandTotal !== undefined) {
-    lines.push('', `TOPLAM: ${Number(payload.grandTotal).toFixed(2)} TL`);
+  if (payload.discount) lines.push(`İndirim: ${formatTl(payload.discount)}`);
+  if (payload.grandTotal !== undefined) lines.push(`TOPLAM: ${formatTl(payload.grandTotal)}`);
+  for (const payment of payload.payments ?? []) {
+    lines.push(`${METHOD_LABELS[payment.method] ?? payment.method}: ${formatTl(payment.amount)}`);
+    if (payment.change) lines.push(`Para üstü: ${formatTl(payment.change)}`);
   }
+  if (payload.footer?.length) lines.push('', ...payload.footer);
   return `${lines.join('\r\n')}\r\n\r\n`;
 }
 
@@ -68,10 +124,10 @@ export function decodePrinterList(stdout: string): string[] {
   return names.filter((name): name is string => typeof name === 'string' && name.trim() !== '');
 }
 
-/** Fis listesinde tek satirlik ozet ("MUTFAK FİŞİ · 20260927-0007"). */
+/** Fis listesinde tek satirlik ozet ("MUTFAK FİŞİ · Bahçe · Masa 5 · 20260927-0007"). */
 export function printSummary(payload: PrintPayload): string {
   if (payload.text) return payload.text.split(/\r?\n/)[0] ?? '';
-  return [payload.title, payload.orderNo].filter(Boolean).join(' · ');
+  return [payload.title, payload.table, payload.orderNo].filter(Boolean).join(' · ');
 }
 
 // --- self-check: `ts-node src/printing/print-text.ts` ---
@@ -87,9 +143,43 @@ if (require.main === module) {
     discount: 10,
     grandTotal: 245.5,
   });
-  assert.ok(text.includes('2 x Çay  30.00 TL'), 'kalem satiri');
-  assert.ok(text.includes('İndirim: 10.00 TL'), 'indirim etiketi Turkce');
-  assert.ok(text.includes('TOPLAM: 245.50 TL'), 'toplam');
+  assert.ok(text.includes('2 x Çay  30,00 TL'), 'kalem satiri (Turk para bicimi)');
+  assert.ok(text.includes('0,5 x İçli köfte (ğüöı)  40,00 TL'), 'kesirli miktar virgulle');
+  assert.ok(text.includes('İndirim: 10,00 TL'), 'indirim etiketi Turkce');
+  assert.ok(text.includes('TOPLAM: 245,50 TL'), 'toplam');
+  assert.strictEqual(formatTl(1234.5), '1.234,50 TL', 'binlik ayirac');
+
+  // Mutfak fisi: masa, garson, saat ve kalem notu (eskiden yalniz adisyon no + kalemler).
+  const kitchen = printText({
+    title: 'MUTFAK FİŞİ',
+    table: 'Bahçe · Masa 5',
+    waiter: 'Ali',
+    orderNo: '20260927-0007',
+    date: '2026-09-27T11:35:00.000Z',
+    items: [{ name: 'Adana', quantity: 2, note: 'az pişmiş, soğansız' }],
+  });
+  assert.ok(kitchen.includes('Masa: Bahçe · Masa 5'), 'mutfak fisinde masa');
+  assert.ok(kitchen.includes('Garson: Ali'), 'mutfak fisinde garson');
+  assert.match(kitchen, /Tarih: \d{2}\.\d{2}\.2026 \d{2}:\d{2}/, 'tarih/saat yerel bicimde');
+  assert.ok(kitchen.includes('2 x Adana\r\n   Not: az pişmiş, soğansız'), 'not kalemin altinda');
+
+  // Musteri fisi: isletme basligi, odeme satirlari + para ustu, mali deger notu.
+  const receipt = printText({
+    header: ['Lezzet Lokantası', 'Atatürk Cad. 1', 'Tel: 0212 000 00 00'],
+    title: 'MÜŞTERİ FİŞİ',
+    grandTotal: 145,
+    payments: [
+      { method: 'card', amount: 50 },
+      { method: 'cash', amount: 95, change: 5 },
+    ],
+    footer: ['Bilgi fişidir — mali değeri yoktur.'],
+  });
+  assert.ok(receipt.startsWith('Lezzet Lokantası\r\nAtatürk Cad. 1\r\n'), 'baslik en ustte');
+  assert.ok(
+    receipt.includes('Kart: 50,00 TL\r\nNakit: 95,00 TL\r\nPara üstü: 5,00 TL'),
+    'odeme satirlari',
+  );
+  assert.ok(receipt.includes('Bilgi fişidir — mali değeri yoktur.'), 'mali deger notu');
 
   const encoded = encodeForPowerShell(text);
   assert.match(encoded, /^[A-Za-z0-9+/=]+$/, 'base64 salt ASCII (kod sayfasindan bagimsiz)');
@@ -112,8 +202,8 @@ if (require.main === module) {
   assert.deepStrictEqual(decodePrinterList(listOut([])), [], 'yazici yok');
   assert.deepStrictEqual(decodePrinterList(''), [], 'bos cikti');
   assert.strictEqual(
-    printSummary({ title: 'MUTFAK FİŞİ', orderNo: '20260927-0007' }),
-    'MUTFAK FİŞİ · 20260927-0007',
+    printSummary({ title: 'MUTFAK FİŞİ', table: 'Bahçe · Masa 5', orderNo: '20260927-0007' }),
+    'MUTFAK FİŞİ · Bahçe · Masa 5 · 20260927-0007',
   );
   assert.strictEqual(
     printSummary({ text: 'Yazıcı Sınama Sayfası\nDurum' }),

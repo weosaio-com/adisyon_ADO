@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, apiUpload, ApiError, hasPerm } from '../lib/api';
 import { downloadText } from '../lib/export';
 import type { AppSetting, Backup } from '../lib/types';
+import BusinessInfoCard from './BusinessInfoCard';
 import PrinterSettingsCard from './PrinterSettingsCard';
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString('tr-TR');
@@ -43,6 +44,15 @@ export default function AyarlarScreen() {
         {info && <p className="rounded-lg bg-green-50 p-2 text-sm text-green-700">{info}</p>}
 
         <ServerInfoCard />
+        {hasPerm('settings.manage') && (
+          <BusinessInfoCard
+            onError={fail}
+            onInfo={(m) => {
+              setError('');
+              setInfo(m);
+            }}
+          />
+        )}
         {hasPerm('printer.manage') && (
           <PrinterSettingsCard
             onError={fail}

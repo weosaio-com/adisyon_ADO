@@ -103,14 +103,7 @@ export class PrintingController {
   @Post('test-print/:id')
   @RequirePermissions(Permission.PrinterManage)
   async testPrint(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const jobPayload = { text: 'Yazıcı Sınama Sayfası\nDurum: Aktif\nBaşarılar!' };
-    const jobId = await this.printingService.enqueuePrintJob(
-      user.branchId,
-      id,
-      'test_page',
-      jobPayload,
-      user.userId,
-    );
+    const jobId = await this.printingService.printTestPage(user, id);
     return { success: true, jobId };
   }
 
