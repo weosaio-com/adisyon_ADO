@@ -10,12 +10,12 @@ import {
   readFileSync,
   readdirSync,
   writeFileSync,
-  createWriteStream,
   renameSync,
   unlinkSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { rotatingLog } from './rotating-log.mjs';
 
 // Paketli uygulama dev sunucusuna (3001) yanlislikla baglanmasin.
 const PORT = process.env.API_PORT || (app.isPackaged ? '43127' : '3001');
@@ -136,9 +136,8 @@ function startBackend() {
     ? join(process.resourcesPath, 'backend')
     : join(import.meta.dirname, '..', 'backend');
 
-  const logStream = createWriteStream(join(app.getPath('userData'), 'backend-error.log'), {
-    flags: 'a',
-  });
+  // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin.
+  const writeLog = rotatingLog(join(app.getPath('userData'), 'backend-error.log'));
 
   // ELECTRON_RUN_AS_NODE: electron.exe'yi duz node olarak kullan (sistemde node gerekmez).
   backend = spawn(process.execPath, [join(base, 'dist', 'main.js')], {
@@ -150,8 +149,8 @@ function startBackend() {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  backend.stdout.pipe(logStream);
-  backend.stderr.pipe(logStream);
+  backend.stdout.on('data', writeLog);
+  backend.stderr.on('data', writeLog);
 }
 
 async function waitUp(timeoutMs) {
