@@ -10,7 +10,7 @@
     "seed": "ts-node --transpile-only src/seed.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit",
-    "test:unit": "ts-node --transpile-only src/payments/payments.calc.ts && ts-node --transpile-only src/orders/orders.calc.ts && ts-node --transpile-only src/reports/reports.calc.ts && ts-node --transpile-only src/license/license.keys.ts && ts-node --transpile-only src/auth/recovery.code.ts && ts-node --transpile-only src/catalog/catalog.defaults.selfcheck.ts",
+    "test:unit": "ts-node --transpile-only src/payments/payments.calc.ts && ts-node --transpile-only src/orders/orders.calc.ts && ts-node --transpile-only src/reports/reports.calc.ts && ts-node --transpile-only src/license/license.keys.ts && ts-node --transpile-only src/auth/recovery.code.ts && ts-node --transpile-only src/catalog/catalog.defaults.selfcheck.ts && ts-node --transpile-only src/common/events/event-bus.selfcheck.ts",
     "test:e2e": "node test/smoke.e2e.mjs"
   },
   "dependencies": {

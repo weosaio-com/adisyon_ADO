@@ -6,6 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { DURABLE_LISTENER } from '../common/events/durable-listener';
 import { spawn } from 'node:child_process';
 import { newId, PrintJobStatus, DocumentType, type DomainEvent } from '@ado/shared';
 import type { Prisma } from '@prisma/client';
@@ -455,7 +456,7 @@ export class PrintingService implements OnModuleInit {
   // ===========================================================================
   // Domain Event Abonesi
   // ===========================================================================
-  @OnEvent('order.paid', { async: true })
+  @OnEvent('order.paid', DURABLE_LISTENER)
   async handleOrderPaid(event: DomainEvent<'order.paid', { orderId: string }>) {
     const { orderId } = event.payload;
     this.logger.log(`Received order.paid event for order: ${orderId}`);
@@ -570,7 +571,7 @@ export class PrintingService implements OnModuleInit {
     return { ok: true };
   }
 
-  @OnEvent('order.item.sent', { async: true })
+  @OnEvent('order.item.sent', DURABLE_LISTENER)
   async handleOrderItemSent(
     event: DomainEvent<
       'order.item.sent',

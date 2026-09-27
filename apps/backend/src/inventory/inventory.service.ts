@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { DURABLE_LISTENER } from '../common/events/durable-listener';
 import { newId, StockMovementType, type DomainEvent } from '@ado/shared';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -208,7 +209,7 @@ export class InventoryService {
   // Stok, kalem MUTFAGA GONDERILINCE (order.item.sent) dusulur; 'added'da DEGIL.
   // Boylece pending/taslak/offline kalemler (silinebilir, degistirilebilir) stok tutmaz
   // -> removeItem/updateItem stok sizintisi olusturmaz. Void -> iade (asagida).
-  @OnEvent('order.item.sent', { async: true })
+  @OnEvent('order.item.sent', DURABLE_LISTENER)
   async handleOrderItemSent(
     event: DomainEvent<
       'order.item.sent',
@@ -250,7 +251,7 @@ export class InventoryService {
     }
   }
 
-  @OnEvent('order.item.voided', { async: true })
+  @OnEvent('order.item.voided', DURABLE_LISTENER)
   async handleOrderItemVoided(
     event: DomainEvent<
       'order.item.voided',

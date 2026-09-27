@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { DURABLE_LISTENER } from '../common/events/durable-listener';
 import { Prisma } from '@prisma/client';
 import { newId, CashTxnType, OrderStatus, type DomainEvent } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -191,7 +192,7 @@ export class CashService {
   // ===========================================================================
   // Domain Event Listener
   // ===========================================================================
-  @OnEvent('order.paid', { async: true })
+  @OnEvent('order.paid', DURABLE_LISTENER)
   async handleOrderPaid(
     event: DomainEvent<'order.paid', { amount: number; method: string; paymentId: string }>,
   ) {
@@ -235,7 +236,7 @@ export class CashService {
     });
   }
 
-  @OnEvent('order.refunded', { async: true })
+  @OnEvent('order.refunded', DURABLE_LISTENER)
   async handleOrderRefunded(
     event: DomainEvent<'order.refunded', { amount: number; method: string; paymentId: string }>,
   ) {
