@@ -2,19 +2,16 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import type { Request } from 'express';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { LicenseService } from './license.service';
+import { isAlwaysAllowed } from './license.paths';
 
 // Lisans suresi dolduysa yazma islemlerini durdurur.
 //
 // KAPALI GELIR: `license.enforce` ayari true degilse guard hicbir sey yapmaz.
 // Bu yuzden simdilik hicbir kurulumu etkilemez; acmak icin tek ayar yeter.
 //
-// Suresi dolsa bile ASLA engellenmeyenler:
-//   - okuma (GET) -> sahibi raporlarina/verisine her zaman ulasabilmeli
-//   - /auth/* -> giris yapip lisansi yenileyebilmeli
-//   - /license/* -> yeni anahtari girebilmeli
-//   - /backup/* -> verisini disari alabilmeli (rehin tutma yok)
-// Yani "veri rehin alinmaz", yalnizca yeni satis girisi durur.
-const ALWAYS_ALLOWED = ['/auth', '/license', '/backup', '/health'];
+// Suresi dolsa bile ASLA engellenmeyenler: okuma (GET) ve isAlwaysAllowed
+// uclari (giris, lisans, yedek, saglik). Yani "veri rehin alinmaz", yalnizca
+// yeni satis girisi durur.
 
 @Injectable()
 export class LicenseGuard implements CanActivate {
@@ -24,8 +21,7 @@ export class LicenseGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<Request & { user?: AuthUser }>();
 
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return true;
-    const path = req.path ?? req.url ?? '';
-    if (ALWAYS_ALLOWED.some((p) => path === p || path.startsWith(`${p}/`))) return true;
+    if (isAlwaysAllowed(req.path ?? req.url ?? '')) return true;
 
     // Kullanici yoksa (public uc) lisans denetimi yapilmaz; JwtAuthGuard zaten
     // karar vermistir.

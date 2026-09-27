@@ -6,13 +6,14 @@ import { Logger } from 'nestjs-pino';
 import * as express from 'express';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env.schema';
+import { API_PREFIX } from './common/http/api-prefix';
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv(); // fail-fast: gecersiz .env ile baslamaz.
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix(API_PREFIX);
   const corsOrigins = env.CORS_ORIGINS.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);

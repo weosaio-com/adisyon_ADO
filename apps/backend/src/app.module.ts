@@ -33,11 +33,12 @@ import { UsersModule } from './users/users.module';
 import { SyncModule } from './sync/sync.module';
 import { LicenseModule } from './license/license.module';
 import { LicenseGuard } from './license/license.guard';
+import { API_PREFIX } from './common/http/api-prefix';
 
 const isProd = process.env.NODE_ENV === 'production';
 
 // Tabletler bu uclara ~8 sn'de bir ping atar; her biri loglanirsa dosya sismez.
-const UNLOGGED_PATHS = ['/api/v1/health', '/api/v1/sync/health'];
+const UNLOGGED_PATHS = [`/${API_PREFIX}/health`, `/${API_PREFIX}/sync/health`];
 const isUnloggedRequest = (req: IncomingMessage): boolean => {
   const path = (req.url ?? '').split('?')[0];
   return UNLOGGED_PATHS.includes(path ?? '');
