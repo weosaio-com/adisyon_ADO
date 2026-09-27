@@ -243,9 +243,14 @@ export default function PaymentModal({
             </button>
           </div>
           {receivedShort ? (
-            <p className="mt-2 text-sm font-semibold text-red-600">
-              Alınan nakit, düşülecek tutardan az olamaz.
-            </p>
+            Number.isFinite(receivedKurus) && amountValid ? (
+              // Banknotlar eklenirken gecici durum: hata degil, kalan miktar.
+              <p className="mt-2 text-sm font-semibold text-amber-700">
+                Eksik: {formatKurus(amountKurus - (receivedKurus ?? 0))}
+              </p>
+            ) : (
+              <p className="mt-2 text-sm font-semibold text-red-600">Geçersiz tutar.</p>
+            )
           ) : (
             change > 0 && (
               <p
@@ -311,7 +316,7 @@ export default function PaymentModal({
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-ink-900/40 p-4">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink-900/40 p-4">
       <div className="max-h-full w-full max-w-md overflow-auto rounded-3xl bg-white p-5 shadow-xl sm:p-6">
         {children}
       </div>

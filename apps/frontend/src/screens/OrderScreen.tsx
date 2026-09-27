@@ -258,7 +258,8 @@ export default function OrderScreen() {
           ))}
         </div>
 
-        <div className="grid flex-1 auto-rows-[minmax(112px,auto)] grid-cols-2 content-start gap-3 overflow-auto p-4 sm:grid-cols-3 sm:p-5 xl:grid-cols-4 2xl:grid-cols-5">
+        {/* md'de sag panel acilir, urun alani daralir: 2 sutun (dar kartta ad kesiliyordu). */}
+        <div className="grid flex-1 auto-rows-[minmax(112px,auto)] grid-cols-2 content-start gap-3 overflow-auto p-4 sm:grid-cols-3 sm:p-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {visibleProducts.map((product) => (
             <button
               key={product.id}
@@ -267,14 +268,16 @@ export default function OrderScreen() {
               disabled={busy}
               className="group relative flex min-h-28 flex-col items-start justify-between overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-panel active:translate-y-0 disabled:opacity-50"
             >
-              <span className="line-clamp-2 pr-7 text-sm font-bold text-ink-900 sm:text-base">
+              <span className="line-clamp-3 text-sm font-bold [overflow-wrap:anywhere] text-ink-900 sm:text-base">
                 {product.name}
               </span>
-              <span className="text-sm font-black text-brand-700">
-                {formatKurus(product.salePrice)}
-              </span>
-              <span className="absolute top-3 right-3 flex h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700 transition group-hover:bg-brand-600 group-hover:text-white">
-                +
+              <span className="mt-2 flex w-full items-center justify-between gap-2">
+                <span className="text-sm font-black text-brand-700">
+                  {formatKurus(product.salePrice)}
+                </span>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700 transition group-hover:bg-brand-600 group-hover:text-white">
+                  +
+                </span>
               </span>
             </button>
           ))}
@@ -292,8 +295,8 @@ export default function OrderScreen() {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-black text-ink-900">
-                  Adisyon {currentOrder?.orderNo ?? ''}
+                <h2 className="text-lg font-black text-ink-900" title={currentOrder?.orderNo}>
+                  Adisyon #{currentOrder?.orderNo?.split('-')[1] ?? currentOrder?.orderNo ?? ''}
                 </h2>
                 {currentOrder?.type !== 'dine_in' && (
                   <span
