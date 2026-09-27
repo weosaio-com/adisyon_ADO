@@ -107,6 +107,13 @@ export class PrintingController {
     return { success: true, jobId };
   }
 
+  // Ödenmiş adisyonun müşteri fişini yeniden basar (iade sonrası düzeltilmiş / kaybolan fiş).
+  @Post('order/:id/receipt')
+  @RequirePermissions(Permission.PaymentTake)
+  reprintReceipt(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.printingService.reprintReceipt(user, id);
+  }
+
   // Ödeme öncesi hesap/adisyon fişi (talep üzerine). Fiş 'bill' olarak kaydedilir.
   @Post('order/:id/bill')
   @RequirePermissions(Permission.OrderCreate)

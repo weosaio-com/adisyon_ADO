@@ -193,11 +193,13 @@ export class ReportsService {
       take: 20,
       select: {
         id: true,
+        orderId: true,
         method: true,
         direction: true,
         amount: true,
         paidAt: true,
-        order: { select: { orderNo: true } },
+        order: { select: { orderNo: true, isPaid: true } },
+        reversedBy: { select: { id: true } },
       },
     });
 
@@ -221,11 +223,14 @@ export class ReportsService {
       debtCollectedKurus: -(debtCollected._sum.amount ?? 0),
       recentPayments: recent.map((p) => ({
         id: p.id,
+        orderId: p.orderId,
         method: p.method,
         direction: p.direction,
         amountKurus: p.amount,
         paidAt: p.paidAt,
         orderNo: p.order.orderNo,
+        reversed: p.reversedBy.length > 0, // kasadaki "İade" dugmesi bir kez gorunur
+        orderPaid: p.order.isPaid, // "Fiş" (yeniden yazdir) yalniz odenmis adisyonda
       })),
       generatedAt: end,
       openingFloatKurus: session.openingFloat,

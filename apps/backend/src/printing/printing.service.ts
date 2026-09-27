@@ -703,6 +703,45 @@ export class PrintingService implements OnModuleInit {
       }));
   }
 
+  // Ödenmiş adisyonun müşteri fişini elle yeniden basar. Otomatik fiş adisyon başına
+  // bir kez basılır; iade + yeniden ödemede düzeltilmiş fiş (ya da kaybolan fiş) buradan.
+  async reprintReceipt(user: AuthUser, orderId: string): Promise<{ ok: boolean }> {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, branchId: user.branchId, deletedAt: null },
+      include: {
+        items: {
+          where: { deletedAt: null, status: { not: 'cancelled' } },
+          include: { product: true },
+        },
+      },
+    });
+    if (!order) {
+      throw new NotFoundException({ code: 'ORDER_NOT_FOUND', message: 'Adisyon bulunamadı.' });
+    }
+    if (!order.isPaid) {
+      throw new ConflictException({
+        code: 'ORDER_NOT_PAID',
+        message: 'Adisyon henüz ödenmedi; ödeme öncesi fiş için "Hesap"ı kullanın.',
+      });
+    }
+    const printerId = await this.resolveCustomerPrinterId(user.branchId);
+    if (!printerId) {
+      throw new ConflictException({
+        code: 'NO_CUSTOMER_PRINTER',
+        message: 'Müşteri fişi için yazıcı/rota tanımlı değil.',
+      });
+    }
+    await this.enqueuePrintJob(
+      user.branchId,
+      printerId,
+      DocumentType.Customer,
+      await this.buildCustomerDoc(order, 'MÜŞTERİ FİŞİ — ÖDENDİ (tekrar)', true),
+      user.userId,
+      { orderId: order.id, orderNo: order.orderNo, type: DocumentType.Customer },
+    );
+    return { ok: true };
+  }
+
   // Ödeme ÖNCESİ hesap/adisyon fişi (talep üzerine). Ödeme almaz; fiş
   // Receipt.type='bill' olarak kaydedilir (rapordan görülebilir).
   async printBill(user: AuthUser, orderId: string): Promise<{ ok: boolean }> {

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, hasPerm } from '../lib/api';
+import TextPromptModal from '../components/TextPromptModal';
+import { ulid } from '../offline/ids';
 import { formatKurus, parseTlToKurus as toKurus } from '../lib/format';
 import type { CashSession, Order } from '../lib/types';
 import { readOpenOrders, readTables } from '../offline/read';
@@ -316,22 +318,66 @@ const METHOD_LABEL: Record<string, string> = {
 interface ShiftPayments {
   payments: { method: string; totalKurus: number }[];
   debtCollectedKurus: number;
-  recentPayments: {
-    id: string;
-    method: string;
-    direction: string;
-    amountKurus: number;
-    paidAt: string;
-    orderNo: string;
-  }[];
+  recentPayments: RecentPayment[];
+}
+
+interface RecentPayment {
+  id: string;
+  orderId: string;
+  method: string;
+  direction: string;
+  amountKurus: number;
+  paidAt: string;
+  orderNo: string;
+  reversed: boolean;
+  orderPaid: boolean;
 }
 
 function PaymentsPanel() {
+  const nav = useNavigate();
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ['shift', 'payments'],
     queryFn: () => api<ShiftPayments | null>('/reports/shift'),
     refetchInterval: 30_000,
     retry: false,
+  });
+  // Yanlis yontem/tutar: odeme iade edilir, adisyon yeniden acilir, dogru odeme alinir.
+  // Anahtar pencere acilinca bir kez uretilir: tekrar basma ikinci iade yapmaz.
+  const [refundFor, setRefundFor] = useState<{ payment: RecentPayment; key: string } | null>(null);
+  const [refunded, setRefunded] = useState<RecentPayment | null>(null);
+  const [refundError, setRefundError] = useState('');
+  const refund = useMutation({
+    mutationFn: ({ reason }: { reason: string }) =>
+      api(`/orders/${refundFor!.payment.orderId}/payments/${refundFor!.payment.id}/reverse`, {
+        method: 'POST',
+        body: { reason, idempotencyKey: refundFor!.key },
+      }),
+    onSuccess: () => {
+      setRefunded(refundFor!.payment);
+      setRefundFor(null);
+      qc.invalidateQueries({ queryKey: ['shift'] });
+      qc.invalidateQueries({ queryKey: ['cash'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+    onError: (e) => setRefundError(e instanceof ApiError ? e.message : 'İade başarısız.'),
+  });
+  const canRefund = hasPerm('payment.refund');
+  const canReprint = hasPerm('payment.take');
+  const [printInfo, setPrintInfo] = useState('');
+  const reprint = useMutation({
+    mutationFn: (payment: RecentPayment) =>
+      api(`/printers/order/${payment.orderId}/receipt`, { method: 'POST' }),
+    onSuccess: (_data, payment) => {
+      setRefundError('');
+      setPrintInfo(
+        `#${payment.orderNo.split('-')[1] ?? payment.orderNo} fişi yazıcıya gönderildi.`,
+      );
+    },
+    onError: (e) => {
+      setPrintInfo('');
+      setRefundError(e instanceof ApiError ? e.message : 'Fiş yazdırılamadı.');
+    },
   });
   const d = q.data;
   if (!d) return null;
@@ -382,16 +428,77 @@ function PaymentsPanel() {
                     </span>
                   )}
                 </span>
-                <span
-                  className={`font-semibold ${p.direction === 'refund' ? 'text-red-600' : 'text-slate-700'}`}
-                >
-                  {p.direction === 'refund' ? '−' : ''}
-                  {formatKurus(p.amountKurus)}
+                <span className="flex items-center gap-2">
+                  <span
+                    className={`font-semibold ${p.direction === 'refund' ? 'text-red-600' : 'text-slate-700'}`}
+                  >
+                    {p.direction === 'refund' ? '−' : ''}
+                    {formatKurus(p.amountKurus)}
+                  </span>
+                  {canReprint && p.direction === 'charge' && !p.reversed && p.orderPaid && (
+                    <button
+                      data-testid={`reprint-${p.id}`}
+                      onClick={() => reprint.mutate(p)}
+                      disabled={reprint.isPending}
+                      className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700 disabled:opacity-40"
+                    >
+                      Fiş
+                    </button>
+                  )}
+                  {canRefund && p.direction === 'charge' && !p.reversed && (
+                    <button
+                      data-testid={`refund-${p.id}`}
+                      onClick={() => {
+                        setRefundError('');
+                        setRefundFor({ payment: p, key: ulid() });
+                      }}
+                      className="rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-600"
+                    >
+                      İade
+                    </button>
+                  )}
                 </span>
               </li>
             ))}
           </ul>
         </>
+      )}
+
+      {printInfo && (
+        <p className="mt-3 rounded-lg bg-slate-50 p-2 text-sm text-slate-700">{printInfo}</p>
+      )}
+      {refundError && !refundFor && (
+        <p className="mt-3 rounded-lg bg-red-50 p-2 text-sm text-red-700">{refundError}</p>
+      )}
+
+      {refunded && (
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-green-50 p-2 text-sm text-green-800">
+          <span>
+            İade yapıldı. #{refunded.orderNo.split('-')[1] ?? refunded.orderNo} adisyonu yeniden
+            açıldı; doğru ödemeyi alın. Düzeltilmiş fişi buradaki "Fiş" düğmesiyle basabilirsiniz.
+          </span>
+          <button
+            onClick={() => nav(`/orders/${refunded.orderId}`)}
+            className="shrink-0 rounded-lg bg-green-700 px-3 py-1 text-xs font-semibold text-white"
+          >
+            Adisyonu aç
+          </button>
+        </div>
+      )}
+
+      {refundFor && (
+        <TextPromptModal
+          title="Ödemeyi iade et"
+          description={`${METHOD_LABEL[refundFor.payment.method] ?? refundFor.payment.method} · ${formatKurus(refundFor.payment.amountKurus)} · #${refundFor.payment.orderNo}`}
+          label="İade nedeni"
+          suggestions={['Yanlış ödeme yöntemi', 'Yanlış tutar', 'Müşteri iadesi']}
+          confirmLabel="İade et"
+          danger
+          busy={refund.isPending}
+          error={refundError}
+          onConfirm={(reason) => refund.mutate({ reason })}
+          onClose={() => setRefundFor(null)}
+        />
       )}
     </div>
   );
