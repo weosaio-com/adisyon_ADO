@@ -35,6 +35,12 @@ export const updateItemSchema = z.object({
 });
 export type UpdateItemDto = z.infer<typeof updateItemSchema>;
 
+// --- Kalem notu (yalniz gonderilmemis kalem; bos -> not silinir) ---
+export const itemNoteSchema = z.object({
+  note: z.string().trim().max(200).nullish(),
+});
+export type ItemNoteDto = z.infer<typeof itemNoteSchema>;
+
 // --- Kalem void / adisyon iptal (gerekce) ---
 export const voidItemSchema = z.object({
   reason: z.string().nullish(),

@@ -15,6 +15,12 @@ export interface Table {
   isActive?: boolean;
 }
 
+export interface OrderItemNote {
+  id: string;
+  note: string;
+  type: string; // waiter | kitchen
+}
+
 export interface OrderItem {
   id: string;
   productId: string;
@@ -22,6 +28,7 @@ export interface OrderItem {
   quantity: number; // milis
   lineTotal: number; // kurus
   status: string; // pending | sent | ...
+  notes?: OrderItemNote[];
 }
 
 export interface Discount {
@@ -36,6 +43,7 @@ export interface Order {
   id: string;
   orderNo: string;
   tableId: string | null;
+  table?: { id: string; name: string; hall?: { name: string } } | null;
   type?: string; // dine_in | takeaway | delivery
   status: string; // open | held | completed | cancelled
   grandTotal: number; // kurus

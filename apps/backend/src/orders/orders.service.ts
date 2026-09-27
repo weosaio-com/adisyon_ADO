@@ -26,6 +26,7 @@ import type {
   OpenOrderDto,
   AddItemDto,
   UpdateItemDto,
+  ItemNoteDto,
   VoidItemDto,
   CancelOrderDto,
   OrderQueryDto,
@@ -344,6 +345,68 @@ export class OrdersService {
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
+  }
+
+  // Tek garson notu: yoksa olustur, varsa guncelle, bos gelirse sil. Gonderilmis kaleme
+  // not eklenmez (mutfak fisi basildi; degisiklik icin void + yeni kalem).
+  async setItemNote(user: AuthUser, orderId: string, itemId: string, dto: ItemNoteDto) {
+    const order = await this.orderOpenOrThrow(user.branchId, orderId);
+    const item = await this.itemOrThrow(orderId, itemId);
+    this.assertItemEditable(item);
+
+    const text = dto.note?.trim() ?? '';
+    const existing = await this.prisma.orderItemNote.findFirst({
+      where: { orderItemId: itemId, type: 'waiter', deletedAt: null },
+    });
+    if (existing && !text) {
+      await this.prisma.orderItemNote.update({
+        where: { id: existing.id },
+        data: { deletedAt: new Date(), version: { increment: 1 }, syncState: 'pending' },
+      });
+    } else if (existing) {
+      await this.prisma.orderItemNote.update({
+        where: { id: existing.id },
+        data: { note: text, version: { increment: 1 }, syncState: 'pending' },
+      });
+    } else if (text) {
+      await this.prisma.orderItemNote.create({
+        data: {
+          id: newId(),
+          orderItemId: itemId,
+          note: text,
+          type: 'waiter',
+          createdBy: user.userId,
+          ...this.provenance(user),
+        },
+      });
+    }
+    await this.audit.record({
+      branchId: user.branchId,
+      action: 'order.item.note',
+      entityType: 'order_item',
+      entityId: itemId,
+      userId: user.userId,
+      oldValue: existing?.note ?? null,
+      newValue: text || null,
+      ...this.provenance(user),
+    });
+    await this.publishOrderEvent(user, DomainEventName.OrderUpdated, order);
+    return this.orderWithItems(orderId);
+  }
+
+  // Yanlislikla acilan masa: aktif kalemi ve odemesi olmayan adisyon kapatilir (masa bosalir).
+  async discardEmptyOrder(user: AuthUser, id: string) {
+    await this.orderOrThrow(user.branchId, id);
+    const activeItems = await this.prisma.orderItem.count({
+      where: { orderId: id, deletedAt: null, status: { not: OrderItemStatus.Cancelled } },
+    });
+    if (activeItems > 0) {
+      throw new ConflictException({
+        code: 'ORDER_NOT_EMPTY',
+        message: 'Adisyonda ürün var; dolu adisyonu yalnızca yönetici iptal edebilir.',
+      });
+    }
+    return this.cancelOrder(user, id, { reason: 'Boş adisyon kapatıldı' });
   }
 
   // Void: gonderilmis/onaylanmis kalemi iptal eder (Owner). Satir kalir, status=cancelled.
@@ -1026,8 +1089,19 @@ export class OrdersService {
     return this.prisma.order.findUnique({
       where: { id },
       include: {
-        items: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' } },
+        items: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            notes: {
+              where: { deletedAt: null },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true, note: true, type: true },
+            },
+          },
+        },
         discounts: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' } },
+        table: { select: { id: true, name: true, hall: { select: { name: true } } } },
       },
     });
   }

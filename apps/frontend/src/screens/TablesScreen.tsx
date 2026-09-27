@@ -95,6 +95,7 @@ export default function TablesScreen() {
       alert(error instanceof ApiError ? error.message : 'Adisyon yeniden açılamadı.'),
   });
 
+  const canCancel = hasPerm('order.cancel');
   const askCancel = (order: Order) => {
     const type = order.type === 'delivery' ? 'paket' : 'gel-al';
     if (confirm(`Bu ${type} adisyonunu iptal etmek istiyor musunuz?`)) cancelOrder.mutate(order.id);
@@ -246,14 +247,17 @@ export default function TablesScreen() {
                     </span>
                     <span className="text-lg font-black">{formatKurus(order.grandTotal)}</span>
                   </button>
-                  <button
-                    onClick={() => askCancel(order)}
-                    disabled={busy || cancelOrder.isPending}
-                    title="İptal et"
-                    className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
-                  >
-                    ×
-                  </button>
+                  {/* Iptal yalniz yetkiliye (sunucu da order.cancel ister); bos adisyonu garson icinden kapatir. */}
+                  {canCancel && (
+                    <button
+                      onClick={() => askCancel(order)}
+                      disabled={busy || cancelOrder.isPending}
+                      title="İptal et"
+                      className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
