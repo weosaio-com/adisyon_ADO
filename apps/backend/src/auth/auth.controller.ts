@@ -5,6 +5,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/http/zod-validation.pipe';
+import { isLocalRequest } from '../common/http/local-request';
 import {
   loginSchema,
   loginPinSchema,
@@ -51,7 +52,7 @@ export class AuthController {
     @Body(new ZodValidationPipe(setupSchema)) dto: SetupDto,
     @Req() req: Request,
   ): Promise<unknown> {
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip ?? '')) {
+    if (!isLocalRequest(req.ip)) {
       throw new ForbiddenException({
         code: 'SETUP_LOCAL_ONLY',
         message: 'Ilk kurulum yalnizca ana bilgisayardan yapilabilir.',

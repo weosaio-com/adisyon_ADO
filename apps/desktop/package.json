@@ -15,7 +15,8 @@
     "productName": "Adisyon POS",
     "files": [
       "main.mjs",
-      "rotating-log.mjs"
+      "rotating-log.mjs",
+      "restore.mjs"
     ],
     "extraResources": [
       {

@@ -1,9 +1,11 @@
-﻿// E2E smoke â€” calisan sunucuya karsi kritik para yollari.
+// E2E smoke — calisan sunucuya karsi kritik para yollari.
 // Kullanim: backend'i ayaga kaldir (npm run dev) + seed, sonra: node test/smoke.e2e.mjs
 // Kapsam: merge, split, payment idempotency, reverse (iade), end-of-day, statement CSV.
-import { existsSync, readdirSync } from 'node:fs';
+import { createCipheriv, createHash, randomBytes } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const PORT = process.env.API_PORT || process.env.PORT || 3001;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
@@ -12,7 +14,7 @@ const ok = [];
 const bad = [];
 function assert(cond, msg) {
   (cond ? ok : bad).push(msg);
-  console.log((cond ? '  âœ“ ' : '  âœ— ') + msg);
+  console.log((cond ? '  ✓ ' : '  ✗ ') + msg);
 }
 const uid = () => 'op-' + Math.random().toString(36).slice(2) + Date.now();
 async function waitFor(read, accept, timeoutMs = 4000) {
@@ -39,6 +41,39 @@ async function call(method, path, body, raw = false) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) console.error(`  HTTP ${res.status} ${method} ${path}:`, JSON.stringify(json));
   return { status: res.status, data: json.data ?? json };
+}
+
+// Ham dosya yukleme (yedek import).
+async function upload(path, bytes, auth = true) {
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      ...(auth && token ? { Authorization: 'Bearer ' + token } : {}),
+    },
+    body: bytes,
+  });
+  const json = await res.json().catch(() => ({}));
+  return { status: res.status, data: json.data ?? json };
+}
+
+// Baska bir kurulumun yedegi: gecerli SQLite + yedek bicimi (IV + tag + AES-256-GCM, sha256 anahtar).
+function foreignBackup(rawKey) {
+  const file = join(tmpdir(), `ado-foreign-${Date.now()}.db`);
+  const db = new DatabaseSync(file);
+  db.exec('CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);');
+  db.close();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', createHash('sha256').update(rawKey).digest(), iv);
+  const enc = Buffer.concat([cipher.update(readFileSync(file)), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), enc]);
+}
+
+// Sunucunun restore isaretini yazdigi veri dizini (backend resolveDataDir ile ayni kural).
+function dataDir() {
+  if (process.env.ADO_DATA_DIR?.trim()) return process.env.ADO_DATA_DIR.trim();
+  const url = process.env.DATABASE_URL ?? '';
+  return url.startsWith('file:') ? dirname(url.slice(5)) : null;
 }
 
 async function openOrderWithItem(tableId, prodId, qty = 1000) {
@@ -213,6 +248,64 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
   await call('PUT', '/settings/' + encodeURIComponent('backup.cloudDir'), { value: '' });
   const { data: bk2 } = await call('POST', '/backups');
   assert(bk2.cloudCopied === false, `cloudDir bos -> kopya yok (${bk2.cloudCopied})`);
+
+  // --- YEDEK KURTARMA: anahtar gosterimi + disaridan yedek + baska kurulumun anahtari ---
+  const { status: wrongPw } = await call('POST', '/backups/recovery-key', { password: 'yanlis' });
+  assert(wrongPw === 403, `KURTARMA yanlis yonetici sifresi reddedildi (${wrongPw})`);
+  const { status: rkStatus, data: rk } = await call('POST', '/backups/recovery-key', {
+    password: 'owner1234',
+  });
+  assert(
+    rkStatus === 201 && typeof rk.recoveryKey === 'string' && rk.recoveryKey.length >= 16,
+    `KURTARMA anahtar gosterildi (${rkStatus})`,
+  );
+
+  const own = await upload('/backups/import', readFileSync(bk.path));
+  assert(
+    own.status === 201 && own.data.type === 'imported',
+    `IMPORT yedek yuklendi (${own.status})`,
+  );
+  const ownRestore = await call('POST', `/backups/${own.data.id}/restore`, {});
+  assert(
+    ownRestore.status === 201 && ownRestore.data.staged && ownRestore.data.keyAdopted === false,
+    `IMPORT ayni kurulum yedegi anahtarsiz staged (${ownRestore.status})`,
+  );
+
+  const foreignKey = randomBytes(32).toString('hex');
+  const foreign = await upload('/backups/import', foreignBackup(foreignKey));
+  const needKey = await call('POST', `/backups/${foreign.data.id}/restore`, {});
+  assert(
+    needKey.status === 409 && needKey.data?.error?.code === 'BACKUP_KEY_REQUIRED',
+    `IMPORT baska kurulum -> anahtar istenir (${needKey.status})`,
+  );
+  const wrongKey = await call('POST', `/backups/${foreign.data.id}/restore`, {
+    recoveryKey: randomBytes(32).toString('hex'),
+  });
+  assert(
+    wrongKey.status === 400 && wrongKey.data?.error?.code === 'BACKUP_DECRYPT_FAILED',
+    `IMPORT yanlis kurtarma anahtari reddedildi (${wrongKey.status})`,
+  );
+  // Sahibi anahtari gosterildigi gibi (tireli) ya da buyuk harfle yazabilir.
+  const typedKey = foreignKey.match(/.{4}/g).join('-').toUpperCase();
+  const withKey = await call('POST', `/backups/${foreign.data.id}/restore`, {
+    recoveryKey: typedKey,
+  });
+  assert(
+    withKey.status === 201 && withKey.data.staged && withKey.data.keyAdopted === true,
+    `IMPORT kurtarma anahtariyla staged + anahtar tasinir (${withKey.status})`,
+  );
+  const dir = dataDir();
+  if (dir) {
+    const marker = JSON.parse(readFileSync(join(dir, 'restore-pending.json'), 'utf8'));
+    assert(marker.backupKey === foreignKey, 'IMPORT restore isareti tasinan anahtari tasiyor');
+  }
+  const tiny = await upload('/backups/import', Buffer.from('kisa'));
+  assert(tiny.status === 400, `IMPORT gecersiz dosya reddedildi (${tiny.status})`);
+  const setupImport = await upload('/backups/setup/import', Buffer.alloc(64), false);
+  assert(
+    setupImport.status === 403,
+    `SETUP geri yukleme kullanici varken kapali (${setupImport.status})`,
+  );
 
   // --- SSE: canli sinyal akisi (200 + order.* olayi + tokensiz 401) ---
   const sse = await fetch(`${BASE}/events/stream`, {

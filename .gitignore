@@ -44,3 +44,6 @@ apps/frontend/e2e/.fixtures.json
 apps/frontend/playwright-report/
 apps/frontend/test-results/
 apps/frontend/blob-report/
+
+# Yedek geri yukleme isareti (yerel calistirmalarda veri dizini repo icinde olabilir)
+restore-pending.json

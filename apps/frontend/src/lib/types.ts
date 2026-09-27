@@ -154,7 +154,7 @@ export interface AppSetting {
 
 export interface Backup {
   id: string;
-  type: string; // auto | manual | pre_update
+  type: string; // auto | manual | pre_update | imported
   sizeBytes: number;
   createdAt: string;
 }

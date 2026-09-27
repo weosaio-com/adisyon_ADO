@@ -2,20 +2,11 @@
 // saglik kontrolu gecince pencereyi acar. UI tamamen backend'in sundugu web.
 import { app, BrowserWindow, dialog } from 'electron';
 import { spawn } from 'node:child_process';
-import { isAbsolute, join, relative, resolve } from 'node:path';
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-  renameSync,
-  unlinkSync,
-} from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { rotatingLog } from './rotating-log.mjs';
+import { applyPendingRestore, ensureSecrets } from './restore.mjs';
 
 // Paketli uygulama dev sunucusuna (3001) yanlislikla baglanmasin.
 const PORT = process.env.API_PORT || (app.isPackaged ? '43127' : '3001');
@@ -29,32 +20,23 @@ const isUp = () =>
 
 // Paketli surumde: DB userData'da yasar (kurulum dizini yazilabilir degil),
 // gizli anahtarlar ilk aciliste uretilip userData/secrets.json'da saklanir.
+// Bekleyen yedek geri yuklemesi (ve tasinan yedek anahtari) backend acilmadan uygulanir.
 function packagedEnv() {
   const dataDir = app.getPath('userData');
   mkdirSync(dataDir, { recursive: true }); // ilk aciliste henuz yok
   const dbPath = join(dataDir, 'ado.db');
-  applyPendingRestore(dataDir, dbPath);
+  const secretsPath = join(dataDir, 'secrets.json');
+  applyPendingRestore(dataDir, dbPath, secretsPath);
   if (!existsSync(dbPath)) {
     copyFileSync(join(process.resourcesPath, 'template.db'), dbPath);
   }
   applyMigrations(dbPath);
-  const secretsPath = join(dataDir, 'secrets.json');
-  if (!existsSync(secretsPath)) {
-    writeFileSync(
-      secretsPath,
-      JSON.stringify({
-        JWT_ACCESS_SECRET: randomBytes(32).toString('hex'),
-        JWT_REFRESH_SECRET: randomBytes(32).toString('hex'),
-        BACKUP_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
-      }),
-    );
-  }
   return {
     NODE_ENV: 'production',
     DATABASE_URL: 'file:' + dbPath.replaceAll('\\', '/'),
     ADO_DATA_DIR: dataDir,
     API_PORT: PORT,
-    ...JSON.parse(readFileSync(secretsPath, 'utf8')),
+    ...ensureSecrets(secretsPath),
   };
 }
 
@@ -100,34 +82,6 @@ function applyMigrations(dbPath) {
     }
   } finally {
     db.close();
-  }
-}
-
-function applyPendingRestore(dataDir, dbPath) {
-  const markerPath = join(dataDir, 'restore-pending.json');
-  if (!existsSync(markerPath)) return;
-  const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
-  const stagePath = typeof marker.stagePath === 'string' ? resolve(marker.stagePath) : '';
-  const stageRelative = relative(resolve(dataDir), stagePath);
-  if (
-    !stagePath ||
-    stageRelative.startsWith('..') ||
-    isAbsolute(stageRelative) ||
-    !existsSync(stagePath)
-  ) {
-    throw new Error('Gecersiz restore staging kaydi.');
-  }
-  const incoming = join(dataDir, 'ado.restore-incoming.db');
-  const rollback = join(dataDir, `ado.pre-restore-${Date.now()}.db`);
-  copyFileSync(stagePath, incoming);
-  if (existsSync(dbPath)) renameSync(dbPath, rollback);
-  try {
-    renameSync(incoming, dbPath);
-    unlinkSync(stagePath);
-    unlinkSync(markerPath);
-  } catch (error) {
-    if (!existsSync(dbPath) && existsSync(rollback)) renameSync(rollback, dbPath);
-    throw error;
   }
 }
 
