@@ -47,7 +47,8 @@ export interface Order {
 
 export interface Payment {
   id: string;
-  amount: number; // kurus (+/-; iade negatif)
+  amount: number; // kurus; iade satiri da pozitif, yonu direction belirtir
+  direction?: string; // charge | refund
   method: string; // cash | card | transfer | qr | debt
 }
 
