@@ -61,6 +61,8 @@ jobs:
       DATABASE_URL: 'file:./e2e.db'
       JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
       JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
+      # Yedek modulu anahtar ister; yoksa smoke'taki yedek kontrolleri 400 ile duser.
+      BACKUP_ENCRYPTION_KEY: 'ci-test-backup-key-0123456789abcdef'
       SEED_OWNER_USERNAME: 'owner'
       SEED_OWNER_PASSWORD: 'owner1234'
       API_PORT: '3001'
@@ -107,6 +109,8 @@ jobs:
       DATABASE_URL: 'file:./e2e-web.db'
       JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
       JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
+      # Yedek modulu anahtar ister; yoksa smoke'taki yedek kontrolleri 400 ile duser.
+      BACKUP_ENCRYPTION_KEY: 'ci-test-backup-key-0123456789abcdef'
       SEED_OWNER_USERNAME: 'owner'
       SEED_OWNER_PASSWORD: 'owner1234'
       API_PORT: '3001'

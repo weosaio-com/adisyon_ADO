@@ -40,6 +40,17 @@ export default async function globalSetup(): Promise<void> {
   const token = login.accessToken;
   const user = { ...login.user, permissions: login.permissions ?? [] };
 
+  // Is kurali: kasa oturumu kapaliyken yeni adisyon acilmaz (arayuz + sunucu).
+  // Gercek serviste oldugu gibi oturumu ac; zaten aciksa (409) sorun degil.
+  const cash = await fetch(`${BASE}/cash/sessions/open`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ openingFloat: 0 }),
+  });
+  if (!cash.ok && cash.status !== 409) {
+    throw new Error(`POST /cash/sessions/open -> ${cash.status} ${await cash.text()}`);
+  }
+
   const tag = Date.now();
   const unit = await call<{ id: string }>('POST', '/units', { name: `Adet${tag}`, abbreviation: 'ad' }, token); // prettier-ignore
   const tax = await call<{ id: string }>(
