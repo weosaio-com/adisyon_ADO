@@ -95,20 +95,40 @@ Bu ayarlar bittiğinde sistem satışa hazırdır.
 
 ## 6. Tabletlerin Bağlanması
 
-1. Tabletleri **ana makineyle aynı WiFi ağına** bağlayın.
-2. Ana makinenin **yerel IP adresini** öğrenin (kurulumu yapan kişi verir; örn. `192.168.1.20`).
-3. Tabletin tarayıcısında şu adresi açın:
+Ana makinede **Ayarlar › Sunucu Adresi** kartı, tabletlerde kullanılacak adresleri gösterir
+(örnek: `https://192.168.1.20:43128`). Adresleri buradan kopyalayabilirsiniz; ana makinenin IP'si
+değişirse güncel adres de burada görünür.
 
-   ```
-   http://<ana-makine-ip>:3001
-   ```
-   Örnek: `http://192.168.1.20:3001`
+### Önerilen: HTTPS ile (bağlantı koparsa da uygulama açılır)
 
-4. Açılan ekranda garson **PIN** ile giriş yapar.
-5. **Öneri — uygulama gibi kullanın:** Tarayıcı menüsünden **"Ana ekrana ekle"** deyin. Böylece
-   simge oluşur ve uygulama tam ekran, hızlı açılır. (Bir kez açıldıktan sonra **çevrimdışı da açılır.**)
+Her tablette **bir kez** yapılır (Android'de **Chrome** önerilir):
 
-> Aynı anda birden fazla tablet bağlanabilir; hepsi aynı masaları canlı görür.
+1. Tableti **ana makineyle aynı WiFi ağına** bağlayın.
+2. Tabletin tarayıcısında kartta yazan **sertifika indirme adresini** açın
+   (örnek: `http://192.168.1.20:43127/api/v1/devices/ca.crt`). `adisyon-pos-ca.crt` dosyası iner.
+3. Sertifikayı kurun:
+   - **Android:** Ayarlar'da "sertifika" diye aratın › **CA sertifikası yükle** › indirilen
+     dosyayı seçin ve uyarıyı onaylayın.
+   - **iPad / iPhone:** Ayarlar › **Profil İndirildi** › Yükle. Ardından Ayarlar › Genel › Hakkında ›
+     **Sertifika Güven Ayarları** › "Adisyon POS Yerel CA" için tam güveni açın.
+4. Tarayıcıda **HTTPS adresini** açın (örnek: `https://192.168.1.20:43128`); garson **PIN** ile girer.
+5. Tarayıcı menüsünden **"Ana ekrana ekle"** deyin. Simge oluşur; uygulama tam ekran açılır ve
+   **WiFi koptuğunda da açılır.**
+
+> Ana makinenin IP adresi değişse bile sertifikayı yeniden kurmanız gerekmez; yalnızca
+> Ayarlar'daki yeni adresi kullanın. Sertifika yalnızca sizin ana makinenize aittir.
+
+### Sertifikasız (HTTP)
+
+`http://192.168.1.20:43127` adresi de çalışır; ancak bağlantı koptuğunda sayfa yenilenirse ya da
+tablet kapanıp açılırsa uygulama **açılmaz** (açık sayfada sipariş almaya devam edilebilir).
+Giriş ekranı bu durumda sarı bir uyarı gösterir.
+
+> **HTTP'den HTTPS'e geçerken:** tablette gönderilmemiş işlem olmadığından emin olun (bağlantı
+> rozeti yeşil olmalı); her adres kendi çevrimdışı kuyruğunu tutar.
+
+> Aynı anda birden fazla tablet bağlanabilir; hepsi aynı masaları canlı görür. Windows Güvenlik
+> Duvarı ilk açılışta izin sorarsa **Özel ağlar** için izin verin.
 
 ---
 
@@ -141,7 +161,8 @@ Bu sistemin en güçlü yanı: **bağlantı koptuğunda satış durmaz.**
 - Masa açmak, ürün eklemek/çıkarmak, adet değiştirmek, **mutfağa göndermek.**
 
 Bu işlemler tablette **kalıcı** saklanır — tablet kapansa, yenilense veya şarjı bitse bile
-kaybolmaz. Bağlantı gelince **otomatik ve kayıpsız** senkronlanır. Bekleyen sipariş kaleminde
+kaybolmaz. (Bağlantı yokken uygulamanın yeniden **açılabilmesi** için tablette HTTPS adresi
+kullanılmalıdır — bkz. 6. bölüm.) Bağlantı gelince **otomatik ve kayıpsız** senkronlanır. Bekleyen sipariş kaleminde
 "⏳ senkron bekliyor" işareti görünür; gönderilince kalkar.
 
 **Bağlantı kopukken yapılamaz (güvenlik gereği):** ödeme, kasa işlemleri, yüksek indirim, iade,
@@ -171,19 +192,30 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 
 - **Otomatik günlük yedek:** Her gün sabah **06:00**'da sistem kendi kendine yedek alır.
 - **Bulut kopyası (isteğe bağlı):** Ayarlardan bir senkron klasörü (OneDrive, Google Drive vb.)
-  seçerseniz yedekler oraya da kopyalanır — bilgisayar arızalansa bile veriniz güvende olur.
-- **Elle yedek / geri yükleme:** **Ayarlar** ekranından istediğiniz an yedek alabilir veya bir
-  yedeği geri yükleyebilirsiniz (geri yükleme sonrası program yeniden başlatılır).
+  seçerseniz şifreli yedekler oraya da kopyalanır.
+- **Kurtarma anahtarı (mutlaka saklayın):** Yedekler şifrelidir. **Ayarlar › Yedekler › Kurtarma
+  anahtarı** bölümünden yönetici şifrenizle anahtarı görüntüleyip **yazdırın veya indirin** ve
+  güvenli bir yerde saklayın (bulut klasöründen **ayrı**). Bilgisayar arızalanırsa bulut
+  yedeğini yeni bilgisayarda açmak için bu anahtar gerekir; anahtar olmadan yedek açılamaz.
+- **Elle yedek / geri yükleme:** **Ayarlar** ekranından istediğiniz an yedek alabilir, listedeki
+  bir yedeği ya da **Dosyadan Geri Yükle** ile bulut klasöründeki bir yedek dosyasını
+  (`.db.enc`) geri yükleyebilirsiniz. Geri yükleme programı kapatıp açınca uygulanır.
 
-> **Tavsiye:** Bulut kopyasını mutlaka açın ve ayda bir yedeği harici bir diske alın.
+> **Tavsiye:** Bulut kopyasını açın, kurtarma anahtarını kâğıda yazın ve ayda bir yedeği harici
+> bir diske alın.
 
 ---
 
 ## 11. Sık Karşılaşılanlar / Sorun Giderme
 
 **Tablet ana makineye bağlanamıyor.**
-- Tablet ve ana makine **aynı WiFi'de** mi? Adres doğru mu (`http://<ip>:3001`)?
+- Tablet ve ana makine **aynı WiFi'de** mi? Adres doğru mu? Doğru adres ana makinede
+  **Ayarlar › Sunucu Adresi** kartında yazar (örnek: `https://192.168.1.20:43128`).
 - Ana makinede program açık mı? Windows güvenlik duvarı ilk seferde izin sormuş olabilir — **izin verin.**
+
+**Tablet HTTPS adresinde "bağlantınız gizli değil" uyarısı veriyor.**
+- Sertifika o tablete kurulmamış ya da (iPad/iPhone'da) tam güven açılmamış. 6. bölümdeki
+  adımları tekrarlayın.
 
 **Tabletlerin adresi değişiyor.**
 - Ana makineye router'dan **sabit IP** verin; adres bir daha değişmez.
@@ -196,8 +228,15 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 - Yönetici **Masalar** ekranındaki **"Offline Onay"** butonundan ilgili kaydı görüp karar verir
   (bkz. 8. bölüm).
 
-**Ana makineyi değiştireceğim / formatlayacağım.**
-- Önce **yedek alın** (10. bölüm), yeni makineye kurulum yapıp yedeği **geri yükleyin.**
+**Ana makineyi değiştireceğim / formatlayacağım / eski bilgisayar arızalandı.**
+1. Mümkünse önce güncel bir **yedek alın** (10. bölüm). Arızada bulut klasöründeki son yedeği
+   kullanın.
+2. Yeni bilgisayara programı kurup açın. İlk açılıştaki kurulum ekranında **"Yedekten geri
+   yükleyin"** bağlantısını seçin.
+3. Yedek dosyasını (`.db.enc`) seçin ve **kurtarma anahtarını** girin.
+4. Programı kapatıp açın; eski kullanıcı adı ve şifrenizle giriş yapın. Tüm veriler geri gelir ve
+   kurtarma anahtarınız yeni bilgisayarda da aynı kalır.
+5. Tabletlerde sertifikayı yeniden kurun (yeni bilgisayarın sertifikası farklıdır; 6. bölüm).
 
 ---
 
@@ -205,8 +244,9 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 
 1. Ana makineye programı kur → aç → **yönetici hesabı** oluştur.
 2. **Kullanıcılar, Masalar, Ürünler**'i tanımla.
-3. Tabletleri aynı WiFi'ye bağla, `http://<ana-makine-ip>:3001` adresini aç, **ana ekrana ekle.**
+3. Tabletleri aynı WiFi'ye bağla, **sertifikayı kur** ve Ayarlar'daki **HTTPS adresini** aç
+   (örnek: `https://192.168.1.20:43128`), **ana ekrana ekle** (6. bölüm).
 4. Garsonlar **PIN** ile girsin, sipariş almaya başlasın.
-5. Ödeme/gün sonu **kasadan**; **bulut yedeğini** aç.
+5. Ödeme/gün sonu **kasadan**; **bulut yedeğini** aç ve **kurtarma anahtarını** sakla.
 
 Kolay gelsin.
