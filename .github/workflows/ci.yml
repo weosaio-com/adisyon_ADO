@@ -59,6 +59,7 @@ jobs:
     env:
       HUSKY: '0'
       DATABASE_URL: 'file:./e2e.db'
+      API_TLS_PORT: '3002' # yerel HTTPS (tablet) kontrolleri smoke'ta
       JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
       JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
       # Yedek modulu anahtar ister; yoksa smoke'taki yedek kontrolleri 400 ile duser.
@@ -107,6 +108,9 @@ jobs:
     env:
       HUSKY: '0'
       DATABASE_URL: 'file:./e2e-web.db'
+      # LAN IP + HTTPS: tablet senaryosu (guvenli baglam + service worker) https-lan.spec.ts
+      API_TLS_PORT: '3002'
+      E2E_HTTPS_PORT: '3002'
       JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
       JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
       # Yedek modulu anahtar ister; yoksa smoke'taki yedek kontrolleri 400 ile duser.

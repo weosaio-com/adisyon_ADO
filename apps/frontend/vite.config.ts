@@ -13,6 +13,8 @@ export default defineConfig({
     // PWA: app-shell precache -> tablet offline'da uygulama acilir. OFFLINE_DESIGN.md §3, K5
     VitePWA({
       registerType: 'autoUpdate',
+      // public/icons (kaynak: icon.svg) -> app-shell ile birlikte onbellege alinir.
+      includeAssets: ['icons/*.png', 'icons/*.svg'],
       workbox: {
         // Yeni SW aktif olunca acik sayfalari HEMEN kontrol et -> ilk yenileme offline calisir.
         clientsClaim: true,
@@ -29,7 +31,17 @@ export default defineConfig({
         start_url: '/',
         theme_color: '#1e293b',
         background_color: '#f1f5f9',
-        icons: [], // ponytail: ikon seti sonra, kurulabilirlik icin eklenir
+        // Kurulabilirlik (ana ekrana ekle) icin 192/512 + maskelenebilir simge gerekir.
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: '/icons/icon-512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
     }),
   ],

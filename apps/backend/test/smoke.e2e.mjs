@@ -1,8 +1,9 @@
 // E2E smoke — calisan sunucuya karsi kritik para yollari.
 // Kullanim: backend'i ayaga kaldir (npm run dev) + seed, sonra: node test/smoke.e2e.mjs
 // Kapsam: merge, split, payment idempotency, reverse (iade), end-of-day, statement CSV.
-import { createCipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -486,6 +487,39 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
     neg.length === 1 && neg[0].quantity === -2000,
     `STOK: yalniz gonderilen kalem dustu -2000, silinen sizmadi (${JSON.stringify(neg.map((m) => m.quantity))})`,
   );
+
+  // --- YEREL HTTPS (API_TLS_PORT): CA tokensiz indirilir, sunucu bu CA ile dogrulanir ---
+  if (process.env.API_TLS_PORT) {
+    const caRes = await fetch(`${BASE}/devices/ca.crt`);
+    const caDer = Buffer.from(await caRes.arrayBuffer());
+    assert(
+      caRes.status === 200 && (caRes.headers.get('content-type') || '').includes('x509'),
+      `TLS ca.crt tokensiz indirilir (${caRes.status})`,
+    );
+    const caPem = new X509Certificate(caDer).toString();
+    const tlsStatus = await new Promise((resolve) => {
+      const req = httpsRequest(
+        {
+          host: '127.0.0.1',
+          port: Number(process.env.API_TLS_PORT),
+          path: '/api/v1/health',
+          ca: caPem,
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        },
+      );
+      req.on('error', (e) => resolve(e.code || 'ERR'));
+      req.end();
+    });
+    assert(tlsStatus === 200, `TLS HTTPS yalniz yerel CA ile dogrulandi (${tlsStatus})`);
+    const { data: info } = await call('GET', '/devices/server-info');
+    assert(
+      Array.isArray(info.httpsUrls) && Array.isArray(info.caUrls) && info.httpsPort > 0,
+      'TLS server-info HTTPS + sertifika adresleri',
+    );
+  }
 
   console.log(`\nE2E SONUC: ${ok.length} gecti, ${bad.length} kaldi`);
   process.exit(bad.length ? 1 : 0);

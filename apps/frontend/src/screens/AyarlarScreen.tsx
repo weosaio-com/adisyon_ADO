@@ -58,41 +58,64 @@ export default function AyarlarScreen() {
   );
 }
 
+interface ServerInfo {
+  port: number;
+  addresses: string[];
+  urls: string[];
+  httpsUrls?: string[];
+  caUrls?: string[];
+}
+
 // Garsonun tablette gireceği sunucu adresi. IP değişirse buradan görülür.
 function ServerInfoCard() {
   const info = useQuery({
     queryKey: ['server-info'],
-    queryFn: () =>
-      api<{ port: number; addresses: string[]; urls: string[] }>('/devices/server-info'),
+    queryFn: () => api<ServerInfo>('/devices/server-info'),
   });
   const urls = info.data?.urls ?? [];
+  const httpsUrls = info.data?.httpsUrls ?? [];
+  const caUrls = info.data?.caUrls ?? [];
   return (
     <div className="rounded-2xl bg-white p-4 shadow">
       <h2 className="mb-1 font-bold text-slate-800">Sunucu Adresi (garson tableti)</h2>
       <p className="mb-2 text-sm text-slate-500">
-        Garson tabletinde tarayıcıya aşağıdaki adresi yazın. Ağ/IP değişirse buradan güncel adresi
-        görebilirsiniz.
+        {httpsUrls.length > 0
+          ? 'Tabletlerde HTTPS adresini kullanın: bağlantı koptuğunda da uygulama açılır. Her tablete bir kez güvenlik sertifikasını kurun (kullanım kılavuzu, 6. bölüm).'
+          : 'Garson tabletinde tarayıcıya aşağıdaki adresi yazın. Ağ/IP değişirse buradan güncel adresi görebilirsiniz.'}
       </p>
       {info.isLoading && <p className="text-sm text-slate-400">Yükleniyor…</p>}
       {!info.isLoading && urls.length === 0 && (
         <p className="text-sm text-slate-400">Ağ adresi bulunamadı.</p>
       )}
-      <div className="space-y-1">
-        {urls.map((u) => (
-          <div
-            key={u}
-            className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800"
+      <UrlGroup title="HTTPS (önerilen)" urls={httpsUrls} />
+      <UrlGroup title="Sertifika indirme adresi (tablette bir kez açın)" urls={caUrls} />
+      <UrlGroup
+        title={httpsUrls.length > 0 ? 'HTTP (sertifikasız; çevrimdışı açılmaz)' : ''}
+        urls={urls}
+      />
+    </div>
+  );
+}
+
+function UrlGroup({ title, urls }: { title: string; urls: string[] }) {
+  if (urls.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {title && <p className="text-xs font-medium text-slate-500">{title}</p>}
+      {urls.map((u) => (
+        <div
+          key={u}
+          className="flex items-center justify-between gap-2 rounded-lg bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800"
+        >
+          <span className="min-w-0 break-all">{u}</span>
+          <button
+            onClick={() => void navigator.clipboard?.writeText(u)}
+            className="shrink-0 rounded bg-slate-700 px-2 py-0.5 text-xs font-medium text-white"
           >
-            <span>{u}</span>
-            <button
-              onClick={() => void navigator.clipboard?.writeText(u)}
-              className="rounded bg-slate-700 px-2 py-0.5 text-xs font-medium text-white"
-            >
-              Kopyala
-            </button>
-          </div>
-        ))}
-      </div>
+            Kopyala
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

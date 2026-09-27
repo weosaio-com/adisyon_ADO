@@ -36,6 +36,8 @@ function packagedEnv() {
     DATABASE_URL: 'file:' + dbPath.replaceAll('\\', '/'),
     ADO_DATA_DIR: dataDir,
     API_PORT: PORT,
+    // Garson tabletleri icin yerel HTTPS (cevrimdisi acilis icin sart). Pencere HTTP'de kalir.
+    API_TLS_PORT: String(Number(PORT) + 1),
     ...ensureSecrets(secretsPath),
   };
 }

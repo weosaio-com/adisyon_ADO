@@ -10,6 +10,11 @@ export const envSchema = z.object({
   BACKUP_ENCRYPTION_KEY: z.string().min(16).optional(),
 
   API_PORT: z.coerce.number().int().positive().default(3001),
+  // Tabletler icin yerel HTTPS portu (tanimsiz/bos = kapali). Paketli surum PORT+1 verir.
+  API_TLS_PORT: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
   API_HOST: z.string().default('0.0.0.0'),
   CORS_ORIGINS: z.string().default(''),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

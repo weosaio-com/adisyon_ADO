@@ -59,6 +59,12 @@ export default function LoginScreen() {
         <p className="mt-2 text-sm leading-6 text-stone-500">
           Vardiyanıza devam etmek için hesabınızla giriş yapın.
         </p>
+        {!window.isSecureContext && (
+          <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-5 font-medium text-amber-800">
+            Bu bağlantı güvenli değil (HTTP): bağlantı koptuğunda uygulama yeniden açılamaz.
+            Çevrimdışı çalışma için yöneticinizden HTTPS adresini isteyin (Ayarlar › Sunucu Adresi).
+          </p>
+        )}
 
         <div className="mt-8 grid grid-cols-2 rounded-2xl bg-stone-100 p-1.5">
           {(['owner', 'waiter'] as Mode[]).map((item) => (
