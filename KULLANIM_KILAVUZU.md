@@ -40,7 +40,7 @@ devam eder**. Bağlantı gelince siparişler otomatik ve kayıpsız senkronlanı
 | **Ana makine** | Windows 10/11, 4 GB RAM, açık kalabilen bir bilgisayar (kasa PC) |
 | **Ağ** | Bir WiFi router (internet şart değil); ana makine tercihen **kabloyla** bağlı |
 | **Tabletler** | Güncel bir tarayıcısı olan herhangi bir tablet/telefon (Android/iPad/Windows) |
-| **Yazıcı** | (İsteğe bağlı) Mutfak/fiş yazıcısı |
+| **Yazıcı** | (İsteğe bağlı) Mutfak/fiş yazıcısı — önce Windows'a sürücüsüyle kurulur (5.4) |
 
 > **İpucu:** Ana makineye **sabit yerel IP** verilmesi tavsiye edilir; böylece tabletlerin adresi
 > hep aynı kalır.
@@ -89,6 +89,22 @@ Yönetici olarak giriş yaptıktan sonra üst menüden şu ayarları yapın:
 - Gerekirse **birim** (adet, porsiyon) ve **KDV oranı** tanımlayın.
 - **Ürünleri** fiyatlarıyla ekleyin. (İsterseniz ürün için **stok takibi**ni açabilirsiniz.)
 
+### 5.4 İşletme Bilgileri ve Yazıcılar — **Ayarlar**
+- **İşletme Bilgileri:** İşletme adı, adres ve telefon. Müşteri fişinin ve hesabın en üstüne
+  basılır.
+- **Yazıcılar:** Yazıcıyı önce Windows'a (üreticinin sürücüsüyle) kurun ve Windows'tan bir test
+  sayfası basıldığını görün. Sonra **Ayarlar › Yazıcılar › + Yazıcı ekle**:
+  1. **Yüklü yazıcılardan** seçin (listede yoksa Windows'taki adını aynen yazın), görünen ad
+     verin (örn. "Mutfak"), kağıt genişliğini (80/58 mm) seçin.
+  2. İlk yazıcıyı **Varsayılan** yapın: yönlendirme yoksa tüm fişler buradan çıkar.
+  3. **Test yazdır** deyin; sayfadaki "ÇĞİÖŞÜ" satırı düzgün okunuyorsa yazıcı hazırdır.
+  4. **Hangi fiş nereden çıksın?** bölümünden mutfak fişi ve müşteri fişi yazıcısını seçin.
+     İçecekleri bara yönlendirmek için **Kategoriye özel** satırını kullanın
+     (örn. İçecekler → Bar yazıcısı).
+- **Son fişler** listesi basılan her fişi gösterir (**Önizle** ile içeriği görülür). Yazdırılamayan
+  fiş kırmızı işaretlenir; yazıcıyı/kağıdı kontrol edip **Tekrar dene** deyin. Böyle bir fiş varsa
+  Masalar ekranının üstünde de uyarı çıkar.
+
 Bu ayarlar bittiğinde sistem satışa hazırdır.
 
 ---
@@ -134,17 +150,29 @@ Giriş ekranı bu durumda sarı bir uyarı gösterir.
 
 ## 7. Günlük Kullanım Akışı
 
-1. **Masalar ekranı:** Boş masa gri, dolu masa sarı, bekletilen mor görünür.
-2. **Sipariş alma:** Boş masaya dokun → adisyon açılır. Kategoriden ürünlere dokunarak ekle;
-   adet **+ / −** ile ayarlanır, gönderilmemiş kalem silinebilir.
+1. **Masalar ekranı:** Boş masa beyaz, dolu masa koyu, bekletilen mor, çevrimdışı açılıp
+   senkron bekleyen sarı görünür.
+2. **Sipariş alma:** Boş masaya dokun → adisyon açılır (ekranın üstünde salon ve masa adı yazar).
+   Kategoriden ürünlere dokunarak ekle; adet **+ / −** ile ayarlanır, gönderilmemiş kalem
+   silinebilir. **Not** ile ürüne not eklenir (örn. "az pişmiş, soğansız"); not mutfak fişinde
+   ürünün altına basılır. Yanlış masaya dokunduysanız boş adisyonda **Masayı kapat** deyin.
 3. **Mutfağa Gönder:** Kalemler hazırsa "Mutfağa Gönder" ile mutfağa/kasaya iletilir (ve varsa
    mutfak fişi basılır). Gönderilen kalem kilitlenir; değişiklik için yöneticiden **iptal (void)**
    gerekir.
-4. **Ödeme / Kapatma:** Ödeme **kasadan/yöneticiden** alınır (nakit/kart/veresiye, kısmi/split
-   ödeme, para üstü). Ödeme tamamlanınca masa boşalır.
+4. **Ödeme / Kapatma:** Ödeme **kasadan/yöneticiden** alınır (nakit/kart/havale/veresiye,
+   kısmi/split ödeme). Nakitte müşterinin verdiği parayı **Alınan nakit** alanına yazın (ya da
+   +20/+50/+100/+200 düğmelerine dokunun); **para üstü** ekranda gösterilir ve ödemeden sonra
+   ekranda kalır. Kasaya yalnızca adisyon tutarı satış olarak yazılır. Ödeme tamamlanınca masa
+   boşalır ve müşteri fişi basılır.
 5. **Ek işlemler (yönetici):** Masa taşı/birleştir, adisyon böl, indirim (yüksek indirim yönetici
-   onayı ister), beklet/çağır.
-6. **Gün Sonu:** Gün bitince **Kasa → Gün Sonu (Z raporu)** ile kasa sayımı ve özet alınır.
+   onayı ister), beklet/çağır, **İptal et** (neden seçilerek; ödeme alınmışsa önce iade gerekir).
+6. **Yanlış ödeme / fiş tekrarı:** **Kasa › Son işlemler** listesinde ilgili ödemenin yanındaki
+   **İade** ile ödeme geri alınır ve adisyon yeniden açılır; doğru ödemeyi alın. Düzeltilmiş (ya da
+   kaybolan) müşteri fişini aynı listedeki **Fiş** düğmesiyle yeniden basabilirsiniz.
+7. **Gün Sonu:** Gün bitince **Kasa → Gün Sonu (Z raporu)** ile kasa sayımı ve özet alınır.
+
+> **Not:** Programın bastığı fişler **bilgi fişidir, mali değeri yoktur**. Yasal mali fiş (ÖKC
+> fişi / e-Arşiv) ayrıca düzenlenmelidir; mali müşavirinize danışın.
 
 ---
 
@@ -184,7 +212,7 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 | Rol | Yapabilir |
 |-----|-----------|
 | **Yönetici (Owner)** | Her şey: ürün/masa/kullanıcı yönetimi, ödeme, kasa, indirim, iade, raporlar, yedek |
-| **Garson** | Sipariş alma (masa aç, kalem ekle, mutfağa gönder). Ödeme/kasa/rapor **göremez** |
+| **Garson** | Sipariş alma (masa aç, kalem ekle, not yaz, mutfağa gönder, boş adisyonu kapat). Ödeme/kasa/rapor **göremez** |
 
 ---
 
@@ -217,6 +245,12 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 - Sertifika o tablete kurulmamış ya da (iPad/iPhone'da) tam güven açılmamış. 6. bölümdeki
   adımları tekrarlayın.
 
+**Mutfak fişi / müşteri fişi çıkmıyor.**
+- **Ayarlar › Yazıcılar**'da yazıcı tanımlı mı, **Varsayılan** ya da mutfak/müşteri fişi için
+  seçili mi? **Test yazdır** ile deneyin.
+- **Son fişler**'de fiş "Yazdırılamadı" görünüyorsa altındaki hata mesajına bakın: yazıcı kapalı,
+  kağıt bitmiş ya da Windows'taki adı değişmiş olabilir. Sorunu giderip **Tekrar dene** deyin.
+
 **Tabletlerin adresi değişiyor.**
 - Ana makineye router'dan **sabit IP** verin; adres bir daha değişmez.
 
@@ -243,7 +277,8 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 ## 12. Özet — Hızlı Başlangıç
 
 1. Ana makineye programı kur → aç → **yönetici hesabı** oluştur.
-2. **Kullanıcılar, Masalar, Ürünler**'i tanımla.
+2. **Kullanıcılar, Masalar, Ürünler**'i tanımla; **Ayarlar**'da işletme bilgilerini gir ve
+   yazıcıyı ekleyip test et (5.4).
 3. Tabletleri aynı WiFi'ye bağla, **sertifikayı kur** ve Ayarlar'daki **HTTPS adresini** aç
    (örnek: `https://192.168.1.20:43128`), **ana ekrana ekle** (6. bölüm).
 4. Garsonlar **PIN** ile girsin, sipariş almaya başlasın.

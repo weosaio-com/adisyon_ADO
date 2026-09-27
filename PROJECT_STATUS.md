@@ -17,7 +17,15 @@
 | Masa / Salon | ✅ | — |
 | Sipariş / Adisyon | ✅ | Çekirdek + indirim + mutfağa iletme + held/resume + masa-taşı + **birleştir/böl (merge/split)** |
 | Ödeme (payments) | ✅ | Temel + idempotency + split + **iade/reversal** |
-| Yazdırma (printing) | ✅ | Müşteri + mutfak/**bar fişi (kategori ayrımı)** + Receipt kaydı |
+| Yazdırma (printing) | ✅ | Müşteri + mutfak/**bar fişi (kategori ayrımı)** + Receipt kaydı + **kurulum ekranı, başarısız fiş/tekrar dene, fiş tekrarı** (2026-09-27) |
+
+**2026-09-27 — basit sürüm (garson → mutfak → kasa) doğrulaması:**
+- ✅ Para üstü doğru kaydediliyor; tekrar basılan ödeme tek kayıt; HTTP LAN'dan ödeme çalışıyor
+- ✅ Yazıcı kurulum ekranı; mutfak fişinde masa/garson/not; müşteri fişinde başlık/ödeme/para üstü
+- ✅ Ürün notu, masa adı, boş adisyonu kapatma, yönetici iptali, kasadan iade + fiş tekrarı
+- ✅ Tarayıcı testi `pos-flow.spec.ts` + smoke 86 kontrol
+- ❌ QR menü / müşterinin kendi ödemesi: bulut aktarımı, menü görsel/açıklama/tükendi/seçenek,
+  `Order.source` + onay kuyruğu, ödeme sağlayıcı, mali fiş (ÖKC/e-Arşiv) — Faz 2
 
 **Bu oturumda tamamlananlar:**
 1. ✅ İade / reversal — ters kayıt + `order.refunded` + geri-açma + kasa/veresiye dinleyicileri
