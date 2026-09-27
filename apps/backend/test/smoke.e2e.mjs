@@ -488,6 +488,115 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
     `STOK: yalniz gonderilen kalem dustu -2000, silinen sizmadi (${JSON.stringify(neg.map((m) => m.quantity))})`,
   );
 
+  // --- SIPARIS NOTU + MASA BILGISI + BOS ADISYONU KAPATMA ---
+  const tNote = await mk('NOT' + Date.now());
+  const N = await openOrderWithItem(tNote.id, prod.id);
+  const noteItemId = N.items[0].id;
+  const { status: noteStatus, data: noted } = await call(
+    'PUT',
+    `/orders/${N.id}/items/${noteItemId}/note`,
+    { note: 'az pişmiş' },
+  );
+  assert(
+    noteStatus === 200 && noted.items[0].notes?.[0]?.note === 'az pişmiş',
+    `NOT gonderilmemis kaleme yazildi (${noteStatus})`,
+  );
+  assert(
+    noted.table?.name === tNote.name && !!noted.table?.hall?.name,
+    'SIPARIS yanitinda masa + salon',
+  );
+  const { status: discardFull } = await call('POST', `/orders/${N.id}/discard`);
+  assert(discardFull === 409, `BOS ADISYON: kalemli adisyon kapatilmaz (${discardFull})`);
+  await call('POST', `/orders/${N.id}/send-kitchen`);
+  const { status: noteSent } = await call('PUT', `/orders/${N.id}/items/${noteItemId}/note`, {
+    note: 'x',
+  });
+  assert(noteSent === 409, `NOT gonderilmis kaleme yazilmaz (${noteSent})`);
+  const kitchenJobs = await waitFor(
+    async () => (await call('GET', '/printers/jobs')).data,
+    (jobs) => jobs?.some((j) => j.documentType === 'kitchen' && j.summary.endsWith(N.orderNo)),
+  );
+  const kitchenText =
+    kitchenJobs?.find((j) => j.documentType === 'kitchen' && j.summary.endsWith(N.orderNo))?.text ??
+    '';
+  assert(
+    kitchenText.includes(`Masa: ${hall.name} · ${tNote.name}`) &&
+      kitchenText.includes('Not: az pişmiş'),
+    'MUTFAK FISI masa + not iceriyor',
+  );
+  const tEmpty = await mk('BOS' + Date.now());
+  const { data: E } = await call('POST', '/orders', { tableId: tEmpty.id });
+  const { status: discardStatus, data: discarded } = await call('POST', `/orders/${E.id}/discard`);
+  assert(
+    discardStatus < 400 && discarded.status === 'cancelled',
+    `BOS ADISYON kapatildi (${discardStatus} ${discarded.status})`,
+  );
+  const { data: emptyOpen } = await call('GET', `/orders?tableId=${tEmpty.id}&open=true`);
+  assert(emptyOpen.length === 0, 'BOS ADISYON masayi bosaltti');
+
+  // --- ISLETME BILGILERI (fis basligi) ---
+  const { status: bizStatus } = await call('PUT', '/settings/business', {
+    name: 'Smoke Lokanta',
+    address: 'Test Sok. 1',
+    phone: '0212 111 11 11',
+  });
+  const { data: biz } = await call('GET', '/settings/business');
+  assert(
+    bizStatus === 200 && biz.name === 'Smoke Lokanta' && biz.phone === '0212 111 11 11',
+    `ISLETME bilgileri kaydedildi (${bizStatus})`,
+  );
+  const { status: bizBad } = await call('PUT', '/settings/business', { name: '  ' });
+  assert(bizBad === 422, `ISLETME bos ad reddedilir (${bizBad})`);
+
+  // --- FIS YENIDEN YAZDIR + KASADA IADE ISARETI (C: iade + yeniden odeme) ---
+  const { status: reprintStatus } = await call('POST', `/printers/order/${C.id}/receipt`);
+  assert(reprintStatus < 400, `FIS odenmis adisyonda yeniden yazdirilir (${reprintStatus})`);
+  const { status: reprintUnpaid } = await call('POST', `/printers/order/${N.id}/receipt`);
+  assert(reprintUnpaid === 409, `FIS odenmemis adisyonda yeniden yazdirilmaz (${reprintUnpaid})`);
+  const { data: shift } = await call('GET', '/reports/shift');
+  const reversedRow = shift.recentPayments?.find((p) => p.id === payId);
+  assert(
+    reversedRow?.reversed === true && reversedRow.orderId === C.id,
+    'KASA son islemlerde iade edilen odeme isaretli',
+  );
+
+  // --- YAZICI: kesif, basilamayan fis listesi, tekrar dene / kaldir ---
+  const { status: discStatus, data: disc } = await call('GET', '/printers/discover');
+  assert(
+    discStatus === 200 && Array.isArray(disc) && disc.some((d) => d.driverId === 'escpos-mock'),
+    `YAZICI kesif listesi (${discStatus})`,
+  );
+  const { data: badPrinter } = await call('POST', '/printers', {
+    name: 'Olmayan Yazici',
+    driverId: 'windows-spooler',
+    connection: 'windows_spooler',
+    address: 'Olmayan Yazici',
+    paperWidth: '80',
+  });
+  const { data: testJob } = await call('POST', `/printers/test-print/${badPrinter.id}`);
+  const failedOf = async () => (await call('GET', '/printers/jobs?status=failed')).data;
+  const hasJob = (jobs) => jobs?.some((j) => j.id === testJob.jobId);
+  assert(
+    hasJob(await waitFor(failedOf, hasJob, 8000)),
+    'YAZICI basilamayan fis "failed" listesinde',
+  );
+  const { status: retryStatus } = await call('POST', `/printers/jobs/${testJob.jobId}/retry`);
+  assert(retryStatus < 400, `YAZICI tekrar dene (${retryStatus})`);
+  await waitFor(failedOf, hasJob, 8000);
+  const { status: dismissStatus } = await call('DELETE', `/printers/jobs/${testJob.jobId}`);
+  assert(
+    dismissStatus < 400 && !hasJob(await failedOf()),
+    `YAZICI kaldirilan fis listeden cikti (${dismissStatus})`,
+  );
+  const doneJob = (await call('GET', '/printers/jobs?status=done')).data?.[0];
+  if (doneJob) {
+    const { status: retryDone } = await call('POST', `/printers/jobs/${doneJob.id}/retry`);
+    assert(retryDone === 409, `YAZICI basilmis fis tekrar denenmez (${retryDone})`);
+  }
+  const { status: unknownTest } = await call('POST', '/printers/test-print/yok');
+  assert(unknownTest === 404, `YAZICI olmayan yaziciya test sayfasi 404 (${unknownTest})`);
+  await call('DELETE', `/printers/${badPrinter.id}`);
+
   // --- YEREL HTTPS (API_TLS_PORT): CA tokensiz indirilir, sunucu bu CA ile dogrulanir ---
   if (process.env.API_TLS_PORT) {
     const caRes = await fetch(`${BASE}/devices/ca.crt`);
