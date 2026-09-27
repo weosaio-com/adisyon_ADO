@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, ApiError, getUser, hasPerm } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus } from '../lib/format';
-import type { Order, Table } from '../lib/types';
+import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
 import { offlineOpenTable } from '../offline/actions';
 import { isOffline } from '../offline/engine';
@@ -40,6 +40,16 @@ export default function TablesScreen() {
     refetchInterval: 30_000,
   });
   const cashBlocked = cashStatus.data?.open === false;
+  // Kagit bitti / yazici kapali: fis sessizce kaybolmasin, yonetici gorsun.
+  const canManagePrinters = hasPerm('printer.manage');
+  const failedPrints = useQuery({
+    queryKey: ['printers', 'jobs', 'failed'],
+    queryFn: () => api<PrintJobRow[]>('/printers/jobs?status=failed'),
+    enabled: canManagePrinters,
+    retry: false,
+    refetchInterval: 30_000,
+  });
+  const failedPrintCount = failedPrints.data?.length ?? 0;
 
   const openByTable = new Map<string, Order>();
   for (const order of openOrders.data ?? [])
@@ -159,6 +169,26 @@ export default function TablesScreen() {
                 Kasaya git
               </button>
             )}
+          </div>
+        )}
+
+        {failedPrintCount > 0 && (
+          <div
+            data-testid="print-failed-banner"
+            className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-950 sm:flex-row sm:items-center"
+          >
+            <div>
+              <p className="font-black">{failedPrintCount} fiş yazdırılamadı</p>
+              <p className="text-sm text-red-800">
+                Yazıcının açık olduğunu ve kağıdı kontrol edin, sonra fişi tekrar gönderin.
+              </p>
+            </div>
+            <button
+              onClick={() => nav('/settings')}
+              className="min-h-10 rounded-xl bg-red-900 px-4 text-sm font-bold text-white"
+            >
+              Yazıcı ayarları
+            </button>
           </div>
         )}
 

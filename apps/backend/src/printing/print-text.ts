@@ -54,6 +54,26 @@ export const POWERSHELL_PRINT_SCRIPT =
   "$b = [string]::Join('', @($input)); " +
   `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)) | Out-Printer -Name $env:${PRINTER_ENV}`;
 
+/**
+ * Yuklu Windows yazicilarinin adlari. Cikti base64(JSON): konsol OEM kod sayfasiyla
+ * yazdigi icin "Mutfak Yazıcısı" gibi adlar duz metinde bozulurdu.
+ */
+export const POWERSHELL_LIST_PRINTERS_SCRIPT =
+  '$n = @(Get-Printer | ForEach-Object { $_.Name }); ' +
+  '[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $n -Compress)))';
+
+export function decodePrinterList(stdout: string): string[] {
+  const parsed: unknown = JSON.parse(Buffer.from(stdout.trim(), 'base64').toString('utf8') || '[]');
+  const names = Array.isArray(parsed) ? parsed : [parsed];
+  return names.filter((name): name is string => typeof name === 'string' && name.trim() !== '');
+}
+
+/** Fis listesinde tek satirlik ozet ("MUTFAK FİŞİ · 20260927-0007"). */
+export function printSummary(payload: PrintPayload): string {
+  if (payload.text) return payload.text.split(/\r?\n/)[0] ?? '';
+  return [payload.title, payload.orderNo].filter(Boolean).join(' · ');
+}
+
 // --- self-check: `ts-node src/printing/print-text.ts` ---
 if (require.main === module) {
   const text = printText({
@@ -79,6 +99,25 @@ if (require.main === module) {
   assert.ok(
     !POWERSHELL_PRINT_SCRIPT.includes('$args'),
     '$args kullanilmaz (-Command metnine eklenir)',
+  );
+
+  const listOut = (names: unknown) =>
+    Buffer.from(JSON.stringify(names), 'utf8').toString('base64') + '\r\n';
+  assert.deepStrictEqual(
+    decodePrinterList(listOut(['EPSON TM-T20II', 'Mutfak Yazıcısı'])),
+    ['EPSON TM-T20II', 'Mutfak Yazıcısı'],
+    'yazici listesi Turkce adlarla cozulur',
+  );
+  assert.deepStrictEqual(decodePrinterList(listOut('Tek Yazıcı')), ['Tek Yazıcı'], 'tek ad');
+  assert.deepStrictEqual(decodePrinterList(listOut([])), [], 'yazici yok');
+  assert.deepStrictEqual(decodePrinterList(''), [], 'bos cikti');
+  assert.strictEqual(
+    printSummary({ title: 'MUTFAK FİŞİ', orderNo: '20260927-0007' }),
+    'MUTFAK FİŞİ · 20260927-0007',
+  );
+  assert.strictEqual(
+    printSummary({ text: 'Yazıcı Sınama Sayfası\nDurum' }),
+    'Yazıcı Sınama Sayfası',
   );
 
   console.log('✓ print-text self-check OK');

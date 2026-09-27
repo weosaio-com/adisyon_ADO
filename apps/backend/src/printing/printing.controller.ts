@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Permission } from '@ado/shared';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
@@ -8,9 +8,11 @@ import {
   createPrinterSchema,
   updatePrinterSchema,
   createPrintRouteSchema,
+  printJobQuerySchema,
   type CreatePrinterDto,
   type UpdatePrinterDto,
   type CreatePrintRouteDto,
+  type PrintJobQueryDto,
 } from './dto/printing.schemas';
 
 @Controller('printers')
@@ -46,6 +48,35 @@ export class PrintingController {
   @RequirePermissions(Permission.PrinterManage)
   list(@CurrentUser() user: AuthUser) {
     return this.printingService.listPrinters(user);
+  }
+
+  // Kurulum ekrani: Windows'ta yuklu yazicilar (+ gelistirmede simulasyon yazicisi).
+  @Get('discover')
+  @RequirePermissions(Permission.PrinterManage)
+  discover() {
+    return this.printingService.discoverPrinters();
+  }
+
+  // Son 24 saatin fisleri; ?status=failed -> yazdirilamayanlar (masa ekrani uyarisi).
+  @Get('jobs')
+  @RequirePermissions(Permission.PrinterManage)
+  listJobs(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(printJobQuerySchema)) query: PrintJobQueryDto,
+  ) {
+    return this.printingService.listJobs(user, query.status);
+  }
+
+  @Post('jobs/:id/retry')
+  @RequirePermissions(Permission.PrinterManage)
+  retryJob(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.printingService.retryJob(user, id);
+  }
+
+  @Delete('jobs/:id')
+  @RequirePermissions(Permission.PrinterManage)
+  dismissJob(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.printingService.dismissJob(user, id);
   }
 
   @Post('routes')

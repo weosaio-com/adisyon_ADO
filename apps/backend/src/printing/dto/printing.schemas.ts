@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PrinterConnection, DocumentType } from '@ado/shared';
+import { PrinterConnection, DocumentType, PrintJobStatus } from '@ado/shared';
 
 export const createPrinterSchema = z.object({
   name: z.string().min(1),
@@ -22,3 +22,9 @@ export const createPrintRouteSchema = z.object({
   categoryId: z.string().nullish(),
 });
 export type CreatePrintRouteDto = z.infer<typeof createPrintRouteSchema>;
+
+// --- Fis listesi (son 24 saat) ---
+export const printJobQuerySchema = z.object({
+  status: z.nativeEnum(PrintJobStatus).optional(),
+});
+export type PrintJobQueryDto = z.infer<typeof printJobQuerySchema>;

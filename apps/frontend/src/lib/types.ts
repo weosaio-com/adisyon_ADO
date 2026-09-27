@@ -172,3 +172,41 @@ export interface OfflineReview {
   status: string; // open | resolved | rejected
   createdAt: string;
 }
+
+export interface Printer {
+  id: string;
+  name: string;
+  driverId: string; // windows-spooler | escpos-mock
+  connection: string;
+  address: string | null; // Windows'taki yazici adi
+  paperWidth: number; // 58 | 80
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+export interface PrintRoute {
+  id: string;
+  documentType: string; // kitchen | bar | customer
+  printerId: string;
+  categoryId: string | null; // null -> genel rota
+}
+
+export interface DiscoveredPrinter {
+  driverId: string;
+  name: string;
+  connection: string;
+  address: string;
+}
+
+export interface PrintJobRow {
+  id: string;
+  documentType: string;
+  status: string; // queued | printing | done | failed
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  printedAt: string | null;
+  printerName: string;
+  summary: string;
+  text: string; // yaziciya giden metin (onizleme)
+}
