@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, hasPerm } from '../lib/api';
 import type { Hall, Table } from '../lib/types';
 
 export default function MasaScreen() {
@@ -72,10 +72,20 @@ export default function MasaScreen() {
           <h2 className="font-bold text-slate-800">
             {hall === null ? 'Tüm Masalar' : hallName(hall)}
           </h2>
+          {hasPerm('settings.manage') && (
+            <button
+              onClick={() => nav('/qr-codes')}
+              className="ml-auto rounded-lg bg-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700"
+            >
+              QR kodları
+            </button>
+          )}
           <button
             onClick={() => setTableModal('new')}
             disabled={(halls.data ?? []).length === 0}
-            className="ml-auto rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className={`rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 ${
+              hasPerm('settings.manage') ? '' : 'ml-auto'
+            }`}
           >
             + Masa
           </button>

@@ -13,6 +13,7 @@ import FinansScreen from './screens/FinansScreen';
 import AyarlarScreen from './screens/AyarlarScreen';
 import KullaniciScreen from './screens/KullaniciScreen';
 import OfflineReviewScreen from './screens/OfflineReviewScreen';
+import QrCodesScreen from './screens/QrCodesScreen';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return isAuthed() ? <AppLayout>{children}</AppLayout> : <Navigate to="/login" replace />;
@@ -107,6 +108,14 @@ export default function App() {
         element={
           <RequireAuth>
             <OfflineReviewScreen />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/qr-codes"
+        element={
+          <RequireAuth>
+            <QrCodesScreen />
           </RequireAuth>
         }
       />
