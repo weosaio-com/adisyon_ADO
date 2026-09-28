@@ -1129,6 +1129,10 @@ export class OrdersService {
     if (!product) {
       throw new NotFoundException({ code: 'PRODUCT_NOT_FOUND', message: 'Urun bulunamadi.' });
     }
+    // "Tukendi" isaretli urun siparise eklenemez (QR menu ile ayni bilgi).
+    if (!product.isAvailable) {
+      throw new ConflictException({ code: 'PRODUCT_UNAVAILABLE', message: 'Ürün tükendi.' });
+    }
     return product;
   }
 

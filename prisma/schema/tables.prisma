@@ -41,6 +41,8 @@ model Table {
   mergedInto   Table?  @relation("TableMerge", fields: [mergedIntoId], references: [id])
   mergedFrom   Table[] @relation("TableMerge")
   isActive     Boolean @default(true) @map("is_active")
+  // QR menu masa kodu (16 karakter base32, 80 bit rastgele). Yenilenince eski QR gecersizlesir.
+  publicCode   String? @unique @map("public_code")
   orders       Order[]
 
   createdAt DateTime  @default(now()) @map("created_at")
