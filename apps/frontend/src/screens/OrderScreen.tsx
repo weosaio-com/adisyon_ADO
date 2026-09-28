@@ -260,27 +260,41 @@ export default function OrderScreen() {
 
         {/* md'de sag panel acilir, urun alani daralir: 2 sutun (dar kartta ad kesiliyordu). */}
         <div className="grid flex-1 auto-rows-[minmax(112px,auto)] grid-cols-2 content-start gap-3 overflow-auto p-4 sm:grid-cols-3 sm:p-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {visibleProducts.map((product) => (
-            <button
-              key={product.id}
-              data-testid={`product-${product.id}`}
-              onClick={() => addItem.mutate(product)}
-              disabled={busy}
-              className="group relative flex min-h-28 flex-col items-start justify-between overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-panel active:translate-y-0 disabled:opacity-50"
-            >
-              <span className="line-clamp-3 text-sm font-bold [overflow-wrap:anywhere] text-ink-900 sm:text-base">
-                {product.name}
-              </span>
-              <span className="mt-2 flex w-full items-center justify-between gap-2">
-                <span className="text-sm font-black text-brand-700">
-                  {formatKurus(product.salePrice)}
+          {visibleProducts.map((product) => {
+            // Tukenen urun gorunur kalir ama eklenemez (sunucu da PRODUCT_UNAVAILABLE ile reddeder).
+            const soldOut = product.isAvailable === false;
+            return (
+              <button
+                key={product.id}
+                data-testid={`product-${product.id}`}
+                onClick={() => addItem.mutate(product)}
+                disabled={busy || soldOut}
+                className={`group relative flex min-h-28 flex-col items-start justify-between overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-sm transition duration-150 disabled:opacity-50 ${
+                  soldOut
+                    ? 'cursor-not-allowed'
+                    : 'hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-panel active:translate-y-0'
+                }`}
+              >
+                <span className="line-clamp-3 text-sm font-bold [overflow-wrap:anywhere] text-ink-900 sm:text-base">
+                  {product.name}
                 </span>
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700 transition group-hover:bg-brand-600 group-hover:text-white">
-                  +
+                <span className="mt-2 flex w-full items-center justify-between gap-2">
+                  <span className="text-sm font-black text-brand-700">
+                    {formatKurus(product.salePrice)}
+                  </span>
+                  {soldOut ? (
+                    <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
+                      Tükendi
+                    </span>
+                  ) : (
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700 transition group-hover:bg-brand-600 group-hover:text-white">
+                      +
+                    </span>
+                  )}
                 </span>
-              </span>
-            </button>
-          ))}
+              </button>
+            );
+          })}
           {visibleProducts.length === 0 && !products.isLoading && (
             <div className="col-span-full rounded-2xl border border-dashed border-stone-300 bg-white/50 p-8 text-center">
               <p className="font-bold text-ink-800">Ürün bulunamadı</p>

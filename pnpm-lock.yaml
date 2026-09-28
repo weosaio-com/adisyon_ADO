@@ -151,6 +151,9 @@ importers:
 
   apps/frontend:
     dependencies:
+      '@ado/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
