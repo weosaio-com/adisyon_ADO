@@ -61,6 +61,9 @@ export function createDomainEvent<TName extends string, TPayload>(
  * Su an: katalog (ilk uretici). Sipariş/ödeme/kasa vb. ilgili modul inşa edilirken eklenecek.
  */
 export const DomainEventName = {
+  CategoryCreated: 'category.created',
+  CategoryUpdated: 'category.updated',
+  CategoryDeleted: 'category.deleted',
   ProductCreated: 'product.created',
   ProductUpdated: 'product.updated',
   ProductDeleted: 'product.deleted',
@@ -79,6 +82,11 @@ export const DomainEventName = {
 export type DomainEventName = (typeof DomainEventName)[keyof typeof DomainEventName];
 
 // --- Katalog event payload'lari ---
+export interface CategoryEventPayload {
+  categoryId: string;
+  name: string;
+}
+
 export interface ProductEventPayload {
   productId: string;
   name: string;

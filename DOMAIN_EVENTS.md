@@ -18,6 +18,15 @@
 
 ## Uygulanan Event'ler
 
+### `category.created` / `category.updated` / `category.deleted`
+- **Amaci:** Kategori olusturuldu, guncellendi (ad, sira, QR menu cevirisi, aktiflik) ya da
+  soft-delete edildi.
+- **Yayinlandigi yer:** `CatalogService.createCategory` / `updateCategory` / `deleteCategory`
+  (post-commit; silmede payload silinmeden onceki durum).
+- **Payload:** `{ categoryId, name }`.
+- **Dinleyen moduller:** `EventLoggerSubscriber`. QR menu yayini (bulut baglantisi) menuyu yeniden
+  gonderir.
+
 ### `product.created`
 - **Amaci:** Yeni urun katalogda olusturuldu.
 - **Yayinlandigi yer:** `CatalogService.createProduct` (post-commit).
@@ -25,8 +34,9 @@
 - **Dinleyen moduller:** `EventLoggerSubscriber` (tumu). İleride: Cache invalidation, Dashboard, Sync.
 
 ### `product.updated`
-- **Amaci:** Urun bilgisi/fiyati guncellendi.
-- **Yayinlandigi yer:** `CatalogService.updateProduct` (post-commit).
+- **Amaci:** Urun bilgisi/fiyati guncellendi; "tukendi" anahtari ya da gorsel degisti.
+- **Yayinlandigi yer:** `CatalogService.updateProduct`, `setAvailability`, `setImage`,
+  `clearImage` (post-commit).
 - **Payload:** `{ productId, name, categoryId, salePrice }`.
 - **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Cache invalidation, Dashboard, Sync.
 - **Not:** Ayri bir `price.changed` event'i, fiyat degisimini ozel izlemek gerekince eklenecek
@@ -47,8 +57,8 @@
 - **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Dashboard, canli masa katmani (WS), Sync.
 
 ### `table.updated`
-- **Amaci:** Masa tanimi/konumu (posX/posY) guncellendi.
-- **Yayinlandigi yer:** `TablesService.updateTable` (post-commit).
+- **Amaci:** Masa tanimi/konumu (posX/posY) guncellendi ya da QR menu kodu yenilendi.
+- **Yayinlandigi yer:** `TablesService.updateTable`, `rotatePublicCode` (post-commit).
 - **Payload:** `{ tableId, hallId, name }`.
 - **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Dashboard, canli masa katmani (WS), Sync.
 

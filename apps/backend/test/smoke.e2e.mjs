@@ -597,6 +597,120 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
   assert(unknownTest === 404, `YAZICI olmayan yaziciya test sayfasi 404 (${unknownTest})`);
   await call('DELETE', `/printers/${badPrinter.id}`);
 
+  // --- QR MENU (POS): menu alanlari, tukendi, gorsel, masa kodu ---
+  const { status: qrCatStatus, data: qrCat } = await call('POST', '/categories', {
+    name: 'Çorbalar ' + Date.now(),
+    translations: { en: { name: 'Soups' } },
+  });
+  const { data: catList } = await call('GET', '/categories');
+  assert(
+    qrCatStatus < 400 &&
+      qrCat.translations?.en?.name === 'Soups' &&
+      catList.find((c) => c.id === qrCat.id)?.translations?.en?.name === 'Soups',
+    `QR kategori cevirisi kaydedildi (${qrCatStatus})`,
+  );
+  const { status: qrProdStatus, data: qrProd } = await call('POST', '/products', {
+    name: 'Mercimek Çorbası',
+    categoryId: qrCat.id,
+    unitId: unit.id,
+    taxId: tax.id,
+    salePrice: 12000,
+    description: '  Günlük taze  ',
+    allergens: ['gluten', 'celery', 'gluten'],
+    dietTags: ['vegan'],
+    translations: { en: { name: 'Lentil soup', description: ' ' } },
+  });
+  assert(
+    qrProdStatus < 400 &&
+      qrProd.description === 'Günlük taze' &&
+      JSON.stringify(qrProd.allergens) === '["gluten","celery"]' &&
+      JSON.stringify(qrProd.dietTags) === '["vegan"]' &&
+      JSON.stringify(qrProd.translations) === '{"en":{"name":"Lentil soup"}}' &&
+      qrProd.isAvailable === true &&
+      !('allergensJson' in qrProd),
+    `QR urun menu alanlari kaydedildi, cozulmus doner (${qrProdStatus})`,
+  );
+  const { status: badAllergen } = await call('PATCH', `/products/${qrProd.id}`, {
+    allergens: ['nut'],
+  });
+  assert(badAllergen === 422, `QR bilinmeyen alerjen reddedilir (${badAllergen})`);
+  const { data: qrSnap } = await call('GET', '/sync/snapshot');
+  const snapProd = qrSnap.products?.find((p) => p.id === qrProd.id);
+  assert(
+    Array.isArray(snapProd?.allergens) && !('allergensJson' in snapProd),
+    'QR sync snapshot urunleri API ile ayni gorunumde',
+  );
+
+  const { data: soldOut } = await call('PATCH', `/products/${qrProd.id}/availability`, {
+    isAvailable: false,
+  });
+  const tQr = await mk('QR' + Date.now());
+  const { data: qrOrder } = await call('POST', '/orders', { tableId: tQr.id });
+  const addQr = () =>
+    call('POST', `/orders/${qrOrder.id}/items`, { productId: qrProd.id, quantity: 1000 });
+  const { status: soldOutAdd, data: soldOutErr } = await addQr();
+  assert(
+    soldOut.isAvailable === false &&
+      soldOutAdd === 409 &&
+      soldOutErr.error?.code === 'PRODUCT_UNAVAILABLE',
+    `QR tukenen urun siparise eklenmez (${soldOutAdd})`,
+  );
+  await call('PATCH', `/products/${qrProd.id}/availability`, { isAvailable: true });
+  const { status: backAdd } = await addQr();
+  assert(backAdd < 400, `QR tekrar satista olan urun eklenir (${backAdd})`);
+  await call('POST', `/orders/${qrOrder.id}/cancel`, { reason: 'QR testi' });
+
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const pngKey = createHash('sha256').update(png).digest('hex') + '.png';
+  const { status: imgStatus, data: withImg } = await upload(`/products/${qrProd.id}/image`, png);
+  assert(
+    imgStatus < 400 && withImg.imagePath === pngKey,
+    `QR gorsel yuklendi, anahtar = icerik ozeti (${imgStatus})`,
+  );
+  const imgRes = await fetch(`${BASE}/catalog/images/${pngKey}`);
+  const imgBody = Buffer.from(await imgRes.arrayBuffer());
+  assert(
+    imgRes.status === 200 &&
+      imgRes.headers.get('content-type') === 'image/png' &&
+      (imgRes.headers.get('cache-control') || '').includes('immutable') &&
+      imgBody.equals(png),
+    `QR gorsel tokensiz sunulur (${imgRes.status} ${imgRes.headers.get('content-type')})`,
+  );
+  const { status: notImage } = await upload(`/products/${qrProd.id}/image`, Buffer.from('merhaba'));
+  assert(notImage === 400, `QR gorsel olmayan dosya reddedilir (${notImage})`);
+  const huge = Buffer.concat([png.subarray(0, 8), Buffer.alloc(1024 * 1024)]);
+  const { status: hugeStatus } = await upload(`/products/${qrProd.id}/image`, huge);
+  assert(hugeStatus === 413, `QR 1 MB ustu gorsel reddedilir (${hugeStatus})`);
+  const missingImg = await fetch(`${BASE}/catalog/images/${'0'.repeat(64)}.png`);
+  const traversal = await fetch(`${BASE}/catalog/images/..%2F..%2Fpackage.json`);
+  assert(
+    missingImg.status === 404 && traversal.status === 404,
+    `QR olmayan/gecersiz gorsel adi 404 (${missingImg.status} ${traversal.status})`,
+  );
+  const { data: noImg } = await call('DELETE', `/products/${qrProd.id}/image`);
+  assert(noImg.imagePath === null, 'QR gorsel kaldirildi');
+
+  const codeRe = /^[A-Z2-7]{16}$/;
+  const { data: tableList } = await call('GET', '/tables');
+  const listed = tableList.find((t) => t.id === tQr.id);
+  assert(
+    codeRe.test(tQr.publicCode ?? '') && listed?.publicCode === tQr.publicCode,
+    'QR yeni masaya kod verildi, listede gorunur',
+  );
+  const { status: rotateStatus, data: rotated } = await call(
+    'POST',
+    `/tables/${tQr.id}/public-code`,
+  );
+  assert(
+    rotateStatus < 400 &&
+      codeRe.test(rotated.publicCode ?? '') &&
+      rotated.publicCode !== tQr.publicCode,
+    `QR masa kodu yenilendi (${rotateStatus})`,
+  );
+
   // --- YEREL HTTPS (API_TLS_PORT): CA tokensiz indirilir, sunucu bu CA ile dogrulanir ---
   if (process.env.API_TLS_PORT) {
     const caRes = await fetch(`${BASE}/devices/ca.crt`);

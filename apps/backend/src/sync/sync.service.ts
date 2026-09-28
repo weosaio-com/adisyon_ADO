@@ -13,6 +13,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { OrdersService } from '../orders/orders.service';
+import { categoryView, productView } from '../catalog/catalog.views';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   addLinePayload,
@@ -127,7 +128,15 @@ export class SyncService {
         orderBy: { name: 'asc' },
       }),
     ]);
-    return { serverTime: new Date().toISOString(), halls, tables, orders, categories, products };
+    // Katalog, /categories ve /products ile ayni gorunumde (QR menu JSON alanlari cozulmus).
+    return {
+      serverTime: new Date().toISOString(),
+      halls,
+      tables,
+      orders,
+      categories: categories.map(categoryView),
+      products: products.map(productView),
+    };
   }
 
   // ===========================================================================

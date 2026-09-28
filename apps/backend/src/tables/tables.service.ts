@@ -1,5 +1,18 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { newId, createDomainEvent, DomainEventName } from '@ado/shared';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import {
+  newId,
+  createDomainEvent,
+  DomainEventName,
+  encodeTableCode,
+  TABLE_CODE_BYTES,
+} from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
@@ -19,14 +32,31 @@ import type {
  *
  * KAPSAM DISI (Siparis modulunde): durum gecisi (occupied/reserved), birlestirme/
  * tasima (merge/move), canli WebSocket masa katmani. Burada `status` degistirilmez.
+ *
+ * QR menu: her masanin tahmin edilemez bir `publicCode`'u vardir (QR'daki `/m/<kod>`).
+ * Yeni masada uretilir, eski masalara acilista verilir, istenince yenilenir.
  */
 @Injectable()
-export class TablesService {
+export class TablesService implements OnModuleInit {
+  private readonly logger = new Logger(TablesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly events: EventBusService,
   ) {}
+
+  // Migration sonrasi kodu olmayan masalara kod ver (rastgele base32 SQL'de uretilemez).
+  async onModuleInit(): Promise<void> {
+    const missing = await this.prisma.table.findMany({
+      where: { publicCode: null, deletedAt: null },
+      select: { id: true },
+    });
+    for (const { id } of missing) {
+      await this.prisma.table.update({ where: { id }, data: { publicCode: newPublicCode() } });
+    }
+    if (missing.length) this.logger.log(`${missing.length} masaya QR kodu verildi`);
+  }
 
   private provenance(user: AuthUser): { deviceId?: string } {
     return user.deviceId ? { deviceId: user.deviceId } : {};
@@ -173,6 +203,7 @@ export class TablesService {
         posX: dto.posX ?? null,
         posY: dto.posY ?? null,
         isActive: dto.isActive ?? true,
+        publicCode: newPublicCode(),
         // status varsayilan 'empty' (semada). Durum gecisi Siparis modulunde.
         ...this.provenance(user),
       },
@@ -251,6 +282,27 @@ export class TablesService {
     return after;
   }
 
+  /** QR kodunu yeniler: masadaki eski QR artik menuyu acmaz (yeniden basilmali). */
+  async rotatePublicCode(user: AuthUser, id: string) {
+    const before = await this.tableOrThrow(user.branchId, id);
+    const after = await this.prisma.table.update({
+      where: { id },
+      data: { publicCode: newPublicCode(), version: { increment: 1 }, syncState: 'pending' },
+    });
+    await this.audit.record({
+      branchId: user.branchId,
+      action: 'table.public_code.rotate',
+      entityType: 'table',
+      entityId: id,
+      userId: user.userId,
+      oldValue: { publicCode: before.publicCode },
+      newValue: { publicCode: after.publicCode },
+      ...this.provenance(user),
+    });
+    await this.publishTableEvent(user, DomainEventName.TableUpdated, after);
+    return after;
+  }
+
   // ===========================================================================
   // Yardimcilar
   // ===========================================================================
@@ -273,4 +325,9 @@ export class TablesService {
     }
     return row;
   }
+}
+
+/** 80 bit rastgele masa kodu (16 karakter base32). Cakisma olasiligi ihmal edilebilir. */
+function newPublicCode(): string {
+  return encodeTableCode(randomBytes(TABLE_CODE_BYTES));
 }
