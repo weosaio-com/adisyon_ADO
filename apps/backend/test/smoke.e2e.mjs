@@ -3,6 +3,7 @@
 // Kapsam: merge, split, payment idempotency, reverse (iade), end-of-day, statement CSV.
 import { createCipheriv, createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -75,6 +76,78 @@ function dataDir() {
   if (process.env.ADO_DATA_DIR?.trim()) return process.env.ADO_DATA_DIR.trim();
   const url = process.env.DATABASE_URL ?? '';
   return url.startsWith('file:') ? dirname(url.slice(5)) : null;
+}
+
+// QR menu bulutunun POS API'sini taklit eder (apps/cloud src/routes/pos.ts ile ayni sozlesme).
+async function startFakeCloud() {
+  const TOKEN = 'adoqr_pos_smoke';
+  const state = { menus: [], tables: [], images: new Map(), unpaired: 0, failMenu: 0, version: 0 };
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const raw = Buffer.concat(chunks);
+    const send = (status, body) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    const ok = (data, status = 200) => send(status, { success: true, data });
+    const fail = (status, code, message) =>
+      send(status, { success: false, error: { code, message } });
+    const path = new URL(req.url, 'http://fake').pathname;
+    if (req.method === 'POST' && path === '/api/pos/pair') {
+      const { code } = JSON.parse(raw.toString());
+      if (code.replace(/[^a-z0-9]/gi, '').toUpperCase() !== 'ABCDEFGH') {
+        return fail(400, 'PAIRING_CODE_INVALID', 'Eşleştirme kodu geçersiz ya da süresi dolmuş.');
+      }
+      return ok(
+        {
+          token: TOKEN,
+          branch: { id: 'bulut-sube-1', name: 'Smoke Lokanta' },
+          tenant: { name: 'Smoke Lokanta', planLabel: 'QR Menü', features: { 'qr.menu': true } },
+        },
+        201,
+      );
+    }
+    if (req.headers.authorization !== `Bearer ${TOKEN}`) {
+      return fail(401, 'POS_TOKEN_INVALID', 'POS bağlantısı geçersiz.');
+    }
+    if (req.method === 'POST' && path === '/api/pos/images/check') {
+      const { keys } = JSON.parse(raw.toString());
+      return ok({ missing: keys.filter((key) => !state.images.has(key)) });
+    }
+    if (req.method === 'PUT' && path.startsWith('/api/pos/images/')) {
+      const key = path.slice('/api/pos/images/'.length);
+      const ext = key.slice(key.lastIndexOf('.'));
+      if (createHash('sha256').update(raw).digest('hex') + ext !== key) {
+        return fail(400, 'IMAGE_KEY_MISMATCH', 'Görsel içeriği anahtarla eşleşmiyor.');
+      }
+      state.images.set(key, raw);
+      return ok({ key }, 201);
+    }
+    if (req.method === 'PUT' && path === '/api/pos/menu') {
+      if (state.failMenu > 0) {
+        state.failMenu--;
+        return fail(503, 'UNAVAILABLE', 'Bulut bakımda.');
+      }
+      state.menus.push(JSON.parse(raw.toString()));
+      return ok({ version: ++state.version, updatedAt: new Date().toISOString() });
+    }
+    if (req.method === 'PUT' && path === '/api/pos/tables') {
+      state.tables = JSON.parse(raw.toString()).tables;
+      return ok({ count: state.tables.length });
+    }
+    if (req.method === 'POST' && path === '/api/pos/unpair') {
+      state.unpaired++;
+      return ok({ unpaired: true });
+    }
+    return fail(404, 'NOT_FOUND', 'Kaynak bulunamadı.');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    state,
+    close: () => server.close(),
+  };
 }
 
 async function openOrderWithItem(tableId, prodId, qty = 1000) {
@@ -710,6 +783,91 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
       rotated.publicCode !== tQr.publicCode,
     `QR masa kodu yenilendi (${rotateStatus})`,
   );
+
+  // --- QR MENU BULUT: eslestirme + otomatik yayin (sahte bulut) ---
+  const fake = await startFakeCloud();
+  await upload(`/products/${qrProd.id}/image`, png);
+  const cloudStatus = async () => (await call('GET', '/cloud/status')).data;
+  const { status: plainHttp } = await call('POST', '/cloud/pair', {
+    url: 'http://menu.example.com',
+    code: 'ABCD-EFGH',
+  });
+  assert(plainHttp === 400, `BULUT https olmayan adres reddedilir (${plainHttp})`);
+  const { status: wrongCode, data: wrongCodeErr } = await call('POST', '/cloud/pair', {
+    url: fake.url,
+    code: 'YANLIS22',
+  });
+  assert(
+    wrongCode === 400 && wrongCodeErr.error?.code === 'PAIRING_CODE_INVALID',
+    `BULUT yanlis eslestirme kodu bulutun mesajiyla reddedilir (${wrongCode})`,
+  );
+  const { status: pairStatus, data: paired } = await call('POST', '/cloud/pair', {
+    url: fake.url,
+    code: 'abcd-efgh',
+  });
+  assert(
+    pairStatus < 400 && paired.connected && paired.branchName === 'Smoke Lokanta',
+    `BULUT eslestirildi (${pairStatus})`,
+  );
+  const firstPublish = await waitFor(cloudStatus, (s) => s.lastMenuVersion >= 1, 10000);
+  const published = fake.state.menus.at(-1);
+  const publishedQr = published?.products.find((p) => p.id === qrProd.id);
+  assert(
+    firstPublish.lastMenuVersion === 1 && !firstPublish.lastError,
+    `BULUT ilk yayin tamam (${JSON.stringify(firstPublish.lastError)})`,
+  );
+  assert(
+    publishedQr?.imageKey === pngKey &&
+      fake.state.images.has(pngKey) &&
+      publishedQr.allergens.join() === 'gluten,celery' &&
+      publishedQr.translations?.en?.name === 'Lentil soup' &&
+      published.branch.name === 'Smoke Lokanta',
+    'BULUT menu gorsel, alerjen ve ceviriyle gitti',
+  );
+  assert(
+    fake.state.tables.some((t) => t.code === rotated.publicCode && t.name === tQr.name),
+    'BULUT masa kodlari yayinlandi',
+  );
+  const { data: settingsList } = await call('GET', '/settings');
+  assert(
+    !settingsList.some((row) => row.key.startsWith('cloud.')),
+    'BULUT belirteci /settings listesinde gorunmez',
+  );
+
+  await call('PATCH', `/products/${qrProd.id}/availability`, { isAvailable: false });
+  await waitFor(cloudStatus, (s) => s.lastMenuVersion >= 2, 15000);
+  const soldOutPublished = fake.state.menus.at(-1)?.products.find((p) => p.id === qrProd.id);
+  assert(
+    soldOutPublished?.available === false,
+    'BULUT tukendi degisikligi kendiliginden yayinlandi',
+  );
+  await call('PATCH', `/products/${qrProd.id}/availability`, { isAvailable: true });
+
+  // Once geri alma yayini bitsin; sonra bulut bir kez hata versin.
+  await waitFor(cloudStatus, (s) => !s.publishing, 15000);
+  fake.state.failMenu = 1;
+  const version = fake.state.version;
+  await call('POST', '/cloud/publish');
+  const failed = await waitFor(cloudStatus, (s) => Boolean(s.lastError), 10000);
+  assert(
+    failed.lastError === 'Bulut bakımda.',
+    `BULUT hatasi durumda gorunur (${failed.lastError})`,
+  );
+  const recovered = await waitFor(
+    cloudStatus,
+    (s) => !s.lastError && s.lastMenuVersion > version,
+    20000,
+  );
+  assert(!recovered.lastError, 'BULUT yayin kendiliginden yeniden denendi');
+
+  const { data: disconnected } = await call('DELETE', '/cloud/connection');
+  assert(
+    disconnected.connected === false && fake.state.unpaired === 1,
+    'BULUT baglanti kaldirildi, buluta bildirildi',
+  );
+  const { status: noCloud } = await call('POST', '/cloud/publish');
+  assert(noCloud === 409, `BULUT baglanti yokken yayin istenemez (${noCloud})`);
+  fake.close();
 
   // --- YEREL HTTPS (API_TLS_PORT): CA tokensiz indirilir, sunucu bu CA ile dogrulanir ---
   if (process.env.API_TLS_PORT) {
