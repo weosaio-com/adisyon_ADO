@@ -16,6 +16,11 @@
       "types": "./dist/menu.d.ts",
       "import": "./dist/menu.js",
       "require": "./dist/menu.cjs"
+    },
+    "./menu-core": {
+      "types": "./dist/menu-core.d.ts",
+      "import": "./dist/menu-core.js",
+      "require": "./dist/menu-core.cjs"
     }
   },
   "files": [
@@ -24,7 +29,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types src/menu.selfcheck.ts"
+    "test": "tsup --silent && node --experimental-strip-types src/menu.selfcheck.ts"
   },
   "dependencies": {
     "ulid": "^2.3.0",
