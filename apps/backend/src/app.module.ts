@@ -7,6 +7,7 @@ import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { CloudModule } from './cloud/cloud.module';
 import { TablesModule } from './tables/tables.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -95,6 +96,7 @@ const isUnloggedRequest = (req: IncomingMessage): boolean => {
     UsersModule,
     SyncModule,
     LicenseModule,
+    CloudModule,
   ],
   providers: [
     // Sira onemli: once kimlik (req.user'i doldurur), sonra izin denetimi.
