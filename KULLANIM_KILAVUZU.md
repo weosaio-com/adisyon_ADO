@@ -284,4 +284,7 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 4. Garsonlar **PIN** ile girsin, sipariş almaya başlasın.
 5. Ödeme/gün sonu **kasadan**; **bulut yedeğini** aç ve **kurtarma anahtarını** sakla.
 
+> Kurulumdan sonra yazıcı, tablet ve ödeme akışının gerçek cihazlarla çalıştığını adım adım
+> doğrulamak için: [`TEST_KONTROL_LISTESI.md`](TEST_KONTROL_LISTESI.md).
+
 Kolay gelsin.
