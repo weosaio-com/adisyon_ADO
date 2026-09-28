@@ -1,0 +1,3 @@
+# Yerel gelistirme gizli degerleri: bu dosyayi .dev.vars olarak kopyalayin (git'e girmez).
+# Satici API anahtari (en az 16 karakter). Uretimde: wrangler secret put ADMIN_TOKEN
+ADMIN_TOKEN=yerel-gelistirme-anahtari-degistirin

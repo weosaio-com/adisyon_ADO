@@ -14,6 +14,7 @@ export default tseslint.config(
       'apps/desktop/bundle/**',
       '**/.prisma/**',
       '**/generated/**',
+      '**/.wrangler/**',
       'packages/shared/dist/**',
       'apps/backend/dist/**',
     ],
