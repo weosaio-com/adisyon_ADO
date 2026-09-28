@@ -92,6 +92,12 @@ ama asıl kuyruk **tarayıcı içinde** yaşar. İki katman aynı idempotency pr
 
 - Tablet istemcisi **PWA**'dır: Service Worker uygulama kabuğunu (HTML/JS/CSS) cache'ler →
   offline'da bile **uygulama açılır**. Veri katmanı IndexedDB'dir.
+- **Güvenli bağlam şartı (2026-09 eki):** Service Worker yalnız HTTPS veya localhost'ta çalışır.
+  Tablet uygulamayı LAN IP'sinden (`http://192.168.x.x`) açtığında SW API'si hiç yoktur: IndexedDB
+  outbox sayfa açıkken çalışır ama bağlantı yokken yenileme/yeniden açma başarısız olur. Bu yüzden
+  backend `API_TLS_PORT` ile ek bir **yerel HTTPS** portu açar (kurulum başına yerel CA, tabletlere
+  bir kez kurulur; `GET /devices/ca.crt`). Doğrulama: `apps/frontend/e2e/https-lan.spec.ts`
+  (LAN IP + HTTPS'te güvenli bağlam, SW kontrolü ve çevrimdışı yenileme).
 - **Online yol:** mutasyon anında REST/WS ile sunucuya gider, sonuç uygulanır (bugünkü davranış).
 - **Offline yol:** aynı mutasyon outbox'a yazılır, UI **optimistic** günceller, bağlantı
   gelince Sync Engine kuyruğu sırayla boşaltır.

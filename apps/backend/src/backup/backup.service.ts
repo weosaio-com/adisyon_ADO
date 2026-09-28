@@ -1,36 +1,66 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   copyFileSync,
+  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
   unlinkSync,
   statSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { Transform, type Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { newId } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../common/audit/audit.service';
+import { resolveDataDir } from '../common/util/data-dir';
+import { isLocalRequest } from '../common/http/local-request';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import {
+  BACKUP_HEADER_BYTES,
+  decryptBackup,
+  encryptBackup,
+  formatRecoveryKey,
+  recoveryKeyCandidates,
+} from './backup.keys';
 
-const ALGORITHM = 'aes-256-gcm';
+// Iceri aktarilan yedek siniri (POS SQLite'i bunun cok altinda kalir; Prisma Int 32-bit).
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+
+type BackupActor = { branchId: string; userId?: string };
 
 @Injectable()
 export class BackupService {
   private readonly logger = new Logger(BackupService.name);
-  private readonly dataDir = this.resolveDataDir();
+  private readonly dataDir = resolveDataDir();
   private readonly backupDir = join(this.dataDir, 'backups');
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {
     if (!existsSync(this.backupDir)) {
       mkdirSync(this.backupDir, { recursive: true });
     }
   }
 
-  private getEncryptionKey(): Buffer {
+  /** Bu kurulumun ham yedek anahtari (paketli surumde userData/secrets.json). */
+  private currentRawKey(): string {
     const rawKey = process.env.BACKUP_ENCRYPTION_KEY?.trim();
     if (!rawKey) {
       throw new BadRequestException({
@@ -38,14 +68,7 @@ export class BackupService {
         message: 'Yedek sifreleme anahtari tanimli degil.',
       });
     }
-    return createHash('sha256').update(rawKey).digest();
-  }
-
-  private resolveDataDir(): string {
-    if (process.env.ADO_DATA_DIR?.trim()) return process.env.ADO_DATA_DIR.trim();
-    const databaseUrl = process.env.DATABASE_URL ?? '';
-    if (databaseUrl.startsWith('file:')) return dirname(databaseUrl.slice(5));
-    return join(process.cwd(), 'prisma');
+    return rawKey;
   }
 
   /** Branch bazli ayari oku (JSON deger); yoksa null. */
@@ -77,10 +100,8 @@ export class BackupService {
     }
   }
 
-  async createBackup(
-    actor: { branchId: string; userId?: string },
-    type: 'auto' | 'manual' | 'pre_update',
-  ) {
+  async createBackup(actor: BackupActor, type: 'auto' | 'manual' | 'pre_update') {
+    const rawKey = this.currentRawKey(); // anahtar yoksa sifresiz kopya hic olusmasin
     const backupId = newId();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const tempFile = join(this.backupDir, `temp_${backupId}.db`);
@@ -94,18 +115,8 @@ export class BackupService {
       // SQLite requires the destination file to not exist.
       await this.prisma.$executeRawUnsafe(`VACUUM INTO '${tempFile.replace(/'/g, "''")}'`);
 
-      // 2. Read temp file and encrypt it
-      const rawData = readFileSync(tempFile);
-
-      const key = this.getEncryptionKey();
-      const iv = randomBytes(12); // GCM requires 12 bytes IV
-      const cipher = createCipheriv(ALGORITHM, key, iv);
-
-      const encryptedData = Buffer.concat([cipher.update(rawData), cipher.final()]);
-      const authTag = cipher.getAuthTag();
-
-      // Write encrypted file: IV (12 bytes) + AuthTag (16 bytes) + EncryptedData
-      const finalBuffer = Buffer.concat([iv, authTag, encryptedData]);
+      // 2. Encrypt: IV (12 bytes) + AuthTag (16 bytes) + EncryptedData
+      const finalBuffer = encryptBackup(readFileSync(tempFile), rawKey);
       writeFileSync(finalPath, finalBuffer);
 
       // Clean up temporary unencrypted copy
@@ -162,13 +173,85 @@ export class BackupService {
   }
 
   /**
+   * Disaridan gelen sifreli yedegi (bulut klasoru / baska bilgisayar) kaydeder.
+   * Govde diske akitilir (bellekte tutulmaz); cozme ve dogrulama geri yuklemede.
+   */
+  async importBackup(actor: BackupActor, body: Readable) {
+    const id = newId();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = join(this.backupDir, `imported_${timestamp}_${id}.db.enc`);
+    const hash = createHash('sha256');
+    let size = 0;
+    const meter = new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        size += chunk.length;
+        if (size > MAX_IMPORT_BYTES) {
+          done(
+            new PayloadTooLargeException({
+              code: 'BACKUP_TOO_LARGE',
+              message: 'Yedek dosyasi cok buyuk (en fazla 1 GB).',
+            }),
+          );
+          return;
+        }
+        hash.update(chunk);
+        done(null, chunk);
+      },
+    });
+
+    try {
+      await pipeline(body, meter, createWriteStream(path));
+    } catch (err) {
+      rmSync(path, { force: true });
+      if (err instanceof HttpException) throw err;
+      throw new BadRequestException({
+        code: 'BACKUP_UPLOAD_FAILED',
+        message: 'Yedek dosyasi yuklenemedi.',
+      });
+    }
+    if (size <= BACKUP_HEADER_BYTES) {
+      rmSync(path, { force: true });
+      throw new BadRequestException({
+        code: 'BACKUP_INVALID',
+        message: 'Gecerli bir yedek dosyasi degil.',
+      });
+    }
+
+    const backup = await this.prisma.backup.create({
+      data: {
+        id,
+        branchId: actor.branchId,
+        path,
+        sizeBytes: size,
+        type: 'imported',
+        encrypted: true,
+        checksum: hash.digest('hex'),
+        createdBy: actor.userId ?? null,
+      },
+    });
+    await this.audit.record({
+      branchId: actor.branchId,
+      action: 'backup.import',
+      entityType: 'backup',
+      entityId: id,
+      ...(actor.userId ? { userId: actor.userId } : {}),
+      newValue: { sizeBytes: size },
+    });
+    return backup;
+  }
+
+  /**
    * Yedegi coz + butunluk dogrula + staging dosyasina yaz. Canli SQLite'i surec
    * calisirken yerinde takas etmek kilit/bozulma riski tasidigindan ATOMIK TAKAS
    * yapilmaz; denetci (Electron) yeniden baslatmada staging dosyasini devreye alir.
+   *
+   * Yedek bu kurulumun anahtariyla acilmazsa kurtarma anahtari istenir. Kurtarma
+   * anahtariyla acildiysa isarete `backupKey` yazilir: denetci bu anahtari yeni
+   * bilgisayarda da kullanir (sahibinin sakladigi anahtar gecerli kalir).
    */
-  async restoreBackup(user: AuthUser, id: string) {
+  async restoreBackup(actor: BackupActor, id: string, recoveryKey?: string) {
     const backup = await this.prisma.backup.findFirst({
-      where: { id, branchId: user.branchId, deletedAt: null },
+      where: { id, branchId: actor.branchId, deletedAt: null },
     });
     if (!backup) throw new NotFoundException('Yedek bulunamadı.');
     if (!existsSync(backup.path)) {
@@ -185,19 +268,28 @@ export class BackupService {
       });
     }
 
-    // Format: IV(12) + AuthTag(16) + sifreli veri
-    const iv = raw.subarray(0, 12);
-    const authTag = raw.subarray(12, 28);
-    const encrypted = raw.subarray(28);
-    const decipher = createDecipheriv(ALGORITHM, this.getEncryptionKey(), iv);
-    decipher.setAuthTag(authTag);
-    let decrypted: Buffer;
-    try {
-      decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-    } catch {
-      throw new BadRequestException({
-        code: 'BACKUP_DECRYPT_FAILED',
-        message: 'Yedek çözülemedi (şifre anahtarı veya dosya hatalı).',
+    const currentKey = process.env.BACKUP_ENCRYPTION_KEY?.trim();
+    let decrypted = currentKey ? decryptBackup(raw, currentKey) : null;
+    let adoptedKey: string | undefined;
+    if (!decrypted && recoveryKey) {
+      for (const candidate of recoveryKeyCandidates(recoveryKey)) {
+        decrypted = decryptBackup(raw, candidate);
+        if (decrypted) {
+          if (candidate !== currentKey) adoptedKey = candidate;
+          break;
+        }
+      }
+    }
+    if (!decrypted) {
+      if (recoveryKey) {
+        throw new BadRequestException({
+          code: 'BACKUP_DECRYPT_FAILED',
+          message: 'Kurtarma anahtarı bu yedeği açmıyor (anahtar veya dosya hatalı).',
+        });
+      }
+      throw new ConflictException({
+        code: 'BACKUP_KEY_REQUIRED',
+        message: 'Bu yedek başka bir kurulumun anahtarıyla şifrelenmiş. Kurtarma anahtarını girin.',
       });
     }
 
@@ -217,17 +309,73 @@ export class BackupService {
     }
     writeFileSync(
       join(this.dataDir, 'restore-pending.json'),
-      JSON.stringify({ stagePath, createdAt: new Date().toISOString() }),
+      JSON.stringify({
+        stagePath,
+        createdAt: new Date().toISOString(),
+        ...(adoptedKey ? { backupKey: adoptedKey } : {}),
+      }),
     );
     this.logger.warn(
       `Backup ${backup.id} restore icin hazirlandi: ${stagePath}. Atomik takas yeniden baslatmada yapilir.`,
     );
+    await this.audit.record({
+      branchId: actor.branchId,
+      action: 'backup.restore',
+      entityType: 'backup',
+      entityId: backup.id,
+      ...(actor.userId ? { userId: actor.userId } : {}),
+      newValue: { keyAdopted: Boolean(adoptedKey) },
+    });
     return {
       staged: true,
       stagePath,
+      keyAdopted: Boolean(adoptedKey),
       message:
         'Yedek çözüldü ve doğrulandı. Uygulanması için yeniden başlatma gerekir (atomik takas denetleyici tarafından yapılır).',
     };
+  }
+
+  /** Kurtarma anahtari (cagiran yonetici sifresini dogrulamis olmali). Gosterim denetlenir. */
+  async revealRecoveryKey(user: AuthUser): Promise<{ recoveryKey: string }> {
+    const recoveryKey = formatRecoveryKey(this.currentRawKey());
+    await this.audit.record({
+      branchId: user.branchId,
+      action: 'backup.recovery_key.view',
+      entityType: 'backup',
+      entityId: 'recovery-key',
+      userId: user.userId,
+      ...(user.deviceId ? { deviceId: user.deviceId } : {}),
+    });
+    return { recoveryKey };
+  }
+
+  /**
+   * Ilk kurulum (henuz kullanici yok) ekranindan geri yukleme: yalniz ana
+   * bilgisayardan ve yalniz kullanici yokken. Varsayilan subeyi dondurur.
+   */
+  async setupBranchOrThrow(ip: string | undefined): Promise<string> {
+    if (!isLocalRequest(ip)) {
+      throw new ForbiddenException({
+        code: 'SETUP_LOCAL_ONLY',
+        message: 'Ilk kurulum yalnizca ana bilgisayardan yapilabilir.',
+      });
+    }
+    if ((await this.prisma.user.count({ where: { deletedAt: null } })) > 0) {
+      throw new ForbiddenException({
+        code: 'SETUP_ALREADY_DONE',
+        message: 'Kurulum zaten yapilmis; geri yukleme icin Ayarlar > Yedekler bolumunu kullanin.',
+      });
+    }
+    const branch = await this.prisma.branch.findFirst({
+      where: { isDefault: true, deletedAt: null },
+    });
+    if (!branch) {
+      throw new ForbiddenException({
+        code: 'SETUP_NOT_READY',
+        message: 'Kurulum verisi eksik (varsayilan sube bulunamadi).',
+      });
+    }
+    return branch.id;
   }
 
   async listBackups(user: AuthUser) {

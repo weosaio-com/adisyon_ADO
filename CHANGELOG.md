@@ -6,6 +6,30 @@ Sürümleme: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Yazıcı kurulumu (2026-09-27):** Ayarlar > Yazıcılar — Windows'ta yüklü yazıcıyı seçip ekleme
+  (`GET /printers/discover`), test sayfası, mutfak/müşteri fişi ve kategoriye özel (bar)
+  yönlendirme, son 24 saatin fişleri (önizleme), yazdırılamayan fişi tekrar dene/kaldır
+  (`/printers/jobs`). Yazdırılamayan fiş varsa masa ekranında uyarı.
+- **Fiş içeriği:** mutfak fişinde salon/masa, gönderen garson, saat ve kalem notu; müşteri fişi ve
+  hesapta işletme başlığı (Ayarlar > İşletme Bilgileri, `GET/PUT /settings/business`), ödeme
+  satırları, para üstü ve "Bilgi fişidir — mali değeri yoktur."; Türk para biçimi.
+- **Sipariş ekranı:** başlıkta salon ve masa, ürün notu (`PUT /orders/:id/items/:itemId/note`),
+  yanlış açılan boş adisyonu kapatma (`POST /orders/:id/discard`, garson da), yönetici için
+  gerekçeli "İptal et".
+- **Kasadan iade ve fiş tekrarı:** Kasa > Son işlemler'de "İade" (adisyon yeniden açılır) ve ödenmiş
+  adisyonun müşteri fişini yeniden basma (`POST /printers/order/:id/receipt`).
+- **Testler:** Playwright `pos-flow.spec.ts` (garson → mutfak → kasa, parçalı ödeme ve para üstü,
+  boş masa, iade, HTTP LAN'dan ödeme); backend smoke 68 → 86 kontrol.
+- **Yedek kurtarma anahtarı (2026-09-27):** yedek başka bilgisayarda açılabilir. Ayarlar > Yedekler'de
+  yönetici şifresiyle kurtarma anahtarı gösterilir/indirilir; "Dosyadan Geri Yükle" ile bulut
+  klasöründeki `.db.enc` içe aktarılır; ilk kurulum ekranında "Yedekten geri yükleyin" seçeneği.
+  Kurtarma anahtarıyla açılan yedekte anahtar yeni bilgisayara taşınır. Yedek formatı değişmedi.
+- **Yerel HTTPS (2026-09-27):** tabletler için ek port (paketli sürümde 43128), kurulum başına yerel
+  CA (`GET /devices/ca.crt`), IP değişince CA değişmeden yenilenen sunucu sertifikası. LAN IP'de
+  güvenli bağlam → Service Worker → bağlantı yokken de uygulama açılır. PWA ikonları eklendi.
+- **Testler:** backend smoke 55 → 68 kontrol (yedek içe aktarma/kurtarma, TLS); Playwright
+  `https-lan.spec.ts`; yeni self-check'ler (event-bus, license.paths, backup.keys, tls.certs,
+  print-text, masaüstü restore/log); CI tüm paketlerin self-check'lerini koşar.
 - **İstemci-offline sync API (2026-07-20):** `POST /sync/mutations` (toplu idempotent replay,
   ProcessedClientOp defteri, akıllı birleştirme), `GET /sync/snapshot` (tek istekte aktif durum),
   `GET /sync/health` (token'sız heartbeat), `/offline-reviews` Owner onay kuyruğu
@@ -31,3 +55,28 @@ Sürümleme: [SemVer](https://semver.org/).
 - **`prisma/schema.prisma`:** `DATABASE_DESIGN.md`'deki tüm tablolar (40+ model) — her modelde SyncBase
   alanları, finansal append-only tablolar, hash-zincirli `audit_logs`, outbox/sync/conflict tabloları.
   `prisma validate` ✅, client üretildi ✅, shared typecheck ✅.
+
+### Fixed
+- **Para üstü (2026-09-27):** ödeme ekranında "alınan nakit" alanı yoktu; müşterinin verdiği 200 TL
+  yazılınca 145 TL'lik adisyona 200 TL satış kaydediliyordu (gün sonu kasa açığı, şişik ciro).
+  Artık adisyon tutarı satış, fazlası para üstü olarak kaydedilir ve ekranda gösterilir.
+- **Çift tahsilat:** ödeme işlem anahtarı her tıklamada yenileniyordu; cevap kaybolup tekrar
+  basılınca parçalı ödeme iki kez yazılabiliyordu. Aynı giriş için aynı anahtar kullanılır.
+- **HTTP'de ödeme:** tabletten `http://<ip>` ile ödeme hiç alınamıyordu (`crypto.randomUUID`
+  güvenli bağlam ister). İade sonrası ödeme ekranı "kalan"ı yanlış (0) gösteriyordu.
+- **Kasa uygulamasında PIN/şifre sıfırlama:** `window.prompt` Electron'da hata fırlatır; Kullanıcılar
+  ekranındaki sıfırlama düğmeleri çalışmıyordu (uygulama içi pencere eklendi).
+- **Arayüz:** tablette ürün adları kesiliyordu; pencereler alt menünün altında kalıyordu; silinen
+  yazıcının rotaları yeni rota eklemeyi engelliyordu; olmayan yazıcıya test sayfası 500 veriyordu.
+- **CI (develop kırmızıydı):** Prettier hataları; e2e job'unda eksik `BACKUP_ENCRYPTION_KEY`;
+  e2e-web'de kasa oturumu açılmadığı için offline masa açılamıyordu (test kurulumu düzeltildi).
+- **Olay kuyruğu:** kalıcı olay dinleyicilerinin hataları yutuluyordu (`suppressErrors`), worker
+  yeniden denemiyordu → mutfak/müşteri fişi ve stok düşümü sessizce kaybolabiliyordu.
+- **Windows yazdırma:** yazıcı adı `Out-Printer`'a hiç ulaşmıyordu (`-Command` sonrası argümanlar
+  `$args`'a gitmez); boşluklu adlar bozuluyordu. Türkçe karakterler için metin base64 ile gider.
+- **Loglar:** `Authorization`/cookie başlıkları loglanıyordu; `backend-error.log` sınırsız
+  büyüyordu (sağlık ping'leri loglanmıyor, dosya 10 MB'ta dönüyor).
+- **Lisans guard:** izin listesi `/api/v1` öneki yüzünden hiç eşleşmiyordu; zorunluluk açıldığında
+  süresi dolan kurulum yeni anahtar giremez, yedek alamazdı.
+- **Doküman:** kılavuzda yanlış tablet portu (3001 → paketli 43127/43128) ve çevrimdışı açılış
+  iddiası; `.env.example` lisans değişken adı; `CODEOWNERS` yolları; `ARCHITECTURE.md` durumu.

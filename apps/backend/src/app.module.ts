@@ -33,14 +33,28 @@ import { UsersModule } from './users/users.module';
 import { SyncModule } from './sync/sync.module';
 import { LicenseModule } from './license/license.module';
 import { LicenseGuard } from './license/license.guard';
+import { API_PREFIX } from './common/http/api-prefix';
 
 const isProd = process.env.NODE_ENV === 'production';
+
+// Tabletler bu uclara ~8 sn'de bir ping atar; her biri loglanirsa dosya sismez.
+const UNLOGGED_PATHS = [`/${API_PREFIX}/health`, `/${API_PREFIX}/sync/health`];
+const isUnloggedRequest = (req: IncomingMessage): boolean => {
+  const path = (req.url ?? '').split('?')[0];
+  return UNLOGGED_PATHS.includes(path ?? '');
+};
 
 @Module({
   imports: [
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.LOG_LEVEL ?? 'info',
+        // Paketli surumde log duz metin dosyaya yazilir: token/cookie asla loga girmez.
+        redact: {
+          paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+          censor: '[redacted]',
+        },
+        autoLogging: { ignore: isUnloggedRequest },
         genReqId: (_req: IncomingMessage, res: ServerResponse): string => {
           const id = newId();
           res.setHeader('x-request-id', id);

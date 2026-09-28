@@ -47,17 +47,17 @@
 # Maya — satis hatti + istemci-offline
 /apps/backend/src/tables/           @UcanInek691
 /apps/backend/src/orders/           @UcanInek691
-/apps/backend/src/payment/          @UcanInek691
-/apps/backend/src/offline/          @UcanInek691
+/apps/backend/src/payments/         @UcanInek691
 /apps/backend/src/sync/             @UcanInek691
 
-# Cagri — platform/destek (kalan Tier A altyapi dahil)
-/apps/backend/src/worker/           @mhmmtds0
-/apps/backend/src/scheduler/        @mhmmtds0
-/apps/backend/src/health/           @mhmmtds0
-/apps/backend/src/feature-flags/    @mhmmtds0
+# Cagri — platform/destek (kalan Tier A altyapi dahil). Sonraki (daha ozel) satir
+# kazanir: common/ altindaki bu klasorler yukaridaki cekirdek kuralini ezer.
+/apps/backend/src/common/worker/    @mhmmtds0
+/apps/backend/src/common/schedule/  @mhmmtds0
+/apps/backend/src/common/health/    @mhmmtds0
+/apps/backend/src/common/feature-flags/ @mhmmtds0
 /apps/backend/src/printing/         @mhmmtds0
-/apps/backend/src/reporting/        @mhmmtds0
+/apps/backend/src/reports/          @mhmmtds0
 /apps/backend/src/cash/             @mhmmtds0
 /apps/backend/src/finance/          @mhmmtds0
 /apps/backend/src/customer/         @mhmmtds0
@@ -69,4 +69,4 @@
 # ============================================================================
 /packages/shared/                   @UcanInek691 @mhmmtds0
 /.github/                           @UcanInek691 @mhmmtds0
-/prisma/migrations/                 @UcanInek691 @mhmmtds0
+/prisma/schema/migrations/          @UcanInek691 @mhmmtds0

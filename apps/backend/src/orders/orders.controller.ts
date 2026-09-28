@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { Permission } from '@ado/shared';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
@@ -8,6 +8,7 @@ import {
   openOrderSchema,
   addItemSchema,
   updateItemSchema,
+  itemNoteSchema,
   voidItemSchema,
   cancelOrderSchema,
   orderQuerySchema,
@@ -18,6 +19,7 @@ import {
   type OpenOrderDto,
   type AddItemDto,
   type UpdateItemDto,
+  type ItemNoteDto,
   type VoidItemDto,
   type CancelOrderDto,
   type OrderQueryDto,
@@ -99,6 +101,25 @@ export class OrdersController {
     @Body(new ZodValidationPipe(voidItemSchema)) dto: VoidItemDto,
   ) {
     return this.orders.voidItem(user, id, itemId, dto);
+  }
+
+  // Garson notu ("az pişmiş"): mutfak fisinde kalemin altina basilir.
+  @Put(':id/items/:itemId/note')
+  @RequirePermissions(Permission.OrderItemEdit)
+  setItemNote(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body(new ZodValidationPipe(itemNoteSchema)) dto: ItemNoteDto,
+  ) {
+    return this.orders.setItemNote(user, id, itemId, dto);
+  }
+
+  // Yanlislikla acilan bos adisyonu kapatir (garson da); dolu adisyon icin /cancel (Owner).
+  @Post(':id/discard')
+  @RequirePermissions(Permission.OrderCreate)
+  discard(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.orders.discardEmptyOrder(user, id);
   }
 
   @Post(':id/cancel')

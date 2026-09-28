@@ -1,18 +1,68 @@
 import './bootstrap-env';
 import { existsSync } from 'node:fs';
+import { createServer as createHttpsServer } from 'node:https';
 import { join } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import * as express from 'express';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env.schema';
+import { API_PREFIX } from './common/http/api-prefix';
+import { resolveDataDir } from './common/util/data-dir';
+import { currentTlsHosts, ensureTlsMaterial } from './tls/tls.certs';
+
+// Ucuz kontrol (birkac kucuk dosya): acilista ag henuz yoksa LAN IP'si en gec 1 dk'da eklenir.
+const TLS_RECHECK_MS = 60_000;
+
+/**
+ * Tabletler icin yerel HTTPS (ayni Express ornegi, ayri port). Tarayici LAN IP'sini
+ * ancak HTTPS ile "guvenli baglam" sayar; Service Worker (cevrimdisi acilis) buna bagli.
+ * Hata POS'u dusurmez: loglanir, yalniz HTTP ile devam edilir.
+ */
+async function startHttps(
+  handler: express.Express,
+  port: number,
+  host: string,
+  logger: Logger,
+): Promise<void> {
+  const dir = join(resolveDataDir(), 'tls');
+  try {
+    const tls = await ensureTlsMaterial(dir, currentTlsHosts());
+    const server = createHttpsServer({ key: tls.key, cert: tls.cert }, handler);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, host, () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+    logger.log(`HTTPS hazir (garson tabletleri): https://${host}:${port}`);
+    // Ag adresi degisirse (DHCP) sertifika yenilenir; CA ayni kalir -> tabletlerde yeniden kurulum yok.
+    setInterval(() => {
+      const hosts = currentTlsHosts();
+      // Ag gecici olarak koptuysa (IP yok) LAN IP'sini sertifikadan dusurme: geri gelince hata olmasin.
+      if (hosts.ips.length === 0) return;
+      ensureTlsMaterial(dir, hosts)
+        .then((next) => {
+          if (!next.renewed) return;
+          server.setSecureContext({ key: next.key, cert: next.cert });
+          logger.log('HTTPS sertifikasi yenilendi (ag adresi degisti).');
+        })
+        .catch((err: unknown) => logger.error(`HTTPS sertifikasi yenilenemedi: ${String(err)}`));
+    }, TLS_RECHECK_MS).unref();
+  } catch (err) {
+    logger.error(
+      `HTTPS baslatilamadi, yalniz HTTP ile devam: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv(); // fail-fast: gecersiz .env ile baslamaz.
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix(API_PREFIX);
   const corsOrigins = env.CORS_ORIGINS.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -47,7 +97,11 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.listen(env.API_PORT, env.API_HOST);
-  app.get(Logger).log(`Backend hazir: http://${env.API_HOST}:${env.API_PORT}/api/v1`);
+  const logger = app.get(Logger);
+  logger.log(`Backend hazir: http://${env.API_HOST}:${env.API_PORT}/api/v1`);
+  if (env.API_TLS_PORT) {
+    await startHttps(app.getHttpAdapter().getInstance(), env.API_TLS_PORT, env.API_HOST, logger);
+  }
 }
 
 void bootstrap();

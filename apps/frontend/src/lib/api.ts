@@ -88,17 +88,22 @@ async function refresh(): Promise<boolean> {
 
 export async function api<T = unknown>(
   path: string,
-  opts: { method?: string; body?: unknown } = {},
+  opts: { method?: string; body?: unknown; file?: Blob } = {},
   retry = true,
 ): Promise<T> {
   const access = getAccess();
   const res = await fetch(BASE + path, {
-    method: opts.method ?? 'GET',
+    method: opts.method ?? (opts.file ? 'POST' : 'GET'),
     headers: {
-      'Content-Type': 'application/json',
+      // file: ham dosya govdesi (orn. yedek yukleme); aksi halde JSON.
+      'Content-Type': opts.file ? 'application/octet-stream' : 'application/json',
       ...(access ? { Authorization: `Bearer ${access}` } : {}),
     },
-    ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+    ...(opts.file
+      ? { body: opts.file }
+      : opts.body !== undefined
+        ? { body: JSON.stringify(opts.body) }
+        : {}),
   });
   if (res.status === 401 && retry && (await refresh())) {
     return api<T>(path, opts, false);
@@ -107,6 +112,11 @@ export async function api<T = unknown>(
     clearSession();
   }
   return parse<T>(res);
+}
+
+/** Dosya yukle (application/octet-stream); JWT + 401'de refresh api() ile ayni. */
+export function apiUpload<T = unknown>(path: string, file: Blob): Promise<T> {
+  return api<T>(path, { method: 'POST', file });
 }
 
 interface LoginResult {

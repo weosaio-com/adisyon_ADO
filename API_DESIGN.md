@@ -103,6 +103,8 @@
 - `POST /orders/:id/discount` `{ type, value, reason }` — adisyon indirimi
   - Waiter > %10 ise `403 DISCOUNT_APPROVAL_REQUIRED` → Owner onayı gerekir
 - `POST /orders/:id/cancel` `{ reason }` — adisyon iptal (Owner) (**audit**)
+- `PUT /orders/:id/items/:itemId/note` `{ note }` — gönderilmemiş kaleme tek garson notu; boş → silinir, gönderilmiş kalem `409` (**audit**) _(uygulandı 2026-09)_
+- `POST /orders/:id/discard` — aktif kalemi ve ödemesi olmayan adisyonu kapatır, masayı boşaltır (`order.create`; dolu adisyon `409 ORDER_NOT_EMPTY`) _(uygulandı 2026-09)_
 
 ### 5.4 Ödeme (append-only)
 - `POST /orders/:id/payments` `{ method, amount, received? }` **(Idempotency-Key zorunlu)**
@@ -131,6 +133,8 @@
 - `GET/POST/PATCH /printers` · `POST /printers/:id/test` — test çıktısı
 - `POST /printers/:id/discover` — cihaz keşfi (sürücü eklentisi)
 - `GET /print-jobs?status=failed` · `POST /print-jobs/:id/retry` — kuyruk yönetimi
+  - _Uygulanan (2026-09):_ `GET /printers/discover` (Windows `Get-Printer`), `GET /printers/jobs?status=` (son 24 saat, önizleme metniyle), `POST /printers/jobs/:id/retry`, `DELETE /printers/jobs/:id` (yalnız başarısız fiş), `POST /printers/test-print/:id`
+- `POST /printers/order/:id/receipt` — ödenmiş adisyonun müşteri fişini yeniden basar (`payment.take`; ödenmemiş `409`) _(uygulandı 2026-09)_
 - (Fiş üretimi çoğunlukla sipariş/ödeme akışında **otomatik** print job oluşturur.)
 
 ### 5.9 Raporlar (eklenti tabanlı)
@@ -141,6 +145,7 @@
 
 ### 5.10 Sistem
 - `GET/PATCH /settings` — application_settings (Owner)
+- `GET/PUT /settings/business` `{ name, address?, phone? }` — fiş başlığı (şube bilgisi) (`settings.manage`, **audit**) _(uygulandı 2026-09)_
 - `GET /audit-logs?action=&entityType=&from=&to=&cursor=` — filtre/arama (Owner) · `?format=csv` export
 - `GET /license` · `POST /license/activate` `{ key }` · `POST /license/deactivate`
 - `GET /updates/check` · `POST /updates/apply` · `POST /updates/rollback`

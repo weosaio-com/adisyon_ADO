@@ -49,8 +49,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit tests (saf hesap self-check)
-        run: pnpm --filter @ado/backend run test:unit
+      # Tum paketlerin self-check'leri (backend + frontend + desktop).
+      - name: Unit tests (self-check)
+        run: pnpm test
 
   # Kritik para yollari e2e: sunucu + seed + smoke (merge/split/iade/idempotency).
   e2e:
@@ -58,8 +59,11 @@ jobs:
     env:
       HUSKY: '0'
       DATABASE_URL: 'file:./e2e.db'
+      API_TLS_PORT: '3002' # yerel HTTPS (tablet) kontrolleri smoke'ta
       JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
       JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
+      # Yedek modulu anahtar ister; yoksa smoke'taki yedek kontrolleri 400 ile duser.
+      BACKUP_ENCRYPTION_KEY: 'ci-test-backup-key-0123456789abcdef'
       SEED_OWNER_USERNAME: 'owner'
       SEED_OWNER_PASSWORD: 'owner1234'
       API_PORT: '3001'
@@ -104,8 +108,13 @@ jobs:
     env:
       HUSKY: '0'
       DATABASE_URL: 'file:./e2e-web.db'
+      # LAN IP + HTTPS: tablet senaryosu (guvenli baglam + service worker) https-lan.spec.ts
+      API_TLS_PORT: '3002'
+      E2E_HTTPS_PORT: '3002'
       JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
       JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
+      # Yedek modulu anahtar ister; yoksa smoke'taki yedek kontrolleri 400 ile duser.
+      BACKUP_ENCRYPTION_KEY: 'ci-test-backup-key-0123456789abcdef'
       SEED_OWNER_USERNAME: 'owner'
       SEED_OWNER_PASSWORD: 'owner1234'
       API_PORT: '3001'

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, login, loginPin, ApiError } from '../lib/api';
+import { api, apiUpload, login, loginPin, ApiError } from '../lib/api';
 import { pullSnapshot } from '../offline/engine';
 
 type Mode = 'owner' | 'waiter';
@@ -59,6 +59,12 @@ export default function LoginScreen() {
         <p className="mt-2 text-sm leading-6 text-stone-500">
           Vardiyanıza devam etmek için hesabınızla giriş yapın.
         </p>
+        {!window.isSecureContext && (
+          <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-5 font-medium text-amber-800">
+            Bu bağlantı güvenli değil (HTTP): bağlantı koptuğunda uygulama yeniden açılamaz.
+            Çevrimdışı çalışma için yöneticinizden HTTPS adresini isteyin (Ayarlar › Sunucu Adresi).
+          </p>
+        )}
 
         <div className="mt-8 grid grid-cols-2 rounded-2xl bg-stone-100 p-1.5">
           {(['owner', 'waiter'] as Mode[]).map((item) => (
@@ -292,6 +298,7 @@ function SetupForm({ onDone }: { onDone: () => void }) {
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [restoreMode, setRestoreMode] = useState(false);
   const valid =
     username.trim().length >= 3 &&
     password.length >= 6 &&
@@ -318,6 +325,8 @@ function SetupForm({ onDone }: { onDone: () => void }) {
       setBusy(false);
     }
   }
+
+  if (restoreMode) return <SetupRestoreForm onBack={() => setRestoreMode(false)} />;
 
   return (
     <AuthShell>
@@ -376,6 +385,111 @@ function SetupForm({ onDone }: { onDone: () => void }) {
           className="mt-6 min-h-13 rounded-2xl bg-ink-900 font-black text-white disabled:opacity-40"
         >
           {busy ? 'Kuruluyor…' : 'Kurulumu tamamla'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setRestoreMode(true)}
+          className="mt-4 w-full text-sm font-semibold text-stone-500 hover:text-ink-900"
+        >
+          Başka bilgisayardan mı taşıyorsunuz? Yedekten geri yükleyin
+        </button>
+      </form>
+    </AuthShell>
+  );
+}
+
+// Yeni bilgisayar: eski kurulumun yedeği (bulut klasöründeki .db.enc) + kurtarma
+// anahtarı ile tüm veriler (kullanıcılar dahil) geri gelir. Yalnız ana bilgisayarda.
+function SetupRestoreForm({ onBack }: { onBack: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [recoveryKey, setRecoveryKey] = useState('');
+  const [imported, setImported] = useState<{ file: File; id: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!file) return;
+    setBusy(true);
+    setError('');
+    try {
+      // Aynı dosya tekrar denenirse (ör. yanlış anahtar) yeniden yüklenmez.
+      let id = imported?.file === file ? imported.id : '';
+      if (!id) {
+        id = (await apiUpload<{ id: string }>('/backups/setup/import', file)).id;
+        setImported({ file, id });
+      }
+      await api(`/backups/setup/${id}/restore`, {
+        method: 'POST',
+        body: recoveryKey.trim() ? { recoveryKey: recoveryKey.trim() } : {},
+      });
+      setDone(true);
+    } catch (value) {
+      setError(value instanceof ApiError ? value.message : 'Geri yükleme başarısız.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AuthShell>
+      <form onSubmit={submit} className="flex h-full flex-col justify-center p-6 sm:p-10 lg:p-12">
+        <p className="text-[11px] font-bold tracking-[0.18em] text-brand-700 uppercase">
+          Yedekten geri yükle
+        </p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight text-ink-900">
+          Verilerinizi taşıyın
+        </h1>
+        {done ? (
+          <>
+            <p className="mt-4 rounded-xl bg-brand-50 p-3 text-sm leading-6 text-brand-700">
+              Yedek hazırlandı. Uygulamayı kapatıp yeniden açın; ardından eski kullanıcı adı ve
+              şifrenizle giriş yapın.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-2 text-sm leading-6 text-stone-500">
+              Eski bilgisayardaki yedek dosyasını (bulut klasöründeki <code>.db.enc</code>) ve
+              Ayarlar &gt; Yedekler bölümünden sakladığınız kurtarma anahtarını seçin.
+            </p>
+            <div className="mt-7 space-y-4">
+              <Field label="Yedek dosyası">
+                <input
+                  type="file"
+                  accept=".enc"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-stone-600"
+                />
+              </Field>
+              <Field label="Kurtarma anahtarı">
+                <input
+                  value={recoveryKey}
+                  onChange={(e) => setRecoveryKey(e.target.value)}
+                  placeholder="xxxx-xxxx-xxxx-…"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  className={`${INPUT} font-mono`}
+                />
+              </Field>
+            </div>
+            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+            <button
+              type="submit"
+              disabled={busy || !file}
+              className="mt-6 min-h-13 rounded-2xl bg-ink-900 font-black text-white disabled:opacity-40"
+            >
+              {busy ? 'Geri yükleniyor…' : 'Yedeği geri yükle'}
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-4 w-full text-sm font-semibold text-stone-500 hover:text-ink-900"
+        >
+          ← Yeni kuruluma dön
         </button>
       </form>
     </AuthShell>

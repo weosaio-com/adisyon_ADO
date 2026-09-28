@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Adisyon POS uygulama simgesi (kaynak). PNG'ler bundan uretilir: icon-192/512(-maskable).png -->
+  <rect width="512" height="512" rx="112" fill="#10b981"/>
+  <path d="M160 112H352A16 16 0 0 1 368 128V400L336 380L304 400L272 380L240 400L208 380L176 400L144 380V128A16 16 0 0 1 160 112Z" fill="#ffffff"/>
+  <rect x="184" y="168" width="144" height="20" rx="10" fill="#15201d"/>
+  <rect x="184" y="220" width="144" height="20" rx="10" fill="#15201d"/>
+  <rect x="184" y="272" width="88" height="20" rx="10" fill="#15201d"/>
+</svg>

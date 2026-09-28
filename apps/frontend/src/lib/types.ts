@@ -15,6 +15,12 @@ export interface Table {
   isActive?: boolean;
 }
 
+export interface OrderItemNote {
+  id: string;
+  note: string;
+  type: string; // waiter | kitchen
+}
+
 export interface OrderItem {
   id: string;
   productId: string;
@@ -22,6 +28,7 @@ export interface OrderItem {
   quantity: number; // milis
   lineTotal: number; // kurus
   status: string; // pending | sent | ...
+  notes?: OrderItemNote[];
 }
 
 export interface Discount {
@@ -36,6 +43,7 @@ export interface Order {
   id: string;
   orderNo: string;
   tableId: string | null;
+  table?: { id: string; name: string; hall?: { name: string } } | null;
   type?: string; // dine_in | takeaway | delivery
   status: string; // open | held | completed | cancelled
   grandTotal: number; // kurus
@@ -47,7 +55,8 @@ export interface Order {
 
 export interface Payment {
   id: string;
-  amount: number; // kurus (+/-; iade negatif)
+  amount: number; // kurus; iade satiri da pozitif, yonu direction belirtir
+  direction?: string; // charge | refund
   method: string; // cash | card | transfer | qr | debt
 }
 
@@ -154,7 +163,7 @@ export interface AppSetting {
 
 export interface Backup {
   id: string;
-  type: string; // auto | manual | pre_update
+  type: string; // auto | manual | pre_update | imported
   sizeBytes: number;
   createdAt: string;
 }
@@ -170,4 +179,42 @@ export interface OfflineReview {
   reason: string; // table_closed | table_moved | product_inactive | other
   status: string; // open | resolved | rejected
   createdAt: string;
+}
+
+export interface Printer {
+  id: string;
+  name: string;
+  driverId: string; // windows-spooler | escpos-mock
+  connection: string;
+  address: string | null; // Windows'taki yazici adi
+  paperWidth: number; // 58 | 80
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+export interface PrintRoute {
+  id: string;
+  documentType: string; // kitchen | bar | customer
+  printerId: string;
+  categoryId: string | null; // null -> genel rota
+}
+
+export interface DiscoveredPrinter {
+  driverId: string;
+  name: string;
+  connection: string;
+  address: string;
+}
+
+export interface PrintJobRow {
+  id: string;
+  documentType: string;
+  status: string; // queued | printing | done | failed
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  printedAt: string | null;
+  printerName: string;
+  summary: string;
+  text: string; // yaziciya giden metin (onizleme)
 }

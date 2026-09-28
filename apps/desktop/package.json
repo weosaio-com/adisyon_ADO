@@ -6,14 +6,17 @@
   "main": "main.mjs",
   "scripts": {
     "dev": "electron .",
-    "dist": "node build-bundle.mjs && electron-builder --win"
+    "dist": "node build-bundle.mjs && electron-builder --win",
+    "test": "node selfcheck.mjs"
   },
   "build": {
     "appId": "com.ado.pos",
     "npmRebuild": false,
     "productName": "Adisyon POS",
     "files": [
-      "main.mjs"
+      "main.mjs",
+      "rotating-log.mjs",
+      "restore.mjs"
     ],
     "extraResources": [
       {
