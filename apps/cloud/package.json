@@ -1,0 +1,27 @@
+{
+  "name": "@ado/cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QR menu bulutu (Cloudflare Worker + D1 + R2): musteri menusu, panel, POS yayini",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ado/shared": "workspace:*",
+    "hono": "^4.13.9",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "~1.2.8",
+    "@cloudflare/workers-types": "^5.20260926.1",
+    "typescript": "^5.7.0",
+    "vitest": "~4.1.11",
+    "wrangler": "~4.141.0"
+  }
+}

@@ -52,3 +52,8 @@ restore-pending.json
 # dosyalari yok say: apps/backend/src/tls kaynak kodu da "tls" adini tasiyor.
 *.pem
 **/tls/server.json
+
+# Cloudflare (wrangler yerel durum + gizli degerler)
+.wrangler/
+.dev.vars*
+!.dev.vars.example
