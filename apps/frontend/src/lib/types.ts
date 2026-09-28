@@ -229,3 +229,20 @@ export interface PrintJobRow {
   summary: string;
   text: string; // yaziciya giden metin (onizleme)
 }
+
+// QR menu bulut baglantisi (GET /cloud/status).
+export interface CloudStatus {
+  enabled: boolean; // lisans QR menuyu kapatmadiysa true
+  connected: boolean;
+  url: string | null;
+  branchName: string | null;
+  tenantName: string | null;
+  planLabel: string | null;
+  menuEnabled: boolean | null; // paket QR menuyu iceriyor mu
+  pairedAt: string | null;
+  lastPublishedAt: string | null;
+  lastMenuVersion: number | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  publishing: boolean;
+}

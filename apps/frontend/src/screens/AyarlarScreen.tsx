@@ -5,6 +5,7 @@ import { api, apiUpload, ApiError, hasPerm } from '../lib/api';
 import { downloadText } from '../lib/export';
 import type { AppSetting, Backup } from '../lib/types';
 import BusinessInfoCard from './BusinessInfoCard';
+import CloudMenuCard from './CloudMenuCard';
 import PrinterSettingsCard from './PrinterSettingsCard';
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString('tr-TR');
@@ -46,6 +47,15 @@ export default function AyarlarScreen() {
         <ServerInfoCard />
         {hasPerm('settings.manage') && (
           <BusinessInfoCard
+            onError={fail}
+            onInfo={(m) => {
+              setError('');
+              setInfo(m);
+            }}
+          />
+        )}
+        {hasPerm('settings.manage') && (
+          <CloudMenuCard
             onError={fail}
             onInfo={(m) => {
               setError('');
