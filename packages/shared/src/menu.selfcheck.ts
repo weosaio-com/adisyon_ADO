@@ -1,6 +1,9 @@
-// QR menu semasinin runnable self-check'i.
-// Calistir: node --experimental-strip-types src/menu.selfcheck.ts
+// QR menu semasinin runnable self-check'i. Derlenmis ciktiyi (dist) sinar: tuketicilerin
+// yukledigi giris noktalari da dogrulanir.
+// Calistir: pnpm --filter @ado/shared test  (once tsup, sonra bu dosya)
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import * as core from '../dist/menu-core.js';
 import {
   ALLERGEN_LABELS,
   ALLERGENS,
@@ -17,7 +20,26 @@ import {
   sniffImageType,
   tableCodeSchema,
   type MenuSnapshotInput,
-} from './menu.ts';
+} from '../dist/menu.js';
+
+// menu-core bagimliliksizdir: tarayici uygulamasina zod ya da ulid tasimaz.
+const distDir = new URL('../dist/', import.meta.url);
+function importsOf(file: string, seen = new Set<string>()): Set<string> {
+  if (seen.has(file)) return seen;
+  seen.add(file);
+  const text = readFileSync(new URL(file, distDir), 'utf8');
+  for (const [, spec] of text.matchAll(/from\s*["']([^"']+)["']/g)) {
+    if (spec?.startsWith('./')) importsOf(spec.slice(2), seen);
+    else if (spec) seen.add(spec);
+  }
+  return seen;
+}
+const coreImports = [...importsOf('menu-core.js')];
+assert.ok(
+  !coreImports.some((spec) => spec === 'zod' || spec === 'ulid'),
+  `menu-core bagimliliksiz olmali: ${coreImports.join(', ')}`,
+);
+assert.equal(core.menuText, menuText, 'menu ve menu-core ayni yardimciyi paylasir');
 
 const IMG = menuImageKey('A'.repeat(64), 'webp');
 assert.equal(IMG, 'a'.repeat(64) + '.webp', 'ozet kucuk harfe cevrilir');
