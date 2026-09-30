@@ -84,6 +84,15 @@
 - `GET/POST/PATCH/DELETE /products` · `/categories` · `/brands` · `/units` · `/taxes` · `/discounts`
 - `DELETE` = **soft delete** (`deleted_at`). Fiyat değişikliği **audit**'e yazılır.
 - `GET /products?favorite=true` (hızlı satış ekranı), `?barcode=<x>` (okuyucu).
+- **QR menü alanları** _(uygulandı 2026-09)_: ürüne `description`, `allergens` (AB'nin 14 alerjeni),
+  `dietTags`, `translations.en.{name,description}`, `isAvailable`, `imagePath`; kategoriye
+  `translations`. Şema ve sınırlar ortak: `@ado/shared/menu` (`QR_MENU_DESIGN.md`).
+- `PATCH /products/:id/availability` `{ isAvailable }` — "tükendi": ürün listede kalır, siparişe
+  eklenemez (`409 PRODUCT_UNAVAILABLE`) (`product.manage`)
+- `POST /products/:id/image` (gövde `application/octet-stream`; JPEG/PNG/WebP, en fazla 1 MB, dosya
+  imzası kontrol edilir; ad = içerik özeti `sha256.uzantı`) · `DELETE /products/:id/image`
+  (`product.manage`). Arayüz yüklemeden önce 800 px WebP'ye küçültür.
+- `GET /catalog/images/:file` — oturumsuz; dosya adı içerik özeti olduğundan süresiz önbellek.
 
 ### 5.2 Masa & Salon
 - `GET/POST/PATCH/DELETE /halls` · `/tables`
@@ -91,6 +100,8 @@
 - `POST /tables/:id/move` `{ toTableId }` — adisyonu taşı
 - `POST /tables/:id/split` `{ items:[...] }` — adisyon böl
 - `PATCH /tables/:id/status` `{ status }` — boş/temizleniyor vb.
+- Masada `publicCode`: QR menüdeki masa kodu (16 karakter base32, tahmin edilemez) _(uygulandı 2026-09)_
+- `POST /tables/:id/public-code` — kodu yeniler; masadaki eski QR çalışmaz (`table.manage`, **audit**)
 
 ### 5.3 Sipariş / Adisyon
 - `POST /orders` `{ tableId? }` → adisyon aç (order_no üretir)
@@ -173,6 +184,21 @@
 
 **Reconnect akışı:** `/sync/health` OK → `POST /sync/mutations` (push) → `GET /sync/snapshot` (pull) → WS'e dön.
 
+### 5.12 QR Menü Bulut Bağlantısı (POS → bulut) _(uygulandı 2026-09)_
+
+> Bulutun kendi API'si (müşteri menüsü, panel, satıcı) ve kararlar: `QR_MENU_DESIGN.md`.
+
+- `GET /cloud/status` — `enabled` (lisans `qr.menu`), bağlı mı, bulut adresi, işletme/şube/paket,
+  son yayın zamanı ve menü sürümü, yayın sürüyor mu, son hata.
+- `POST /cloud/pair` `{ url, code }` — panelden alınan eşleştirme koduyla bağlanır ve menüyü hemen
+  yayınlar. Adres `https://` olmalı (yalnız `localhost`/`127.0.0.1` için `http://`).
+- `POST /cloud/publish` — şimdi yayınla.
+- `DELETE /cloud/connection` — bağlantıyı kaldırır (bulutta da `unpair`; menü panelden yönetilir).
+- Hepsi `settings.manage`. **Otomatik yayın:** `product.*`, `category.*`, `table.*` olayları şube
+  başına 5 sn birleştirilen `cloud.publish` işini kuyruğa alır; iş eksik görselleri yükler, menüyü ve
+  masa listesini gönderir. Hata olursa üstel geri çekilmeyle (5 sn → en fazla 5 dk) yeniden dener;
+  bulut bağlantıyı artık tanımıyorsa (401) denemez, kartta yeniden eşleştirme ister.
+
 ---
 
 ## 6. WebSocket (Canlı Durum)
@@ -234,6 +260,11 @@
 | `IDEMPOTENCY_REPLAY` | aynı anahtar — ilk sonuç döndü (bilgi) |
 | `LICENSE_INVALID` / `LICENSE_RESTRICTED` | lisans geçersiz / kısıtlı mod |
 | `PRINTER_UNAVAILABLE` | yazıcı yok/kapalı → iş kuyruğa alındı |
+| `PRODUCT_UNAVAILABLE` | tükenen ürün siparişe eklenemez (409) |
+| `IMAGE_TOO_LARGE` / `IMAGE_TYPE_INVALID` | ürün görseli 1 MB üstü (413) / JPEG-PNG-WebP değil |
+| `CLOUD_NOT_CONNECTED` / `CLOUD_URL_INVALID` | QR menü bulutuna bağlı değil / geçersiz bulut adresi |
+| `CLOUD_ERROR` | buluta ulaşılamadı ya da beklenmeyen yanıt (502); bulutun kendi hata kodu varsa o iletilir |
+| `QR_MENU_NOT_LICENSED` | lisans QR menüyü kapatmış |
 
 ---
 

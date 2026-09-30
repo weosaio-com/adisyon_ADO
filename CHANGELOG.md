@@ -6,6 +6,26 @@ Sürümleme: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **QR menü — dijital menü (QR-1, 2026-09-30):** müşteri masadaki QR kodu okutur, menüyü telefonda
+  görür: fotoğraf, açıklama, 14 alerjen, diyet etiketleri, TR/EN, "tükendi". Bkz.
+  `QR_MENU_DESIGN.md`.
+  - **POS:** üründe **QR menü bilgileri** (açıklama, alerjen, diyet, İngilizce ad, görsel — tarayıcıda
+    800 px WebP), **Tükendi** düğmesi (`PATCH /products/:id/availability`; tükenen ürün siparişe
+    eklenemez, `PRODUCT_UNAVAILABLE`), masaya tahmin edilemez QR kodu (`POST /tables/:id/public-code`).
+    **Ayarlar › QR Menü (Bulut)** kartı: eşleştirme kodu ile bağlanma, ürün/kategori/masa değişince
+    5 sn birleştirilmiş otomatik yayın ve yeniden deneme (`/cloud/*`); yazdırılabilir masa QR
+    kartları (`/qr-codes`). Veritabanı: `20260928120000_qr_menu_fields` (yalnız sütun ekler).
+  - **Bulut `apps/cloud`** (Cloudflare Worker + D1 + R2): müşteri menüsü (`/api/m/:code`, ETag),
+    içerik adresli görseller, POS yayın API'si, işletme paneli API'si (çerez oturumu, CSRF, sürüm
+    kontrollü kayıt), satıcı API'si (`ADMIN_TOKEN`), paketler (`menu`/`order`/`pay`/`full`). Kurulum
+    ve yayına alma: `apps/cloud/README.md`.
+  - **`apps/qr-web`:** müşteri menüsü `/m/:code` (arama, kategori sekmeleri, diyet ve "içermesin"
+    alerjen filtresi, ürün ayrıntısı, durum ekranları) ve işletme paneli `/panel` (POS'suz işletmede
+    menü yönetimi, masalar ve QR yazdırma, işletme bilgileri, POS eşleştirme, parola değiştirme).
+  - **Ortak şema:** `@ado/shared/menu` (zod) ve tarayıcı için bağımlılıksız `@ado/shared/menu-core`.
+  - **Testler:** bulut vitest 30 (gerçek workerd), backend smoke 86 → 112 kontrol, Playwright
+    `menu-screen.spec.ts` ve `qr-menu.spec.ts` (POS + yerel bulut; POS'lu ve POS'suz akış); CI'da
+    yeni `e2e-cloud` işi.
 - **Yazıcı kurulumu (2026-09-27):** Ayarlar > Yazıcılar — Windows'ta yüklü yazıcıyı seçip ekleme
   (`GET /printers/discover`), test sayfası, mutfak/müşteri fişi ve kategoriye özel (bar)
   yönlendirme, son 24 saatin fişleri (önizleme), yazdırılamayan fişi tekrar dene/kaldır
