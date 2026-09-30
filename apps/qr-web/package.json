@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types src/lib/menu-view.selfcheck.ts"
+    "test": "node --experimental-strip-types src/lib/menu-view.selfcheck.ts && node --experimental-strip-types src/lib/money.selfcheck.ts && node --experimental-strip-types src/lib/tables.selfcheck.ts"
   },
   "dependencies": {
     "@ado/shared": "workspace:*",
