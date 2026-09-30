@@ -14,7 +14,8 @@ Adisyon POS, kafe/restoran/büfe/pastane için **çevrimdışı çalışabilen**
 - **Garson tabletleri / telefonlar:** Aynı WiFi ağına bağlı cihazlar, tarayıcıdan ana makineye
   bağlanır ve sipariş alır. Ayrı program kurmaya gerek yoktur.
 - **İnternet gerekmez:** Sistem tamamen yerel ağda (kendi WiFi'niz) çalışır. İnternet yalnızca
-  isteğe bağlı **bulut yedeği** için kullanılır.
+  isteğe bağlı **bulut yedeği** ve **QR menü** (5.5) için kullanılır; internet kesilse de satış
+  sürer, QR menü bağlantı gelince güncellenir.
 
 ```
         WiFi / Yerel Ağ (internet gerekmez)
@@ -105,6 +106,29 @@ Yönetici olarak giriş yaptıktan sonra üst menüden şu ayarları yapın:
   fiş kırmızı işaretlenir; yazıcıyı/kağıdı kontrol edip **Tekrar dene** deyin. Böyle bir fiş varsa
   Masalar ekranının üstünde de uyarı çıkar.
 
+### 5.5 QR Menü (isteğe bağlı) — **Ayarlar › QR Menü (Bulut)**
+Müşteri masadaki QR kodu telefonunun kamerasıyla okutur ve menünüzü görür: fotoğraf, açıklama,
+alerjenler, İngilizce ve "tükendi" bilgisi. Uygulama kurmaya gerek yoktur. Bu özellik paketinize
+bağlıdır; hesabınız açılınca size **bulut adresi** (örn. `menu.ornek.com`) ile **işletme paneli
+e-postası ve parolası** verilir.
+
+1. **Ürün bilgileri:** **Ürünler**'de ürünü açıp **QR menü bilgileri**'ne dokunun: fotoğraf (telefon
+   fotoğrafı olabilir, program küçültür), açıklama, alerjenler, diyet (vegan, glutensiz…) ve
+   isterseniz İngilizce ad. İngilizce ad girilen ürün olduğunda menüde TR/EN seçeneği çıkar.
+2. **Eşleştirme kodu:** Bilgisayar ya da telefondan `https://<bulut adresi>/panel` adresini açıp
+   giriş yapın; **Adisyon programı › Eşleştirme kodu al**. Kod 15 dakika geçerlidir.
+3. **Bağlanma:** Programda **Ayarlar › QR Menü (Bulut)** kartına bulut adresini ve kodu yazıp
+   **Bağlan** deyin. Menü birkaç saniyede yayınlanır; kartta **Son yayın** zamanı görünür.
+4. **QR kartları:** Karttaki **Masa QR kodları** (ya da **Düzen › QR kodları**) › **Yazdır**. Kartları
+   kesip masalara yapıştırın. Bir masanın kodunu **Kodu yenile** ile değiştirirseniz o masanın eski
+   kartı çalışmaz; yenisini basın.
+
+- Ürün, fiyat, kategori ya da masa değiştiğinde menü **kendiliğinden** güncellenir (birkaç saniye).
+  Beklemek istemezseniz kartta **Şimdi yayınla** deyin.
+- Adisyon programı kullanmayan işletme menüsünü paneldeki **Menü**, **İşletme** ve **Masalar**
+  sekmelerinden hazırlayıp **Kaydet ve yayınla** der; QR kartlarını da Masalar sekmesinden basar.
+- Menüde alerjen bilgisi için "personele danışın" notu her zaman yer alır.
+
 Bu ayarlar bittiğinde sistem satışa hazırdır.
 
 ---
@@ -169,7 +193,9 @@ Giriş ekranı bu durumda sarı bir uyarı gösterir.
 6. **Yanlış ödeme / fiş tekrarı:** **Kasa › Son işlemler** listesinde ilgili ödemenin yanındaki
    **İade** ile ödeme geri alınır ve adisyon yeniden açılır; doğru ödemeyi alın. Düzeltilmiş (ya da
    kaybolan) müşteri fişini aynı listedeki **Fiş** düğmesiyle yeniden basabilirsiniz.
-7. **Gün Sonu:** Gün bitince **Kasa → Gün Sonu (Z raporu)** ile kasa sayımı ve özet alınır.
+7. **Ürün bitti:** **Ürünler** ekranında ürünün yanındaki **Tükendi** düğmesine basın. Ürün QR
+   menüde soluk "Tükendi" rozetiyle görünür ve siparişe eklenemez. Ürün gelince **Satışa aç**.
+8. **Gün Sonu:** Gün bitince **Kasa → Gün Sonu (Z raporu)** ile kasa sayımı ve özet alınır.
 
 > **Not:** Programın bastığı fişler **bilgi fişidir, mali değeri yoktur**. Yasal mali fiş (ÖKC
 > fişi / e-Arşiv) ayrıca düzenlenmelidir; mali müşavirinize danışın.
@@ -251,6 +277,15 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 - **Son fişler**'de fiş "Yazdırılamadı" görünüyorsa altındaki hata mesajına bakın: yazıcı kapalı,
   kağıt bitmiş ya da Windows'taki adı değişmiş olabilir. Sorunu giderip **Tekrar dene** deyin.
 
+**QR menü güncellenmiyor / kartta "Son yayın başarısız" yazıyor.**
+- Ana makinenin internet bağlantısını kontrol edin. Program birkaç dakika içinde kendisi yeniden
+  dener; bağlantı gelince kartta **Şimdi yayınla** diyebilirsiniz. Satış bundan etkilenmez.
+- Kartta "Paketiniz QR menüyü içermiyor" yazıyorsa hesabınızın paketi için bize ulaşın.
+
+**Müşteri QR'ı okutunca "Bu QR kod geçersiz" görüyor.**
+- O masanın kodu yenilenmiş ya da masa silinmiş. **Masa QR kodları** sayfasından o masanın kartını
+  yeniden basın.
+
 **Tabletlerin adresi değişiyor.**
 - Ana makineye router'dan **sabit IP** verin; adres bir daha değişmez.
 
@@ -283,6 +318,8 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
    (örnek: `https://192.168.1.20:43128`), **ana ekrana ekle** (6. bölüm).
 4. Garsonlar **PIN** ile girsin, sipariş almaya başlasın.
 5. Ödeme/gün sonu **kasadan**; **bulut yedeğini** aç ve **kurtarma anahtarını** sakla.
+6. (İsteğe bağlı) **QR menü:** ürünlere fotoğraf ve alerjen ekle, panelden eşleştirme koduyla bağlan,
+   masa QR kartlarını bas (5.5).
 
 > Kurulumdan sonra yazıcı, tablet ve ödeme akışının gerçek cihazlarla çalıştığını adım adım
 > doğrulamak için: [`TEST_KONTROL_LISTESI.md`](TEST_KONTROL_LISTESI.md).
