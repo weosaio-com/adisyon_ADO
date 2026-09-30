@@ -10,7 +10,8 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // 4xx (gecersiz kod, oturum yok) tekrar denenmez; ag/sunucu hatasi bir kez daha denenir.
-      retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 1,
+      retry: (count, error) =>
+        !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 1,
     },
   },
 });
