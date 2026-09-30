@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types src/offline/sync-core.selfcheck.ts && node --experimental-strip-types src/lib/api.selfcheck.ts && node --experimental-strip-types src/lib/format.selfcheck.ts && node --experimental-strip-types src/lib/export.selfcheck.ts && node --experimental-strip-types src/screens/report-audit.selfcheck.ts && node --experimental-strip-types src/screens/KasaScreen.selfcheck.ts && node --experimental-strip-types src/screens/payment-input.selfcheck.ts && node --experimental-strip-types src/lib/image.selfcheck.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:cloud": "playwright test qr-menu"
   },
   "dependencies": {
     "@ado/shared": "workspace:*",
