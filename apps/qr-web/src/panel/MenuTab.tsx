@@ -9,10 +9,12 @@ import {
   type DietTag,
 } from '@ado/shared/menu-core';
 import type { MenuCategory, MenuProduct, MenuSnapshot } from '@ado/shared/menu';
-import { api } from '../lib/api';
+import { ApiError } from '../lib/api';
 import { prepareMenuImage } from '../lib/image';
+import { imageKeyForBlob } from '../lib/image-key';
 import { formatPrice } from '../lib/menu-view';
 import { parsePrice, priceInput } from '../lib/money';
+import { useImageSrc } from './images';
 import { useMenuDraft } from './menu-draft';
 import {
   BUTTON_PRIMARY,
@@ -53,6 +55,7 @@ export function MenuTab() {
   const [editProduct, setEditProduct] = useState<MenuProduct | 'new' | null>(null);
 
   if (menu.loading) return <p className="text-sm text-stone-500">Yükleniyor…</p>;
+  if (menu.unavailable) return <MenuUnavailable />;
   const categories = sorted(menu.draft.categories);
   const active = categories.find((c) => c.id === categoryId) ?? categories[0] ?? null;
   const products = active
@@ -155,15 +158,7 @@ export function MenuTab() {
           <ul className="divide-y divide-stone-100">
             {products.map((product, index) => (
               <li key={product.id} className="flex items-center gap-3 py-2">
-                {product.imageKey ? (
-                  <img
-                    src={`/img/${product.imageKey}`}
-                    alt=""
-                    className="h-12 w-12 shrink-0 rounded-lg bg-stone-100 object-cover"
-                  />
-                ) : (
-                  <div className="h-12 w-12 shrink-0 rounded-lg bg-stone-100" />
-                )}
+                <Thumbnail imageKey={product.imageKey} />
                 <button
                   onClick={() => setEditProduct(product)}
                   className="min-w-0 flex-1 text-left"
@@ -262,6 +257,31 @@ export function MenuTab() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function Thumbnail({ imageKey }: { imageKey: string | null }) {
+  const src = useImageSrc(imageKey);
+  return src ? (
+    <img src={src} alt="" className="h-12 w-12 shrink-0 rounded-lg bg-stone-100 object-cover" />
+  ) : (
+    <div className="h-12 w-12 shrink-0 rounded-lg bg-stone-100" />
+  );
+}
+
+// Menu ne buluttan ne cihazdan okunabildi: duzenleme acilmaz (bos menuyle ezme riski olmasin).
+export function MenuUnavailable() {
+  const menu = useMenuDraft();
+  return (
+    <div className="max-w-lg space-y-3">
+      <Notice tone="warn">
+        {menu.loadError ||
+          'Bu cihazda kayıtlı menü yok. Menüyü ilk kez açmak için internet gerekir; sonrasında internetsiz de düzenleyebilirsiniz.'}
+      </Notice>
+      <button onClick={menu.reload} className={BUTTON_SECONDARY}>
+        Tekrar dene
+      </button>
     </div>
   );
 }
@@ -375,13 +395,19 @@ function ProductDialog({
   const parsedPrice = parsePrice(price);
   const valid = name.trim() !== '' && parsedPrice !== null && parsedPrice <= MENU_LIMITS.price;
 
+  const imageSrc = useImageSrc(imageKey);
+
+  // Fotograf tarayicida kucultulur, anahtari burada hesaplanir; internet yoksa cihazda bekler.
   const upload = async (file: File | undefined) => {
     if (!file) return;
     setUploading(true);
     setError('');
     try {
       const blob = await prepareMenuImage(file);
-      const { key } = await api<{ key: string }>(menu.imageUploadPath, { body: blob });
+      const key = await imageKeyForBlob(blob);
+      if (!key)
+        throw new ApiError(400, 'IMAGE_TYPE_INVALID', 'Görsel JPEG, PNG ya da WebP olmalı.');
+      await menu.addImage(key, blob);
       setImageKey(key);
     } catch (err) {
       setError(errorText(err));
@@ -420,9 +446,9 @@ function ProductDialog({
         </div>
         <div className="flex items-center gap-3">
           <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-stone-100">
-            {imageKey && (
+            {imageSrc && (
               <img
-                src={`/img/${imageKey}`}
+                src={imageSrc}
                 alt=""
                 className="h-full w-full object-cover"
                 data-testid="product-image"

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useOnline } from '../lib/connectivity';
 import { BUTTON_PRIMARY, Card, errorText, Field, INPUT, Notice } from './ui';
 
 const MIN_PASSWORD = 10;
@@ -10,6 +11,7 @@ export function AccountTab() {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [repeat, setRepeat] = useState('');
+  const online = useOnline();
   const change = useMutation({
     mutationFn: () =>
       api('/api/panel/password', { json: { currentPassword: current, newPassword: next } }),
@@ -24,7 +26,10 @@ export function AccountTab() {
   const ready = current !== '' && next.length >= MIN_PASSWORD && next === repeat;
 
   return (
-    <div className="max-w-md">
+    <div className="max-w-md space-y-4">
+      {!online && (
+        <Notice tone="warn">İnternet yok. Parola değiştirmek için internet gerekir.</Notice>
+      )}
       <Card>
         <h2 className="mb-3 font-black text-ink-900">Parola değiştir</h2>
         <form
@@ -74,7 +79,7 @@ export function AccountTab() {
           )}
           <button
             type="submit"
-            disabled={!ready || change.isPending}
+            disabled={!ready || change.isPending || !online}
             className={`${BUTTON_PRIMARY} w-full py-2.5`}
           >
             {change.isPending ? 'Değiştiriliyor…' : 'Parolayı değiştir'}

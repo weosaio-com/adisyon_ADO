@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useOnline } from '../lib/connectivity';
 import { useMenuDraft } from './menu-draft';
 import { meQuery, menuKey, tablesQuery } from './queries';
 import type { BranchSummary } from './types';
@@ -21,6 +22,7 @@ function remaining(expiresAt: string, now: number): string {
 // Adisyon programi (POS) baglantisi: eslestirme kodu, durum ve baglantiyi kaldirma.
 export function PosTab({ branch }: { branch: BranchSummary }) {
   const qc = useQueryClient();
+  const online = useOnline();
   const draft = useMenuDraft();
   const [pairing, setPairing] = useState<PairingCode | null>(null);
   const [paired, setPaired] = useState(false);
@@ -74,6 +76,11 @@ export function PosTab({ branch }: { branch: BranchSummary }) {
 
   return (
     <div className="max-w-2xl space-y-4">
+      {!online && (
+        <Notice tone="warn">
+          İnternet yok. Eşleştirme kodu almak ve bağlantıyı kaldırmak için internet gerekir.
+        </Notice>
+      )}
       {paired && (
         <Notice tone="info">
           Adisyon programı bağlandı. Menü ve masalar birkaç saniye içinde programdan yayınlanır.
@@ -111,7 +118,7 @@ export function PosTab({ branch }: { branch: BranchSummary }) {
                   unpair.mutate();
                 }
               }}
-              disabled={unpair.isPending}
+              disabled={unpair.isPending || !online}
               className="mt-4 rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-700 disabled:opacity-40"
             >
               Bağlantıyı kaldır
@@ -176,7 +183,7 @@ export function PosTab({ branch }: { branch: BranchSummary }) {
             )}
             <button
               onClick={() => create.mutate()}
-              disabled={create.isPending}
+              disabled={create.isPending || !online}
               className={`${branch.source === 'pos' ? BUTTON_SECONDARY : BUTTON_PRIMARY} mt-4`}
               data-testid="pairing-create"
             >

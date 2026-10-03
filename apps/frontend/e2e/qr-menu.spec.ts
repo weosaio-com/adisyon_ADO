@@ -168,6 +168,92 @@ test('POS’suz işletme: panelde menü ve masa, müşteri telefonda görür', a
   );
 });
 
+test('panel uygulama olarak yüklenir, internetsiz düzenlenir, internet gelince yayınlar', async ({
+  browser,
+}) => {
+  const owner = await newTenant('E2E Çevrimdışı Kafe');
+  const panel = await phone(browser);
+  const context = panel.context();
+  await panelLogin(panel, owner);
+
+  // Yalniz panel uygulama olarak yuklenir: manifest + /panel kapsamli service worker.
+  await expect(panel.locator('link[rel="manifest"]')).toHaveAttribute('href', '/panel.webmanifest');
+  const scope = await panel.evaluate(() => navigator.serviceWorker.ready.then((r) => r.scope));
+  expect(scope).toBe(`${CLOUD}/panel`);
+  await panel.waitForFunction(() => navigator.serviceWorker.controller !== null);
+
+  // Internet varken yayinlanan menu cihazda saklanir.
+  await panel.getByRole('button', { name: '+ Kategori' }).click();
+  await panel.getByLabel('Ad', { exact: true }).fill('Kahveler');
+  await panel.getByRole('button', { name: 'Tamam' }).click();
+  await panel.getByTestId('save-menu').click();
+  await expect(panel.getByText(/Yayında: sürüm 1/)).toBeVisible();
+
+  // Internet kesilir; uygulama yeniden acilir ve cihazdaki son menuyle calisir.
+  await context.setOffline(true);
+  await panel.reload();
+  await expect(panel.getByTestId('offline-banner')).toBeVisible();
+  await expect(panel.getByTestId('panel-categories')).toContainText('Kahveler');
+  await expect(panel.getByTestId('logout')).toBeDisabled();
+
+  // Internetsiz fotografli urun eklenir ve kaydedilir.
+  await panel.getByRole('button', { name: '+ Ürün' }).click();
+  await panel.getByTestId('product-name').fill('Filtre Kahve');
+  await panel.getByTestId('product-price').fill('85');
+  await panel.getByTestId('product-image-input').setInputFiles({
+    name: 'kahve.png',
+    mimeType: 'image/png',
+    buffer: await photo(panel, 1600, 'image/png'),
+  });
+  await expect(panel.getByTestId('product-image')).toBeVisible();
+  await panel.getByTestId('product-ok').click();
+  await expect(panel.getByTestId('save-status')).toContainText('İnternet yok');
+  await panel.getByTestId('save-menu').click();
+  await expect(panel.getByTestId('save-status')).toContainText('internet gelince');
+
+  // Uygulama kapanip acilsa da bekleyen kayit ve fotograf cihazda durur.
+  await panel.reload();
+  await expect(panel.getByTestId('panel-product-Filtre Kahve')).toBeVisible();
+  await expect(panel.getByTestId('save-status')).toContainText('internet gelince');
+
+  // Internet gelir: kayit kendiliginden yayinlanir.
+  await context.setOffline(false);
+  await expect(panel.getByTestId('save-status')).toBeHidden({ timeout: 30_000 });
+  await expect(panel.getByText(/Yayında: sürüm 2/)).toBeVisible();
+  await expect(panel.getByTestId('offline-banner')).toBeHidden();
+
+  // Musteri yeni urunu fotografiyla gorur; musteri sayfasi uygulama degildir.
+  await panel.getByRole('link', { name: 'Masalar' }).click();
+  await panel.getByTestId('table-add').click();
+  const href = await panel
+    .getByTestId('qr-card-Masa 1')
+    .getByRole('link', { name: 'Önizle' })
+    .getAttribute('href');
+  const customer = await phone(browser);
+  await customer.goto(`${CLOUD}${href}`);
+  await expect(customer.getByText('Filtre Kahve')).toBeVisible();
+  await expectImageLoaded(customer, '[data-testid^="menu-item-"] img');
+  await expect(customer.locator('link[rel="manifest"]')).toHaveCount(0);
+  expect(await customer.evaluate(() => navigator.serviceWorker.controller)).toBeNull();
+
+  // Cikis: oturum kapanir, cihazdaki panel verisi silinir.
+  await panel.getByTestId('logout').click();
+  await expect(panel.getByRole('button', { name: 'Giriş yap' })).toBeVisible();
+  const stored = await panel.evaluate(
+    () =>
+      new Promise<number>((resolve, reject) => {
+        const request = indexedDB.open('ado-panel');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const tx = request.result.transaction(['kv', 'drafts', 'images']);
+          const counts = ['kv', 'drafts', 'images'].map((name) => tx.objectStore(name).count());
+          tx.oncomplete = () => resolve(counts.reduce((sum, count) => sum + count.result, 0));
+        };
+      }),
+  );
+  expect(stored).toBe(0);
+});
+
 test.describe('POS’lu işletme', () => {
   const fx = {} as { token: string; product: Named; table: Named };
 

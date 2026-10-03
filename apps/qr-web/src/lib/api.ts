@@ -1,3 +1,5 @@
+import { reportReachable, reportUnreachable } from './connectivity';
+
 // Bulut API istemcisi: zarf { success, data } / { success: false, error }. Oturum cerezde (ayni koken).
 export class ApiError extends Error {
   status: number;
@@ -30,8 +32,10 @@ export async function api<T>(
       credentials: 'same-origin',
     });
   } catch {
+    reportUnreachable();
     throw new ApiError(0, 'NETWORK', 'Bağlantı kurulamadı.');
   }
+  reportReachable();
   const text = await res.text();
   let parsed: {
     success?: boolean;

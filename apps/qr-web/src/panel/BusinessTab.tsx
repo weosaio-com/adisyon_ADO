@@ -1,6 +1,7 @@
 import { MENU_LIMITS } from '@ado/shared/menu-core';
 import type { MenuSnapshot } from '@ado/shared/menu';
 import { useMenuDraft } from './menu-draft';
+import { MenuUnavailable } from './MenuTab';
 import { Card, Field, INPUT, Notice } from './ui';
 
 type BranchInfo = MenuSnapshot['branch'];
@@ -9,6 +10,7 @@ type BranchInfo = MenuSnapshot['branch'];
 export function BusinessTab() {
   const menu = useMenuDraft();
   if (menu.loading) return <p className="text-sm text-stone-500">Yükleniyor…</p>;
+  if (menu.unavailable) return <MenuUnavailable />;
   const branch = menu.draft.branch;
   const set = (change: Partial<BranchInfo>) =>
     menu.update((m) => ({ ...m, branch: { ...m.branch, ...change } }));

@@ -1,35 +1,64 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
+import { useOnline } from '../lib/connectivity';
 import { AccountTab } from './AccountTab';
 import { BusinessTab } from './BusinessTab';
+import { forgetAllPendingImages, loadPendingImages } from './images';
 import { InstallButton, useInstallPrompt } from './install';
 import { MenuDraftProvider, useMenuDraft } from './menu-draft';
 import { MenuTab } from './MenuTab';
+import { persistPanelQueries, restorePanelQueries } from './persist';
 import { PosTab } from './PosTab';
 import { setupPanelApp } from './pwa';
 import { meQuery } from './queries';
+import { clearAll, kvGet, kvSet, listDrafts } from './store';
+import { saveBarState } from './sync-core';
 import { TablesTab } from './TablesTab';
 import type { Me } from './types';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, errorText, Field, INPUT, Notice } from './ui';
 
+const LOADING = <p className="p-8 text-center text-sm text-stone-500">Yükleniyor…</p>;
+
 // Isletme paneli: POS'suz isletme menusunu buradan yonetir; POS'lu isletme durumu ve QR'lari gorur.
+// Telefona/bilgisayara uygulama olarak yuklenir; son veriler cihazda saklanir, internetsiz de acilir.
 export default function PanelApp() {
-  const me = useQuery(meQuery);
+  const qc = useQueryClient();
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
     document.title = 'İşletme paneli';
     setupPanelApp();
-  }, []);
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    // Cihazdaki son menu/masa verisi once yuklenir: internet yokken panel bununla acilir.
+    void Promise.all([restorePanelQueries(qc), loadPendingImages()]).finally(() => {
+      if (cancelled) return;
+      stop = persistPanelQueries(qc);
+      setRestored(true);
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [qc]);
+  return restored ? <PanelRoot /> : LOADING;
+}
+
+function PanelRoot() {
+  const me = useQuery(meQuery);
+  const online = useOnline();
   if (me.error instanceof ApiError && me.error.status === 401) return <Login />;
   // Arka plandaki yenileme hatasi (ag kesintisi) paneli ve kaydedilmemis taslagi silmesin.
   if (me.data) return <Shell me={me.data} />;
-  if (me.isPending) {
-    return <p className="p-8 text-center text-sm text-stone-500">Yükleniyor…</p>;
-  }
+  if (me.isPending && online) return LOADING;
   return (
-    <div className="p-8 text-center">
-      <Notice tone="error">{errorText(me.error)}</Notice>
+    <div className="mx-auto max-w-sm p-8 text-center">
+      <Notice tone={online ? 'error' : 'warn'}>
+        {online
+          ? errorText(me.error)
+          : 'İnternet yok. Paneli bu cihazda ilk kez açmak için internet gerekir; sonrasında internetsiz de açılır.'}
+      </Notice>
       <button onClick={() => void me.refetch()} className={`${BUTTON_PRIMARY} mt-4`}>
         Tekrar dene
       </button>
@@ -111,13 +140,47 @@ const TABS = [
 ];
 
 function Shell({ me }: { me: Me }) {
+  const qc = useQueryClient();
+  const online = useOnline();
   const [branchId, setBranchId] = useState(me.branches[0]?.id ?? '');
+  const [leaving, setLeaving] = useState(false);
   const branch = me.branches.find((item) => item.id === branchId) ?? me.branches[0];
-  const logout = useMutation({
-    mutationFn: () => api('/api/panel/logout', { method: 'POST' }),
-    // Sayfayi bastan yukle: bellekte menu/masa verisi kalmasin, giris ekrani gelsin.
-    onSettled: () => window.location.assign('/panel'),
-  });
+
+  // Cihazda baska bir hesabin verisi kaldiysa (oturumu dusmus, cikis yapilmamis) silinir.
+  useEffect(() => {
+    void (async () => {
+      const owner = await kvGet<string>('owner');
+      if (owner && owner !== me.user.email) {
+        await clearAll();
+        forgetAllPendingImages();
+        qc.removeQueries({
+          predicate: (query) => query.queryKey[0] === 'panel' && query.queryKey[1] !== 'me',
+        });
+      }
+      await kvSet('owner', me.user.email);
+    })();
+  }, [me.user.email, qc]);
+
+  // Cikis: oturum kapanir ve bu cihazdaki panel verisi silinir (internet gerekir: oturum cerezi
+  // yalniz bulutta kapatilabilir). Sayfa bastan yuklenir, bellekte veri kalmaz.
+  const logout = async () => {
+    const drafts = await listDrafts();
+    if (
+      drafts.length > 0 &&
+      !window.confirm('Bu cihazda yayınlanmamış değişiklikler var; çıkınca silinecek. Çıkılsın mı?')
+    ) {
+      return;
+    }
+    setLeaving(true);
+    try {
+      await api('/api/panel/logout', { method: 'POST' });
+    } catch {
+      // Oturum zaten dusmus olabilir; cihaz verisi yine silinir.
+    }
+    await clearAll();
+    if ('caches' in window) await caches.delete('panel-images').catch(() => false);
+    window.location.assign('/panel');
+  };
 
   return (
     <div className="min-h-screen pb-36">
@@ -150,8 +213,11 @@ function Shell({ me }: { me: Me }) {
             className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold"
           />
           <button
-            onClick={() => logout.mutate()}
-            className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold"
+            onClick={() => void logout()}
+            disabled={!online || leaving}
+            title={online ? undefined : 'Çıkış için internet gerekir'}
+            className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold disabled:opacity-40"
+            data-testid="logout"
           >
             Çıkış
           </button>
@@ -172,6 +238,14 @@ function Shell({ me }: { me: Me }) {
           ))}
         </nav>
       </header>
+
+      {!online && (
+        <div className="bg-amber-100 text-amber-950 print:hidden" data-testid="offline-banner">
+          <p className="mx-auto max-w-5xl px-4 py-2 text-sm font-semibold">
+            İnternet yok — değişiklikler bu cihazda saklanıyor.
+          </p>
+        </div>
+      )}
 
       {me.tenant.status === 'suspended' && (
         <div className="mx-auto max-w-5xl px-4 pt-4">
@@ -209,37 +283,95 @@ function Shell({ me }: { me: Me }) {
   );
 }
 
-// Menu ya da isletme bilgisi degisince altta kalir: kaydet ya da vazgec.
+// Menu ya da isletme bilgisi degisince altta kalir: kaydet ya da vazgec. Internet yokken kayit
+// cihazda bekler ve internet gelince kendiliginden yayinlanir.
 function SaveBar() {
   const draft = useMenuDraft();
-  if (!draft.dirty && !draft.error) return null;
+  const state = saveBarState({
+    dirty: draft.dirty,
+    online: draft.online,
+    busy: draft.saving,
+    publishPending: draft.publishPending,
+    conflict: draft.conflict,
+    error: draft.error !== '',
+  });
+  if (state.kind === 'hidden') return null;
+
+  const discard = (label: string) => (
+    <button
+      onClick={draft.discard}
+      disabled={draft.saving}
+      className={`${BUTTON_SECONDARY} flex-1 sm:flex-none`}
+    >
+      {label}
+    </button>
+  );
+  const save = (label: string) => (
+    <button
+      onClick={draft.save}
+      disabled={draft.saving}
+      className={`${BUTTON_PRIMARY} flex-1 sm:flex-none`}
+      data-testid="save-menu"
+    >
+      {label}
+    </button>
+  );
+
+  let message: ReactNode;
+  let actions: ReactNode = null;
+  switch (state.kind) {
+    case 'conflict':
+      message = <span className="text-red-700">{draft.error}</span>;
+      actions = discard('Güncel menüyü yükle');
+      break;
+    case 'publishing':
+      message = <span className="text-stone-600">Yayınlanıyor…</span>;
+      break;
+    case 'queued':
+      message = (
+        <span className="text-amber-900">
+          {state.online
+            ? 'Yayınlanıyor…'
+            : 'Kaydedildi; internet gelince kendiliğinden yayınlanacak.'}
+        </span>
+      );
+      actions = discard('Vazgeç');
+      break;
+    case 'error':
+      message = <span className="text-red-700">{draft.error}</span>;
+      actions = state.dirty ? (
+        <>
+          {discard('Vazgeç')}
+          {save('Tekrar dene')}
+        </>
+      ) : (
+        discard('Tamam')
+      );
+      break;
+    case 'dirty':
+      message = (
+        <span className="text-stone-600">
+          {state.online
+            ? 'Kaydedilmemiş değişiklikler var.'
+            : 'İnternet yok. Kaydederseniz bu cihazda saklanır, internet gelince yayınlanır.'}
+        </span>
+      );
+      actions = (
+        <>
+          {discard('Vazgeç')}
+          {save(state.online ? 'Kaydet ve yayınla' : 'Kaydet')}
+        </>
+      );
+      break;
+  }
+
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 backdrop-blur print:hidden">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <p className="w-full text-sm sm:w-auto sm:min-w-0 sm:flex-1" data-testid="save-status">
-          {draft.error ? (
-            <span className="text-red-700">{draft.error}</span>
-          ) : (
-            <span className="text-stone-600">Kaydedilmemiş değişiklikler var.</span>
-          )}
+          {message}
         </p>
-        <button
-          onClick={draft.discard}
-          disabled={draft.saving}
-          className={`${BUTTON_SECONDARY} flex-1 sm:flex-none`}
-        >
-          {draft.conflict ? 'Güncel menüyü yükle' : draft.dirty ? 'Vazgeç' : 'Tekrar dene'}
-        </button>
-        {!draft.conflict && draft.dirty && (
-          <button
-            onClick={draft.save}
-            disabled={draft.saving}
-            className={`${BUTTON_PRIMARY} flex-1 sm:flex-none`}
-            data-testid="save-menu"
-          >
-            {draft.saving ? 'Kaydediliyor…' : 'Kaydet ve yayınla'}
-          </button>
-        )}
+        {actions}
       </div>
     </div>
   );

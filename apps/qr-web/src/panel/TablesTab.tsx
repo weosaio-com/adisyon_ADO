@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
 import { MENU_LIMITS } from '@ado/shared/menu-core';
 import { api } from '../lib/api';
+import { useOnline } from '../lib/connectivity';
 import { nextTableName, tableMenuUrl } from '../lib/tables';
 import { meQuery, tablesQuery } from './queries';
 import type { BranchSummary, PanelTable } from './types';
@@ -26,6 +27,9 @@ export function TablesTab({ branch }: { branch: BranchSummary }) {
   const options = tablesQuery(branch.id);
   const tables = useQuery(options);
   const readOnly = branch.source === 'pos';
+  const online = useOnline();
+  // Masa ekleme/duzenleme bulutta kod uretir: internet ister. QR kartlari cihazdaki kodlarla basilir.
+  const editable = !readOnly && online;
   const [name, setName] = useState<string | null>(null);
   const [hall, setHall] = useState('');
   const [editing, setEditing] = useState<PanelTable | null>(null);
@@ -114,7 +118,23 @@ export function TablesTab({ branch }: { branch: BranchSummary }) {
         )}
       </div>
 
-      {!readOnly && (
+      {!online && !readOnly && (
+        <div className="print:hidden">
+          <Notice tone="warn">
+            İnternet yok. QR kartlarını yazdırabilirsiniz; masa eklemek, düzenlemek ve kod yenilemek
+            için internet gerekir.
+          </Notice>
+        </div>
+      )}
+      {!online && tables.data === undefined && (
+        <div className="print:hidden">
+          <Notice tone="warn">
+            Bu cihazda kayıtlı masa listesi yok; ilk açılış için internet gerekir.
+          </Notice>
+        </div>
+      )}
+
+      {editable && (
         <div className="print:hidden">
           <Card>
             <form
@@ -160,7 +180,7 @@ export function TablesTab({ branch }: { branch: BranchSummary }) {
           <Notice tone="error">{error}</Notice>
         </div>
       )}
-      {tables.isError && (
+      {tables.isError && online && (
         <div className="print:hidden">
           <Notice tone="error">{errorText(tables.error)}</Notice>
         </div>
@@ -203,7 +223,7 @@ export function TablesTab({ branch }: { branch: BranchSummary }) {
               >
                 Önizle
               </a>
-              {!readOnly && (
+              {editable && (
                 <>
                   <button onClick={() => setEditing(table)} className="font-semibold text-ink-800">
                     Düzenle

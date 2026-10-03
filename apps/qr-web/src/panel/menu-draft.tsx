@@ -1,31 +1,58 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MENU_SCHEMA_VERSION } from '@ado/shared/menu-core';
 import type { MenuSnapshot } from '@ado/shared/menu';
 import { api, ApiError } from '../lib/api';
-import { menuKey } from './queries';
+import { useOnline } from '../lib/connectivity';
+import { dropPendingImage, isPendingImage, keepPendingImage, prunePendingImages } from './images';
+import { meQuery, menuKey } from './queries';
+import { deleteDraft, getImage, loadDraft, saveDraft } from './store';
+import { classifyPublishError, referencedImageKeys, shouldAutoPublish } from './sync-core';
 import type { BranchMenu, BranchSummary } from './types';
 
 /**
- * Menu ve Isletme sekmeleri ayni taslagi duzenler; "Kaydet" tek istekle menuyu yayinlar
- * (surum kontrollu: baska sekmede degistiyse bulut 409 VERSION_CONFLICT dondurur).
+ * Menu ve Isletme sekmeleri ayni taslagi duzenler. Taslak cihazda saklanir (internet yokken de
+ * duzenlenir, uygulama kapansa da kaybolmaz). "Kaydet ve yayinla" internet varsa hemen, yoksa
+ * internet gelince kendiliginden yayinlar: once bekleyen fotograflar, sonra menu (surum kontrollu;
+ * arada baska yerden kaydedildiyse bulut 409 VERSION_CONFLICT dondurur, ezilmez).
  */
 interface MenuDraft {
   loading: boolean;
+  /** Menu ne buluttan ne cihazdan okunabildi (ilk acilis internetsiz ya da bulut hatasi). */
+  unavailable: boolean;
+  loadError: string;
   readOnly: boolean;
+  online: boolean;
   draft: MenuSnapshot;
   dirty: boolean;
   version: number | null;
   updatedAt: string | null;
   saving: boolean;
+  /** Yayin istendi, internet bekleniyor. */
+  publishPending: boolean;
   error: string;
   conflict: boolean;
-  /** Urun gorseli yukleme adresi (govde: kucultulmus gorsel). */
-  imageUploadPath: string;
   update: (change: (menu: MenuSnapshot) => MenuSnapshot) => void;
+  /** Kucultulmus fotografi cihazda saklar; internet varsa hemen yukler. */
+  addImage: (key: string, blob: Blob) => Promise<void>;
   save: () => void;
   discard: () => void;
+  reload: () => void;
 }
+
+const CONFLICT_TEXT =
+  'Menü başka bir yerden değiştirildi. Güncel menüyü yükleyip değişikliklerinizi yeniden yapın.';
+const IMAGES_TEXT =
+  'Bazı fotoğraflar yüklenemedi. İlgili ürünlerin fotoğrafını yeniden seçip tekrar kaydedin.';
 
 const Context = createContext<MenuDraft | null>(null);
 
@@ -62,6 +89,11 @@ function describeIssues(error: ApiError, menu: MenuSnapshot): string {
   return [error.message, ...lines].join(' — ');
 }
 
+interface Draft {
+  menu: MenuSnapshot;
+  baseVersion: number | null;
+}
+
 export function MenuDraftProvider({
   branch,
   children,
@@ -70,86 +102,187 @@ export function MenuDraftProvider({
   children: ReactNode;
 }) {
   const qc = useQueryClient();
-  const key = menuKey(branch.id);
-  const query = useQuery({
-    queryKey: key,
-    queryFn: () => api<BranchMenu>(`/api/panel/branches/${branch.id}/menu`),
-  });
+  const online = useOnline();
+  const key = useMemo(() => menuKey(branch.id), [branch.id]);
+  const menuPath = `/api/panel/branches/${branch.id}/menu`;
+  const imagePath = `/api/panel/branches/${branch.id}/images`;
+  const query = useQuery({ queryKey: key, queryFn: () => api<BranchMenu>(menuPath) });
   const server = useMemo(
     () => query.data?.menu ?? emptyMenu(branch.name),
     [query.data, branch.name],
   );
-  // Ilk duzenlemeye kadar taslak yoktur: sunucudaki menu gosterilir. Taslak, dayandigi surumu
-  // saklar; menu arka planda yenilense de kayit o surume gore yapilir (baska sekmenin
-  // degisikligi sessizce ezilmez, bulut 409 dondurur).
-  const [draft, setDraft] = useState<{ menu: MenuSnapshot; baseVersion: number | null } | null>(
-    null,
-  );
+
+  // Ilk duzenlemeye kadar taslak yoktur: buluttaki menu gosterilir. Taslak dayandigi surumu
+  // saklar; menu arka planda yenilense de kayit o surume gore yapilir.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [publishPending, setPublishPending] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
+
+  // Cihazdaki taslak geri yuklenir (uygulama kapanip acilsa da duzenleme kaybolmaz).
+  useEffect(() => {
+    let cancelled = false;
+    void loadDraft(branch.id).then((stored) => {
+      if (cancelled) return;
+      if (stored) {
+        setDraft({ menu: stored.menu, baseVersion: stored.baseVersion });
+        setPublishPending(stored.publishPending);
+      }
+      setRestored(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [branch.id]);
+
+  useEffect(() => {
+    if (!restored) return;
+    if (draft) {
+      void saveDraft({
+        branchId: branch.id,
+        menu: draft.menu,
+        baseVersion: draft.baseVersion,
+        publishPending,
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      void deleteDraft(branch.id);
+    }
+  }, [restored, draft, publishPending, branch.id]);
 
   const current = draft?.menu ?? server;
   const dirty = draft !== null && JSON.stringify(draft.menu) !== JSON.stringify(server);
   const readOnly = branch.source === 'pos' || query.data?.source === 'pos';
 
-  // Kaydedilmemis degisiklikle sayfadan cikarken tarayici uyarsin.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  // Yayin, beklerken de en guncel taslagi gonderir.
+  const latest = useRef({ draft, server });
+  latest.current = { draft, server };
+  const busy = useRef(false);
+  // Oturum dustugunde yeniden giris yapilana kadar kendiliginden denenmez (giriste yeniden kurulur).
+  const sessionLost = useRef(false);
 
-  const save = useMutation({
-    mutationFn: (input: { menu: MenuSnapshot; baseVersion: number | null }) =>
-      api<{ version: number; updatedAt: string }>(`/api/panel/branches/${branch.id}/menu`, {
+  const publish = useCallback(async () => {
+    if (busy.current) return;
+    const { draft: pending, server: published } = latest.current;
+    if (!pending || JSON.stringify(pending.menu) === JSON.stringify(published)) {
+      setDraft(null);
+      setPublishPending(false);
+      return;
+    }
+    busy.current = true;
+    setSaving(true);
+    setError('');
+    const input = { menu: pending.menu, baseVersion: pending.baseVersion };
+    try {
+      for (const imageKey of referencedImageKeys(input.menu)) {
+        if (!isPendingImage(imageKey)) continue;
+        const stored = await getImage(imageKey);
+        if (!stored) continue;
+        const uploaded = await api<{ key: string }>(imagePath, { body: stored.blob });
+        if (uploaded.key !== imageKey) {
+          throw new ApiError(400, 'IMAGE_KEY_MISMATCH', IMAGES_TEXT);
+        }
+        await dropPendingImage(imageKey);
+      }
+      const saved = await api<{ version: number; updatedAt: string }>(menuPath, {
         method: 'PUT',
         json: input,
-      }),
-    onSuccess: (saved, input) => {
-      setError('');
-      setConflict(false);
+      });
       qc.setQueryData<BranchMenu>(key, {
         source: 'panel',
         version: saved.version,
         updatedAt: saved.updatedAt,
         menu: input.menu,
       });
-      // Kayit surerken yapilan duzenleme taslakta kalir ve yeni surume dayanir.
+      // Yayin surerken yapilan duzenleme taslakta kalir ve yeni surume dayanir.
       setDraft((previous) =>
         previous === null || previous.menu === input.menu
           ? null
           : { ...previous, baseVersion: saved.version },
       );
+      setPublishPending(false);
+      setConflict(false);
+      void prunePendingImages();
       // Bulut metinleri kirpilmis haliyle saklar; guncel halini ve sube ozetini yeniden al.
       void qc.invalidateQueries({ queryKey: key });
-      void qc.invalidateQueries({ queryKey: ['panel', 'me'] });
-    },
-    onError: (err, input) => {
-      setConflict(err instanceof ApiError && err.code === 'VERSION_CONFLICT');
-      setError(
-        err instanceof ApiError && err.code === 'VERSION_CONFLICT'
-          ? 'Menü başka bir yerden değiştirildi. Güncel menüyü yükleyip değişikliklerinizi yeniden yapın.'
-          : err instanceof ApiError && err.code === 'VALIDATION_ERROR'
-            ? describeIssues(err, input.menu)
-            : err instanceof ApiError
-              ? err.message
-              : 'Kaydedilemedi.',
-      );
-    },
-  });
+      void qc.invalidateQueries({ queryKey: meQuery.queryKey });
+    } catch (err) {
+      const kind = classifyPublishError(err);
+      if (kind === 'offline') {
+        setPublishPending(true); // internet gelince kendiliginden tekrar
+      } else if (kind === 'session') {
+        // Oturum dustu: taslak cihazda kalir, yeniden giristen sonra yayinlanir.
+        sessionLost.current = true;
+        setPublishPending(true);
+        await saveDraft({
+          branchId: branch.id,
+          ...input,
+          publishPending: true,
+          updatedAt: new Date().toISOString(),
+        });
+        void qc.invalidateQueries({ queryKey: meQuery.queryKey });
+      } else {
+        setPublishPending(false);
+        setConflict(kind === 'conflict');
+        setError(
+          kind === 'conflict'
+            ? CONFLICT_TEXT
+            : kind === 'images'
+              ? IMAGES_TEXT
+              : kind === 'invalid' && err instanceof ApiError
+                ? describeIssues(err, input.menu)
+                : err instanceof ApiError
+                  ? err.message
+                  : 'Kaydedilemedi.',
+        );
+      }
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
+  }, [qc, key, menuPath, imagePath, branch.id]);
+
+  // Internet gelince bekleyen yayin kendiliginden gonderilir.
+  useEffect(() => {
+    if (sessionLost.current) return;
+    if (
+      shouldAutoPublish({
+        ready: restored,
+        hasDraft: draft !== null,
+        publishPending,
+        online,
+        busy: saving,
+        conflict,
+      })
+    ) {
+      void publish();
+    }
+  }, [restored, draft, publishPending, online, saving, conflict, publish]);
+
+  const unavailable =
+    restored &&
+    draft === null &&
+    query.data === undefined &&
+    (query.isError || query.fetchStatus === 'paused');
+  const loadError =
+    query.error instanceof ApiError && query.error.status !== 0 ? query.error.message : '';
 
   const value: MenuDraft = {
-    loading: query.isPending,
+    loading: !restored || (query.data === undefined && draft === null && !unavailable),
+    unavailable,
+    loadError,
     readOnly,
+    online,
     draft: current,
     dirty,
     version: query.data?.version ?? null,
     updatedAt: query.data?.updatedAt ?? null,
-    saving: save.isPending,
-    error: error || (query.error ? String(query.error.message) : ''),
+    saving,
+    publishPending,
+    error,
     conflict,
-    imageUploadPath: `/api/panel/branches/${branch.id}/images`,
     update: (change) => {
       if (readOnly) return;
       setDraft((previous) => ({
@@ -157,18 +290,34 @@ export function MenuDraftProvider({
         baseVersion: previous ? previous.baseVersion : (query.data?.version ?? null),
       }));
     },
-    save: () =>
-      save.mutate({
-        menu: current,
-        baseVersion: draft ? draft.baseVersion : (query.data?.version ?? null),
-      }),
-    // Degisiklikleri at ve sunucudaki guncel menuyu yukle (surum cakismasinda da).
+    addImage: async (imageKey, blob) => {
+      await keepPendingImage(imageKey, blob);
+      if (!online) return; // internet gelince yayinla birlikte yuklenir
+      try {
+        const uploaded = await api<{ key: string }>(imagePath, { body: blob });
+        if (uploaded.key !== imageKey) throw new ApiError(400, 'IMAGE_KEY_MISMATCH', IMAGES_TEXT);
+        await dropPendingImage(imageKey);
+      } catch (err) {
+        if (classifyPublishError(err) === 'offline') return;
+        await dropPendingImage(imageKey);
+        throw err;
+      }
+    },
+    save: () => {
+      setError('');
+      if (online) void publish();
+      else setPublishPending(true);
+    },
+    // Degisiklikleri at ve buluttaki guncel menuyu yukle (surum cakismasinda da).
     discard: () => {
       setError('');
       setConflict(false);
+      setPublishPending(false);
       setDraft(null);
+      void deleteDraft(branch.id).then(prunePendingImages);
       void query.refetch();
     },
+    reload: () => void query.refetch(),
   };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
