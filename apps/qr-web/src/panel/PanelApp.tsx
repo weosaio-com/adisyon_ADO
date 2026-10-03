@@ -4,9 +4,11 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
 import { AccountTab } from './AccountTab';
 import { BusinessTab } from './BusinessTab';
+import { InstallButton, useInstallPrompt } from './install';
 import { MenuDraftProvider, useMenuDraft } from './menu-draft';
 import { MenuTab } from './MenuTab';
 import { PosTab } from './PosTab';
+import { setupPanelApp } from './pwa';
 import { meQuery } from './queries';
 import { TablesTab } from './TablesTab';
 import type { Me } from './types';
@@ -17,6 +19,7 @@ export default function PanelApp() {
   const me = useQuery(meQuery);
   useEffect(() => {
     document.title = 'İşletme paneli';
+    setupPanelApp();
   }, []);
   if (me.error instanceof ApiError && me.error.status === 401) return <Login />;
   // Arka plandaki yenileme hatasi (ag kesintisi) paneli ve kaydedilmemis taslagi silmesin.
@@ -81,7 +84,20 @@ function Login() {
         >
           Giriş yap
         </button>
+        <InstallHint />
       </form>
+    </div>
+  );
+}
+
+// Ilk giristen once de gorunsun: panel telefona ve bilgisayara uygulama olarak yuklenebilir.
+function InstallHint() {
+  const { available } = useInstallPrompt();
+  if (!available) return null;
+  return (
+    <div className="border-t border-stone-100 pt-3 text-center text-xs text-stone-500">
+      <p className="mb-2">Paneli telefonunuza ya da bilgisayarınıza uygulama olarak yükleyin.</p>
+      <InstallButton className={`${BUTTON_SECONDARY} w-full`} />
     </div>
   );
 }
@@ -129,6 +145,10 @@ function Shell({ me }: { me: Me }) {
               ))}
             </select>
           )}
+          <InstallButton
+            label="Yükle"
+            className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold"
+          />
           <button
             onClick={() => logout.mutate()}
             className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold"

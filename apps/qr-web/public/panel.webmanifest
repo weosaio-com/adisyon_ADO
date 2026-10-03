@@ -1,0 +1,23 @@
+{
+  "name": "İşletme Paneli — QR Menü",
+  "short_name": "İşletme Paneli",
+  "description": "QR menünüzü, masalarınızı ve adisyon programı bağlantınızı yönetin.",
+  "id": "/panel/",
+  "start_url": "/panel/",
+  "scope": "/panel",
+  "display": "standalone",
+  "lang": "tr",
+  "dir": "ltr",
+  "background_color": "#f5f5f2",
+  "theme_color": "#15201d",
+  "icons": [
+    { "src": "/icons/panel-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/panel-512.png", "sizes": "512x512", "type": "image/png" },
+    {
+      "src": "/icons/panel-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

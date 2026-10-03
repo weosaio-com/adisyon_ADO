@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskelenebilir simge: tam zemin (isletim sistemi kendi seklini uygular), icerik guvenli alanda. -->
+  <rect width="512" height="512" fill="#15201d"/>
+  <g fill="#10b981" transform="translate(256 256) scale(0.8) translate(-256 -256)">
+    <path fill-rule="evenodd" d="M128 128h112v112H128zM156 156v56h56v-56z"/>
+    <rect x="170" y="170" width="28" height="28" rx="4"/>
+    <path fill-rule="evenodd" d="M272 128h112v112H272zM300 156v56h56v-56z"/>
+    <rect x="314" y="170" width="28" height="28" rx="4"/>
+    <path fill-rule="evenodd" d="M128 272h112v112H128zM156 300v56h56v-56z"/>
+    <rect x="170" y="314" width="28" height="28" rx="4"/>
+    <rect x="272" y="272" width="36" height="36" rx="6"/>
+    <rect x="348" y="272" width="36" height="36" rx="6"/>
+    <rect x="310" y="310" width="36" height="36" rx="6"/>
+    <rect x="272" y="348" width="36" height="36" rx="6"/>
+    <rect x="348" y="348" width="36" height="36" rx="6"/>
+  </g>
+</svg>
