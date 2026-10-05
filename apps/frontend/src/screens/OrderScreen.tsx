@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, hasPerm } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus, formatQty } from '../lib/format';
@@ -10,7 +10,7 @@ import PaymentModal from './PaymentModal';
 import DiscountModal from './DiscountModal';
 import TableTransferModal from './TableTransferModal';
 import SplitModal from './SplitModal';
-import SyncBadge from '../offline/SyncBadge';
+import SyncBadge, { useSyncState } from '../offline/SyncBadge';
 import { isOffline } from '../offline/engine';
 import { draftDelete } from '../offline/db';
 import {
@@ -22,6 +22,8 @@ import {
   readLocalOrder,
 } from '../offline/actions';
 import { readCategories, readHalls, readProducts, readTables } from '../offline/read';
+
+type PhoneView = 'products' | 'order';
 
 export default function OrderScreen() {
   const { id = '' } = useParams();
@@ -36,7 +38,14 @@ export default function OrderScreen() {
   const [splitOpen, setSplitOpen] = useState(false);
   const [noteItem, setNoteItem] = useState<OrderItem | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  // Telefonda (md alti) urunler ve adisyon ayni ekrana sigmaz: ikisi arasinda gecilir. Cevrimdisi
+  // taslak sunucuya gecince yeni adrese yonlendirilir (ekran yeniden kurulur); gorunum korunur.
+  const location = useLocation();
+  const [phoneView, setPhoneView] = useState<PhoneView>(
+    () => (location.state as { phoneView?: PhoneView } | null)?.phoneView ?? 'products',
+  );
   const local = isLocalId(id);
+  const offline = useSyncState().mode === 'offline';
 
   useLiveEvents();
   const order = useQuery({
@@ -158,9 +167,9 @@ export default function OrderScreen() {
   useEffect(() => {
     if (local && currentOrder?.serverId) {
       void draftDelete(id);
-      nav(`/orders/${currentOrder.serverId}`, { replace: true });
+      nav(`/orders/${currentOrder.serverId}`, { replace: true, state: { phoneView } });
     }
-  }, [local, currentOrder?.serverId, id, nav]);
+  }, [local, currentOrder?.serverId, id, nav, phoneView]);
 
   const cats = categories.data ?? [];
   const cat = activeCat || cats[0]?.id || '';
@@ -169,8 +178,14 @@ export default function OrderScreen() {
     query ? product.name.toLocaleLowerCase('tr-TR').includes(query) : product.categoryId === cat,
   );
   const canPay = hasPerm('payment.take');
+  // Odeme ve kasa yalniz ana bilgisayarda (OFFLINE_DESIGN K3): baglanti yokken tahsilat alinmaz,
+  // cift tahsilat ya da kasa farki olusmaz. Kullaniciya nedeni yazilir.
+  const payNeedsServer = canPay && (local || offline);
   const canVoid = hasPerm('order.cancel');
-  const hasPending = (currentOrder?.items ?? []).some((item) => item.status === 'pending');
+  const pendingCount = (currentOrder?.items ?? []).filter(
+    (item) => item.status === 'pending',
+  ).length;
+  const hasPending = pendingCount > 0;
   const activeItems = (currentOrder?.items ?? []).filter((item) => item.status !== 'cancelled');
   const isOpen = !local && currentOrder?.status === 'open';
   const place = orderPlace(currentOrder, tables.data, halls.data);
@@ -185,7 +200,11 @@ export default function OrderScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f5f5f2] md:flex-row">
-      <main className="order-1 flex min-h-0 min-w-0 flex-1 flex-col">
+      <main
+        className={`order-1 min-h-0 min-w-0 flex-1 flex-col md:flex ${
+          phoneView === 'order' ? 'hidden' : 'flex'
+        }`}
+      >
         <header className="border-b border-stone-200/80 bg-[#f5f5f2]/95 px-4 py-3 backdrop-blur sm:px-5">
           <div className="flex items-center gap-3">
             <button
@@ -205,6 +224,10 @@ export default function OrderScreen() {
               >
                 {place.title}
               </h1>
+            </div>
+            {/* Telefonda adisyon paneli gizliyken baglanti durumu burada gorunur. */}
+            <div className="shrink-0 md:hidden">
+              <SyncBadge testId="sync-badge-phone" />
             </div>
             <label className="relative hidden w-full max-w-xs xl:block">
               <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-stone-400">
@@ -302,17 +325,62 @@ export default function OrderScreen() {
             </div>
           )}
         </div>
+
+        {/* Telefon: adisyon ayri gorunumde; alttaki serit ozeti gosterir, dokununca adisyon acilir. */}
+        <div className="border-t border-stone-200 bg-white p-3 md:hidden">
+          {error && (
+            <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+              {error}
+            </p>
+          )}
+          <button
+            data-testid="show-order"
+            onClick={() => setPhoneView('order')}
+            className="flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl bg-ink-900 px-4 text-left text-white transition active:scale-[0.98]"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-black">Adisyonu gör</span>
+              <span className="block truncate text-xs text-white/70">
+                {activeItems.length} kalem
+                {hasPending && ` · ${pendingCount} mutfağa gönderilmedi`}
+              </span>
+            </span>
+            <span className="shrink-0 text-lg font-black">
+              {formatKurus(currentOrder?.grandTotal ?? 0)} →
+            </span>
+          </button>
+        </div>
       </main>
 
-      <aside className="order-2 flex max-h-[52%] min-h-0 w-full shrink-0 flex-col border-t border-stone-200 bg-white shadow-[-12px_0_30px_rgba(21,32,29,0.04)] md:h-full md:max-h-none md:w-[360px] md:border-t-0 md:border-l xl:w-[390px]">
+      <aside
+        className={`order-2 min-h-0 w-full flex-1 flex-col bg-white md:flex md:h-full md:w-[360px] md:flex-none md:shrink-0 md:border-l md:border-stone-200 md:shadow-[-12px_0_30px_rgba(21,32,29,0.04)] xl:w-[390px] ${
+          phoneView === 'order' ? 'flex' : 'hidden'
+        }`}
+      >
         <header className="border-b border-stone-200 px-4 py-4">
+          <div className="mb-3 flex items-center gap-3 md:hidden">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[10px] font-bold tracking-[0.16em] text-brand-700 uppercase">
+                {place.caption}
+              </p>
+              <p className="truncate text-base font-black text-ink-900">{place.title}</p>
+            </div>
+            <button
+              data-testid="show-products"
+              onClick={() => setPhoneView('products')}
+              className="min-h-11 shrink-0 rounded-xl bg-brand-50 px-4 text-sm font-black text-brand-700 transition active:scale-[0.98]"
+            >
+              + Ürün ekle
+            </button>
+          </div>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-black text-ink-900" title={currentOrder?.orderNo}>
                   Adisyon #{currentOrder?.orderNo?.split('-')[1] ?? currentOrder?.orderNo ?? ''}
                 </h2>
-                {currentOrder?.type !== 'dine_in' && (
+                {/* Cevrimdisi taslakta tur yoktur (yalniz masa); "Gel-al" yazmasin. */}
+                {currentOrder?.type && currentOrder.type !== 'dine_in' && (
                   <span
                     className={`rounded-full px-2 py-1 text-[10px] font-bold tracking-wide uppercase ${
                       currentOrder?.type === 'delivery'
@@ -530,13 +598,24 @@ export default function OrderScreen() {
             {canPay && (
               <button
                 onClick={() => setPayOpen(true)}
-                disabled={busy || local || !currentOrder || currentOrder.grandTotal <= 0}
+                disabled={busy || payNeedsServer || !currentOrder || currentOrder.grandTotal <= 0}
                 className="min-h-14 rounded-2xl bg-brand-600 px-3 text-sm font-black text-white transition hover:bg-brand-700 active:scale-[0.98] disabled:opacity-35"
               >
                 Ödeme al
               </button>
             )}
           </div>
+          {payNeedsServer && (
+            <p
+              data-testid="pay-offline-hint"
+              className="mt-2 text-center text-xs font-medium text-stone-500"
+            >
+              Ödeme için ana bilgisayara bağlantı gerekir.{' '}
+              {local
+                ? 'Sipariş bu cihazda saklandı; bağlantı gelince gönderilir.'
+                : 'Bağlantı gelince ödeme alınabilir.'}
+            </p>
+          )}
         </div>
       </aside>
 

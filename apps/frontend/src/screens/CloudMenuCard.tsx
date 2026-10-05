@@ -141,8 +141,21 @@ export default function CloudMenuCard({
               Masa QR kodları
             </button>
           </div>
+          {s.url && (
+            // Panel bulutta: masaustu programda sistem tarayicisinda acilir (apps/desktop/main.mjs).
+            <a
+              href={`${s.url}/panel`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-lg bg-slate-100 py-2 text-center text-sm font-semibold text-slate-800 hover:bg-slate-200"
+              data-testid="cloud-panel-link"
+            >
+              İşletme panelini aç ↗
+            </a>
+          )}
           <p className="text-xs text-slate-500">
             Ürün, kategori ve masa değişiklikleri birkaç saniye içinde kendiliğinden yayınlanır.
+            İşletme panelini telefon ya da bilgisayara uygulama olarak da yükleyebilirsiniz.
           </p>
           <button
             onClick={() => {

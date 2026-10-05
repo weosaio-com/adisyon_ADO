@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, apiUpload, login, loginPin, ApiError } from '../lib/api';
 import { pullSnapshot } from '../offline/engine';
+import { InstallButton, useInstallPrompt } from '../lib/install';
 
 type Mode = 'owner' | 'waiter';
 
@@ -120,6 +121,7 @@ export default function LoginScreen() {
         >
           {busy ? 'Giriş yapılıyor…' : 'Sisteme giriş yap'}
         </button>
+        <InstallHint />
         {mode === 'owner' && recoveryEnabled.data?.enabled && (
           <button
             type="button"
@@ -493,5 +495,17 @@ function SetupRestoreForm({ onBack }: { onBack: () => void }) {
         </button>
       </form>
     </AuthShell>
+  );
+}
+
+// Tablet ve telefonda adisyon uygulama gibi yuklenir (ana ekranda simge, baglanti koptugunda da acilir).
+function InstallHint() {
+  const { available } = useInstallPrompt();
+  if (!available) return null;
+  return (
+    <div className="mt-4 rounded-2xl bg-stone-50 p-3 text-center text-xs text-stone-500">
+      <p className="mb-2">Bu cihaza uygulama olarak yükleyin: ana ekrandan tek dokunuşla açılır.</p>
+      <InstallButton className="min-h-11 w-full rounded-xl bg-white font-bold text-ink-900 shadow-sm ring-1 ring-stone-200" />
+    </div>
   );
 }
