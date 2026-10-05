@@ -69,6 +69,48 @@ pnpm --filter @ado/frontend run test:e2e:cloud
 
 ---
 
+## Test ortamı (yayından önce deneme)
+
+Gerçek işletmelere açmadan önce telefonla denemek için ayrı bir Worker: `ado-qr-test`. Kendi
+veritabanı (`ado-qr-test`) ve görsel deposu (`ado-qr-images-test`) vardır; canlı veriye dokunmaz.
+Adresi `https://ado-qr-test.<hesap>.workers.dev` olur, alan adı gerekmez. Yapılandırma
+`wrangler.jsonc` › `env.test`.
+
+Bir kez yapılır (hesap ve oturum için aşağıdaki **Yayına alma**'nın 1–2. adımları; Workers Paid planı
+hesap başınadır, test ortamı da onu kullanır):
+
+1. `pnpm --filter @ado/cloud exec wrangler d1 create ado-qr-test` — çıktıdaki `database_id`'yi
+   `wrangler.jsonc` › `env.test` içindeki `00000000-…` yerine yazıp commit'leyin.
+2. `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images-test`
+3. `pnpm --filter @ado/cloud db:migrate:test`
+4. `pnpm --filter @ado/cloud exec wrangler secret put ADMIN_TOKEN --env test` — canlı ortamdakinden
+   farklı bir değer.
+5. `pnpm --filter @ado/cloud run deploy:test` — çıktıdaki `https://ado-qr-test.….workers.dev`
+   adresini not edin.
+6. Yukarıdaki **Deneme işletmesi açmak** komutuyla (adres ve `ADMIN_TOKEN` değişir) bir işletme açın.
+
+Sonraki denemeler yalnız 5. adımdır; yeni bir migration varsa önce 3. adım.
+
+### Telefonla deneme (işletme paneli uygulaması)
+
+1. Telefonda `https://ado-qr-test.….workers.dev/panel` adresini açıp giriş yapın. Android (Chrome):
+   **Uygulamayı yükle** (girişte) ya da **Yükle** (üst çubukta) düğmesi, yoksa menü › **Ana ekrana
+   ekle**. iPhone (Safari): **Paylaş › Ana
+   Ekrana Ekle**. Panel ana ekrandan tam ekran açılır.
+2. Uçak modunu açın ve paneli ana ekrandan açın: son menü gelir, üstte "İnternet yok — değişiklikler
+   bu cihazda saklanıyor." yazar. Fotoğraflı bir ürün ekleyip **Kaydet ve yayınla**'ya basın:
+   "Kaydedildi; internet gelince kendiliğinden yayınlanacak." görünür. Uygulamayı kapatıp açın:
+   değişiklik durur.
+3. Uçak modunu kapatın: birkaç saniye içinde kendiliğinden yayınlanır (sürüm artar). Masalar'daki
+   **Önizle** ile müşteri sayfasında ürün ve fotoğraf görünür.
+4. Masa ekleme, POS eşleştirme ve parola değiştirme internetsizken pasiftir ve nedenini yazar.
+5. **Çıkış** yapınca bu cihazdaki panel verisi silinir (yayınlanmamış değişiklik varsa önce sorar).
+
+POS ile denemek için POS'ta **Ayarlar › QR Menü (Bulut)** kartına test ortamının adresini ve panelden
+alınan eşleştirme kodunu girin.
+
+---
+
 ## Yayına alma (Cloudflare)
 
 Bir kez yapılır. Komutlar depo kökünden çalıştırılır.
