@@ -13,9 +13,9 @@
 
 | # | Konu | Karar |
 |---|------|-------|
-| K1 | Offline kapsam | **Sadece Waiter tabletleri.** Ana makine = sunucu + SQLite (zaten offline). |
+| K1 | Offline kapsam | **Sadece Waiter tablet ve telefonları** (yüklenebilir PWA). Ana makine = sunucu + SQLite (zaten offline). |
 | K2 | Offline işlemler | Masa aç · kalem ekle/çıkar (gönderilmemiş taslakta) · adet/not · **siparişi gönder**. |
-| K3 | Offline OLMAYAN işlemler | Ödeme, kasa, indirim>%10, iade, masa birleştir/böl, **kayıt silme (Owner, sunucuda)**. |
+| K3 | Offline OLMAYAN işlemler | Ödeme, kasa, indirim>%10, iade, masa birleştir/böl, **kayıt silme (Owner, sunucuda)**. Arayüz: bağlantı yokken **Ödeme al** pasif ve nedeni yazılır (`pay-offline-hint`). |
 | K4 | Çakışma politikası | **Akıllı birleştirme** (append-only merge; kapalı/ödenmiş masa → Owner review). |
 | K5 | İstemci kalıcılık | Tablet tarayıcısında **IndexedDB outbox** + Service Worker (PWA). |
 | K6 | Idempotency | Her mutasyon **ULID `clientOpId`** taşır; sunucu dedup eder (replay güvenli). |

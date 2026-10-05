@@ -12,7 +12,8 @@ Adisyon POS, kafe/restoran/büfe/pastane için **çevrimdışı çalışabilen**
 - **Ana makine (kasa bilgisayarı):** Programın kurulu olduğu Windows bilgisayar. Tüm veriler
   (adisyonlar, ürünler, ödemeler, raporlar) **burada** tutulur. İnternete ihtiyaç duymaz.
 - **Garson tabletleri / telefonlar:** Aynı WiFi ağına bağlı cihazlar, tarayıcıdan ana makineye
-  bağlanır ve sipariş alır. Ayrı program kurmaya gerek yoktur.
+  bağlanır ve sipariş alır. Mağazadan program indirmeye gerek yoktur; adisyon tarayıcıdan **uygulama
+  olarak yüklenir** (ana ekranda simge, tam ekran; 6. bölüm).
 - **İnternet gerekmez:** Sistem tamamen yerel ağda (kendi WiFi'niz) çalışır. İnternet yalnızca
   isteğe bağlı **bulut yedeği** ve **QR menü** (5.5) için kullanılır; internet kesilse de satış
   sürer, QR menü bağlantı gelince güncellenir.
@@ -129,34 +130,83 @@ e-postası ve parolası** verilir.
   sekmelerinden hazırlayıp **Kaydet ve yayınla** der; QR kartlarını da Masalar sekmesinden basar.
 - Menüde alerjen bilgisi için "personele danışın" notu her zaman yer alır.
 
+**İşletme paneli uygulama olarak (telefon ve bilgisayar):** Paneli bir kez açıp **Uygulamayı yükle**
+(girişte) ya da **Yükle** (üst çubukta) deyin; iPhone/iPad'de Safari › **Paylaş › Ana Ekrana Ekle**.
+Panel ana ekrandan tam ekran açılır; tarayıcıdan açmaya da devam edebilirsiniz.
+- **İnternet yokken:** ilk giriş için internet gerekir. Sonra panel internetsiz de açılır: son menü,
+  masalar ve QR kartları görünür, kartlar basılabilir. Menüyü ve işletme bilgilerini düzenleyip
+  fotoğraf ekleyebilirsiniz; **Kaydet ve yayınla** dediğinizde değişiklik cihazda saklanır ve
+  **internet gelince kendiliğinden yayınlanır**. Üstte "İnternet yok — değişiklikler bu cihazda
+  saklanıyor." yazar.
+- Masa ekleme ve kod yenileme, programla eşleştirme ve parola değiştirme internet ister; bu düğmeler
+  internetsizken pasiftir.
+- Menü bu arada başka bir yerden değiştirildiyse panel üzerine yazmaz; güncel menüyü yükleyip
+  değişikliğinizi yeniden yapmanızı ister.
+- **Çıkış** yapınca bu cihazdaki panel verisi silinir (yayınlanmamış değişiklik varsa önce sorar).
+- Müşterinin gördüğü QR menü uygulama değildir; her zaman web'den, en güncel haliyle açılır.
+
 Bu ayarlar bittiğinde sistem satışa hazırdır.
 
 ---
 
-## 6. Tabletlerin Bağlanması
+## 6. Tablet ve Telefonların Bağlanması
 
-Ana makinede **Ayarlar › Sunucu Adresi** kartı, tabletlerde kullanılacak adresleri gösterir
-(örnek: `https://192.168.1.20:43128`). Adresleri buradan kopyalayabilirsiniz; ana makinenin IP'si
-değişirse güncel adres de burada görünür.
+Ana makinede **Ayarlar › Sunucu Adresi** kartı, tablet ve telefonlarda kullanılacak adresleri
+gösterir (örnek: `https://192.168.1.20:43128`). Adresleri buradan kopyalayabilirsiniz; ana
+makinenin IP'si değişirse güncel adres de burada görünür. Kartta iki **QR kod** da vardır:
+**1. Sertifika** ve **2. Adisyonu aç**. Tablet ya da telefonun kamerasıyla okutursanız adres
+yazmanız gerekmez.
 
 ### Önerilen: HTTPS ile (bağlantı koparsa da uygulama açılır)
 
-Her tablette **bir kez** yapılır (Android'de **Chrome** önerilir):
+Her cihazda **bir kez** yapılır (Android'de **Chrome** önerilir):
 
-1. Tableti **ana makineyle aynı WiFi ağına** bağlayın.
-2. Tabletin tarayıcısında kartta yazan **sertifika indirme adresini** açın
-   (örnek: `http://192.168.1.20:43127/api/v1/devices/ca.crt`). `adisyon-pos-ca.crt` dosyası iner.
+1. Cihazı **ana makineyle aynı WiFi ağına** bağlayın.
+2. **1. Sertifika** QR kodunu okutun ya da tarayıcıda kartta yazan **sertifika indirme adresini**
+   açın (örnek: `http://192.168.1.20:43127/api/v1/devices/ca.crt`). `adisyon-pos-ca.crt` dosyası iner.
 3. Sertifikayı kurun:
    - **Android:** Ayarlar'da "sertifika" diye aratın › **CA sertifikası yükle** › indirilen
      dosyayı seçin ve uyarıyı onaylayın.
    - **iPad / iPhone:** Ayarlar › **Profil İndirildi** › Yükle. Ardından Ayarlar › Genel › Hakkında ›
      **Sertifika Güven Ayarları** › "Adisyon POS Yerel CA" için tam güveni açın.
-4. Tarayıcıda **HTTPS adresini** açın (örnek: `https://192.168.1.20:43128`); garson **PIN** ile girer.
-5. Tarayıcı menüsünden **"Ana ekrana ekle"** deyin. Simge oluşur; uygulama tam ekran açılır ve
-   **WiFi koptuğunda da açılır.**
+4. **2. Adisyonu aç** QR kodunu okutun ya da tarayıcıda **HTTPS adresini** açın (örnek:
+   `https://192.168.1.20:43128`); garson **PIN** ile girer.
+5. Giriş ekranındaki **Uygulamayı yükle** düğmesine dokunun (düğme yoksa tarayıcı menüsünden **Ana
+   ekrana ekle**; iPhone/iPad'de Safari › **Paylaş › Ana Ekrana Ekle**). Simge oluşur; uygulama tam
+   ekran açılır ve **WiFi koptuğunda da açılır.**
 
 > Ana makinenin IP adresi değişse bile sertifikayı yeniden kurmanız gerekmez; yalnızca
-> Ayarlar'daki yeni adresi kullanın. Sertifika yalnızca sizin ana makinenize aittir.
+> Ayarlar'daki yeni adresi kullanın. Sertifika yalnızca sizin ana makinenize aittir. Yüklü uygulama
+> simgesi ise eski adrese bağlı kalır; yeni adresi açıp yeniden yükleyin. Bunu önlemek için
+> modem/router ayarlarından ana makineye **sabit IP** verin (DHCP rezervasyonu).
+
+### Telefonda kullanım
+
+Garson kendi telefonunu da kullanabilir; kurulum tabletle aynıdır. Telefonda ürünler tam ekran
+açılır; alttaki **Adisyonu gör** şeridi kalem sayısını, mutfağa gönderilmemiş kalemleri ve toplamı
+gösterir. Şeride dokununca adisyon açılır (mutfağa gönder, not, ödeme); **+ Ürün ekle** ile
+ürünlere dönülür.
+
+### İkinci bilgisayar
+
+Başka bir bilgisayarda da Chrome ya da Edge ile HTTPS adresini açıp **Uygulamayı yükle**
+diyebilirsiniz. Sertifika o bilgisayara da bir kez kurulur: Windows'ta indirilen dosyaya çift
+tıklayın › **Sertifika Yükle** › **Tüm sertifikaları aşağıdaki depolama alanına yerleştir** ›
+**Güvenilen Kök Sertifika Yetkilileri**. Program (veritabanı, yazıcılar, yedek) yalnız ana
+makinede çalışır; ikinci bilgisayar bir tablet gibi bağlanır.
+
+### İşletmede WiFi yoksa
+
+İnternet gerekmez; ana makineyle tablet ve telefonların **aynı yerel ağda** olması yeterlidir.
+
+- **Önerilen:** internet bağlantısı olmayan basit bir modem/router. Ana makineyi kabloyla, tablet ve
+  telefonları WiFi ile bağlayın.
+- **Geçici çözüm:** bir Android telefonun **erişim noktasını (hotspot)** açıp ana makineyi ve diğer
+  cihazları ona bağlayın; mobil verinin açık olması gerekmez. Bazı telefonlar bağlı cihazların
+  birbirini görmesine izin vermez; ilk kurulumda deneyin.
+- **Hiç ağ yoksa** ana makine tek başına çalışır; siparişler ve ödemeler oradan alınır.
+- İnternet yalnız QR menünün güncellenmesi ve bulut yedeği içindir; internet gelince bunlar
+  kendiliğinden gider.
 
 ### Sertifikasız (HTTP)
 
@@ -221,6 +271,10 @@ kullanılmalıdır — bkz. 6. bölüm.) Bağlantı gelince **otomatik ve kayıp
 
 **Bağlantı kopukken yapılamaz (güvenlik gereği):** ödeme, kasa işlemleri, yüksek indirim, iade,
 kayıt silme. Bunlar her zaman **yönetici + ana makine** üzerinden yapılır.
+
+Bağlantı yokken tablet ya da telefonda **Ödeme al** düğmesi pasiftir ve altında "Ödeme için ana
+bilgisayara bağlantı gerekir" yazar; sipariş cihazda saklanır, bağlantı gelince gönderilir ve ödeme
+alınabilir. Ödeme yalnız ana makinede kaydedildiği için çift tahsilat ya da kasa farkı oluşmaz.
 
 ### Çakışma olursa — Yönetici Onayı
 Nadiren, bir garson çevrimdışıyken bir masa bu sırada kapatılmış olabilir. Böyle bir durumda
@@ -314,8 +368,9 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 1. Ana makineye programı kur → aç → **yönetici hesabı** oluştur.
 2. **Kullanıcılar, Masalar, Ürünler**'i tanımla; **Ayarlar**'da işletme bilgilerini gir ve
    yazıcıyı ekleyip test et (5.4).
-3. Tabletleri aynı WiFi'ye bağla, **sertifikayı kur** ve Ayarlar'daki **HTTPS adresini** aç
-   (örnek: `https://192.168.1.20:43128`), **ana ekrana ekle** (6. bölüm).
+3. Tablet ve telefonları aynı WiFi'ye bağla; Ayarlar › Sunucu Adresi kartındaki QR kodlarla önce
+   **sertifikayı kur**, sonra **adisyonu aç** ve **Uygulamayı yükle** (6. bölüm). WiFi yoksa: 6.
+   bölüm › İşletmede WiFi yoksa.
 4. Garsonlar **PIN** ile girsin, sipariş almaya başlasın.
 5. Ödeme/gün sonu **kasadan**; **bulut yedeğini** aç ve **kurtarma anahtarını** sakla.
 6. (İsteğe bağlı) **QR menü:** ürünlere fotoğraf ve alerjen ekle, panelden eşleştirme koduyla bağlan,

@@ -6,6 +6,25 @@ Sürümleme: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Uygulama olarak yükleme ve internetsiz çalışma (2026-10-05):** işletme paneli ve adisyon,
+  telefona ve bilgisayara mağazasız yüklenen uygulama (PWA) oldu; web'den açılmaya devam eder. QR
+  menü yalnız web'de kalır.
+  - **İşletme paneli (`apps/qr-web` `/panel`):** "Uygulamayı yükle" (iPhone/iPad'de Ana Ekrana Ekle
+    yönergesi), simgeler ve manifest; service worker yalnız `/panel` kapsamında, müşteri sayfasında
+    yok. Son menü, masalar ve QR kartları cihazda saklanır (IndexedDB); panel internetsiz açılır.
+    Menü ve fotoğraflar internetsiz düzenlenir, **internet gelince kendiliğinden yayınlanır**
+    (sürüm kontrollü; çakışmada üzerine yazmaz). Çıkışta cihaz verisi silinir.
+  - **Adisyon (`apps/frontend`):** giriş ekranında ve Ayarlar › Sunucu Adresi kartında "Uygulamayı
+    yükle"; kartta tablet/telefonun kamerayla okutacağı **sertifika** ve **adisyon** QR kodları ile
+    "İşletmede WiFi yoksa" yönergesi. Bağlantısız cihazda **Ödeme al** pasif ve nedeni yazılı
+    (ödeme yalnız ana makinede). Telefonda ürünler ve adisyon ayrı görünüm (alt şeritte özet).
+    Çevrimdışı taslakta yanlış "Gel-al" rozeti düzeltildi.
+  - **Masaüstü:** QR menü kartından işletme paneli açılır; dış bağlantılar sistem tarayıcısında açılır.
+  - **Bulut test ortamı:** `wrangler.jsonc` › `env.test` (ayrı Worker `ado-qr-test`, D1 ve R2),
+    `deploy:test` ve `db:migrate:test` betikleri; kurulum `apps/cloud/README.md` › Test ortamı.
+  - **Testler:** `qr-menu.spec.ts` panel uygulaması ve internetsiz yayın; `offline.spec.ts` ödeme
+    notu; `pos-flow.spec.ts` 390 px garson akışı ve kurulum QR kodları; qr-web self-check'leri
+    `image-key` ve `sync-core`.
 - **QR menü — dijital menü (QR-1, 2026-09-30):** müşteri masadaki QR kodu okutur, menüyü telefonda
   görür: fotoğraf, açıklama, 14 alerjen, diyet etiketleri, TR/EN, "tükendi". Bkz.
   `QR_MENU_DESIGN.md`.

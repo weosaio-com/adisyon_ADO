@@ -79,6 +79,28 @@
     Satıcı özellikleri tek tek açıp kapatabilir. Askıya alınan işletmede hepsi kapalıdır. Müşteri
     sayfası `qr.menu` yoksa `403 MENU_DISABLED` alır. POS lisansındaki `qr.menu: false` yalnız
     arayüzdeki kartı gizler; asıl kapı buluttur.
+11. **İşletme paneli yüklenebilir uygulamadır (PWA); müşteri sayfası değildir.** Mağaza yok: telefon
+    ve bilgisayarda tarayıcıdan yüklenir, güncellemeler kendiliğinden gelir.
+    - Manifest ve service worker yalnız panel açılınca eklenir. SW kapsamı `/panel` (sondaki `/`
+      yok: giriş adresi `/panel` de kapsamda kalır). Müşteri sayfası `/m/*` SW'ye ve manifeste hiç
+      girmez; menüyü her zaman ağdan, güncel haliyle alır.
+    - SW uygulama kabuğunu önbelleğe alır ve `/panel` gezinmelerini `index.html`'e düşürür.
+      `/img/<sha256>` görselleri CacheFirst'tür (anahtar içerik özeti, değişmez); `/api/*`
+      önbelleklenmez.
+12. **Panel internetsiz düzenlenir, internet gelince yayınlar.**
+    - Veri IndexedDB'de (`ado-panel`): son sorgular (TanStack `dehydrate`, 30 gün), şube başına
+      taslak (`menu`, `baseVersion`, `publishPending`), henüz yüklenmemiş fotoğraflar. Çıkışta ve
+      cihaza başka hesap girince silinir. İlk giriş internet ister.
+    - Bağlantı durumu tarayıcı olayları ve API yanıtlarından izlenir; bağlantı yokken `/api/health`
+      yoklanır. İnternetsiz **Kaydet ve yayınla** taslağı "yayın bekliyor" işaretler. Bağlantı gelince
+      önce taslağın kullandığı bekleyen fotoğraflar, sonra menü `baseVersion` ile gider.
+    - Fotoğraf anahtarı tarayıcıda bulutla aynı kuralla hesaplanır (SHA-256 + dosya imzası →
+      `menuImageKey`); taslak anahtarı hemen kullanır, yüklemede bulutun döndürdüğü anahtar
+      karşılaştırılır.
+    - Sürüm çakışması (409) kendiliğinden yeniden denenmez (karar 4). Oturum düşerse (401) taslak
+      cihazda kalır, yeniden girişten sonra yayınlanır.
+    - Masa ekleme/kod yenileme, POS eşleştirme ve parola değiştirme internet ister; düğmeler pasiftir
+      ve nedeni yazılır.
 
 ---
 
@@ -101,7 +123,13 @@
    tükendi), **İşletme** (ad, adres, telefon, İngilizce menü), **Masalar** (ekle, adlandır, kodu
    yenile, QR yazdır). **Kaydet ve yayınla** menüyü tek seferde yayınlar.
 
-### 3.3 Müşteri
+### 3.3 Panel internetsizken
+1. Panel ana ekrandan açılır; üstte "İnternet yok — değişiklikler bu cihazda saklanıyor." yazar.
+2. Menüde ürün/fotoğraf değiştirilir, **Kaydet ve yayınla** → "internet gelince kendiliğinden
+   yayınlanacak". Uygulama kapanıp açılsa da taslak durur.
+3. Bağlantı gelince yayın kendiliğinden gider (sürüm artar); müşteri sayfası yeni menüyü alır.
+
+### 3.4 Müşteri
 1. QR → `/m/<kod>` (statik sayfa) → `GET /api/m/<kod>`: menü + masa adı + salon.
 2. Görseller `/img/<anahtar>` (R2, süresiz önbellek).
 3. Durumlar: geçersiz kod (404 `TABLE_NOT_FOUND`), paket/askı (403 `MENU_DISABLED`), menü henüz yok
@@ -172,13 +200,17 @@ gider.
 - Backend smoke (`apps/backend/test/smoke.e2e.mjs`) QR ve BULUT bölümleri: sahte buluta eşleştirme,
   otomatik yayın, birleştirme, hata ve yeniden deneme.
 - Playwright `apps/frontend/e2e/menu-screen.spec.ts` (POS ürün ekranı) ve `qr-menu.spec.ts`
-  (POS + `wrangler dev`: POS'lu ve POS'suz akış, 390 px müşteri sayfası). CI: `e2e-cloud` işi.
-- Self-check'ler: `@ado/shared/menu`, `cloud.snapshot`, qr-web `menu-view`, `money`, `tables`.
+  (POS + `wrangler dev`: POS'lu ve POS'suz akış, 390 px müşteri sayfası; panelin uygulama olarak
+  yüklenmesi, internetsiz düzenleme ve fotoğraf, internet gelince yayın, müşteri sayfasında SW
+  olmaması, çıkışta cihaz verisinin silinmesi). CI: `e2e-cloud` işi.
+- Self-check'ler: `@ado/shared/menu`, `cloud.snapshot`, qr-web `menu-view`, `money`, `tables`,
+  `image-key` (tarayıcı anahtarı = bulut anahtarı), `sync-core` (yayın durumları).
 
 ---
 
 ## 8. Sonraya kalanlar
 
 - İşletme logosu ve renk teması; kendi kendine kayıt ve ücretlendirme (şimdilik satıcı açar).
+- Panelde internetsiz masa düzenleme; Google Play / App Store sürümleri (istenirse).
 - QR-2 sipariş, QR-3 uzaktan ödeme ve hesap bölme (ödeme sağlayıcısı QR-3'te seçilecek),
   QR-4 oyunlar ve şans çarkı.
