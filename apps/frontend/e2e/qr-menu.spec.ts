@@ -312,6 +312,12 @@ test.describe('POS’lu işletme', () => {
     await expect(cloudCard.getByTestId('cloud-last-published')).toContainText('sürüm', {
       timeout: 30_000,
     });
+    // Karttan isletme paneline gecilir (yeni sekme; masaustu programda sistem tarayicisi).
+    await expect(cloudCard.getByTestId('cloud-panel-link')).toHaveAttribute(
+      'href',
+      `${CLOUD}/panel`,
+    );
+    await expect(cloudCard.getByTestId('cloud-panel-link')).toHaveAttribute('target', '_blank');
 
     // Panel kendiliginden guncellenir; menu artik POS'tan gelir (salt okunur).
     await expect(panel.getByText('Adisyon programı bağlandı.', { exact: false })).toBeVisible({

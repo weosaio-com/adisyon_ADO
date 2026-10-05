@@ -11,6 +11,7 @@ const OWNER = {
   password: process.env.SEED_OWNER_PASSWORD ?? 'owner1234',
 };
 const TABLET = { width: 820, height: 1180 };
+const PHONE = { width: 390, height: 844 };
 
 interface Named {
   id: string;
@@ -57,7 +58,7 @@ const fx = {} as {
   categoryId: string;
   kofte: Named;
   ayran: Named;
-  tables: Record<'a' | 'b' | 'c' | 'd', Named>;
+  tables: Record<'a' | 'b' | 'c' | 'd' | 'e', Named>;
   printerName: string;
   waiter: { id: string; username: string; displayName: string; pin: string };
 };
@@ -89,6 +90,7 @@ test.beforeAll(async () => {
     b: await table('Masa 2'),
     c: await table('Masa 3'),
     d: await table('Masa 4'),
+    e: await table('Masa 5'),
   };
   fx.printerName = `E2E Mutfak ${tag}`;
   // PIN aktif kullanicilar arasinda benzersiz olmali (PIN_TAKEN); cakisirsa yeniden dene.
@@ -127,9 +129,9 @@ async function login(page: Page, origin: string, kind: 'owner' | 'waiter') {
   await expect(page).toHaveURL(`${origin}/`);
 }
 
-async function waiterPage(browser: Browser): Promise<Page> {
+async function waiterPage(browser: Browser, viewport = TABLET): Promise<Page> {
   const context = await browser.newContext({
-    viewport: TABLET,
+    viewport,
     storageState: { cookies: [], origins: [] },
   });
   const page = await context.newPage();
@@ -214,6 +216,63 @@ test('garson tabletten sipariş girer, not ekler ve mutfağa gönderir', async (
   expect(ticket.text).toContain(`Garson: ${fx.waiter.displayName}`);
   expect(ticket.text).toContain(`2 x ${fx.kofte.name}\r\n   Not: az pişmiş`);
   await waiter.context().close();
+});
+
+// Sayfa yana kaymasin (telefon): belge genisligi ekran genisligini asmaz.
+async function expectNoHorizontalScroll(page: Page) {
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+  ).toBeLessThanOrEqual(0);
+}
+
+test('garson telefondan (390 px) sipariş girer ve mutfağa gönderir', async ({ browser }) => {
+  const waiter = await waiterPage(browser, PHONE);
+  await expectNoHorizontalScroll(waiter);
+  await waiter.getByTestId(`table-${fx.tables.e.id}`).click();
+  await expect(waiter.getByTestId('order-title')).toHaveText(fx.tables.e.name);
+
+  // Telefonda urunler tam ekran; adisyon alttaki seritte ozetlenir.
+  await waiter.getByTestId(`category-${fx.categoryId}`).click();
+  await waiter.getByTestId(`product-${fx.kofte.id}`).click();
+  await expect(waiter.getByTestId('show-order')).toContainText('1 kalem');
+  await waiter.getByTestId(`product-${fx.ayran.id}`).click();
+  const summary = waiter.getByTestId('show-order');
+  await expect(summary).toContainText('2 kalem · 2 mutfağa gönderilmedi');
+  await expect(summary).toContainText('₺175,00');
+  await expectNoHorizontalScroll(waiter);
+
+  await summary.click();
+  await expect(waiter.getByTestId('order-item')).toHaveCount(2);
+  await expect(waiter.getByTestId(`product-${fx.kofte.id}`)).toBeHidden();
+  await expectNoHorizontalScroll(waiter);
+  await waiter.getByTestId('send-kitchen').click();
+  await expect(waiter.getByText('Mutfağa gönderildi')).toHaveCount(2);
+
+  // Urun eklemeye donulur.
+  await waiter.getByTestId('show-products').click();
+  await expect(waiter.getByTestId(`product-${fx.kofte.id}`)).toBeVisible();
+  await expect(waiter.getByTestId('show-order')).toContainText('2 kalem');
+  await expect(waiter.getByTestId('show-order')).not.toContainText('gönderilmedi');
+  await waiter.context().close();
+});
+
+test('Ayarlar: tablet ve telefon için kurulum QR kodları ve WiFi yönergesi', async ({ page }) => {
+  test.skip(!lanIp(), 'LAN IPv4 yok');
+  const info = await call<{ urls: string[]; httpsUrls: string[]; caUrls: string[] }>(
+    'GET',
+    '/devices/server-info',
+    undefined,
+    fx.token,
+  );
+  await page.goto('/settings');
+  // HTTPS aciksa once sertifika, sonra adisyon; degilse yalniz adisyon adresi.
+  const qr = page.getByTestId('server-qr');
+  await expect(qr.locator('img')).toHaveCount(info.caUrls.length > 0 ? 2 : 1);
+  await expect(qr.locator('img').last()).toHaveAttribute('src', /^data:image\/svg\+xml/);
+  await expect(qr).toContainText('Adisyonu aç');
+  const help = page.getByTestId('no-wifi-help');
+  await help.locator('summary').click();
+  await expect(help).toContainText('Android');
 });
 
 test('kasa parçalı ödeme alır: kart + nakit, para üstü doğru kaydedilir', async ({ page }) => {
