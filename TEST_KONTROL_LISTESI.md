@@ -1,7 +1,7 @@
 # Elle Test Kontrol Listesi — Garson → Mutfak → Kasa
 
 > Her sürümden önce **gerçek donanımla** yapılır: Windows kasa bilgisayarı, termal yazıcı, aynı
-> Wi-Fi'de bir tablet. Süre yaklaşık 1 saat. Otomatik testler (smoke, Playwright) yazılımı sınar;
+> Wi-Fi'de bir tablet ve bir telefon. Süre yaklaşık 1,5 saat. Otomatik testler (smoke, Playwright) yazılımı sınar;
 > bu liste yalnız gerçek cihazda görülebilecekleri sınar.
 >
 > **Sonuç bildirimi:** adım numarası + ✓/✗ + kısa not, varsa fotoğraf.
@@ -70,16 +70,18 @@ seçin → görünen ad (ör. "Mutfak") → kağıt 80/58 mm → **Varsayılan**
 
 ## 3. Tablet bağlantısı
 
-**Yap:** Kasa bilgisayarında Ayarlar › **Sunucu Adresi** kartındaki adresleri kullanın.
+**Yap:** Kasa bilgisayarında Ayarlar › **Sunucu Adresi** kartındaki QR kodları kullanın.
 
-- Tablette **Sertifika indirme adresi**ni açıp sertifikayı kurun (Android / iPad adımları:
+- Tabletin kamerasıyla **1. Sertifika** QR kodunu okutup sertifikayı kurun (Android / iPad adımları:
   `KULLANIM_KILAVUZU.md` 6. bölüm).
-- **HTTPS** adresini açın → **Garson** → kullanıcı `garson`, PIN → **Sisteme giriş yap** → tarayıcı
-  menüsünden **Ana ekrana ekle**.
+- **2. Adisyonu aç** QR kodunu okutun → **Garson** → kullanıcı `garson`, PIN → **Sisteme giriş yap**
+  → **Uygulamayı yükle** (düğme yoksa tarayıcı menüsünden **Ana ekrana ekle**; iPad'de Safari ›
+  Paylaş › Ana Ekrana Ekle).
 - Tablette Wi-Fi'yi kapatıp uygulamayı ana ekrandan yeniden açın; sonra Wi-Fi'yi açın.
 
-**Beklenen:** Giriş ekranında "Bu bağlantı güvenli değil" uyarısı **görünmez**. Wi-Fi kapalıyken de
-uygulama açılır (rozet çevrimdışı), Wi-Fi gelince çevrimiçi olur.
+**Beklenen:** QR kodlar doğru adresleri açar. Giriş ekranında "Bu bağlantı güvenli değil" uyarısı
+**görünmez**. Uygulama ana ekrandan tam ekran açılır. Wi-Fi kapalıyken de uygulama açılır (rozet
+çevrimdışı), Wi-Fi gelince çevrimiçi olur.
 
 ## 4. Garson siparişi (tablet)
 
@@ -154,3 +156,43 @@ oluşmaz.
 
 **Beklenen:** Program açılır. Tabletler Ayarlar › Sunucu Adresi'ndeki adreslerle bağlanır
 (paketli sürümde HTTP `43127`, HTTPS `43128`).
+
+## 12. Telefondan garson siparişi
+
+**Yap:** Bir telefonda 3. adımı tekrarlayın (sertifika, adisyon, **Uygulamayı yükle**). Garson
+olarak girip bir masaya dokunun → iki ürün ekleyin → alttaki **Adisyonu gör** şeridine dokunun →
+**Mutfağa gönder** → **+ Ürün ekle**.
+
+**Beklenen:** Sayfa yana kaymaz, yazılar kesilmez. Ürün ekledikçe şeritte kalem sayısı, "mutfağa
+gönderilmedi" ve toplam güncellenir. Adisyonda iki kalem ve düğmeler tam görünür; mutfak fişi çıkar.
+**+ Ürün ekle** ürünlere döner.
+
+## 13. Bağlantı yokken ödeme
+
+**Yap:** Tablette (ya da telefonda) **yönetici/kasiyer** olarak girin → Wi-Fi'yi kapatın → boş bir
+masaya dokunun → ürün ekleyin → adisyonu açın. Sonra Wi-Fi'yi açın ve rozet yeşil olana kadar
+bekleyin.
+
+**Beklenen:** Wi-Fi kapalıyken **Ödeme al** pasiftir ve altında "Ödeme için ana bilgisayara
+bağlantı gerekir. Sipariş bu cihazda saklandı; bağlantı gelince gönderilir." yazar. Wi-Fi gelince
+sipariş ana makineye geçer, uyarı kalkar ve **Ödeme al** çalışır. Kasada tek ödeme kaydı oluşur.
+
+## 14. (İsteğe bağlı) WiFi'siz işletme
+
+**Yap:** Kasa bilgisayarını ve tableti bir Android telefonun erişim noktasına (hotspot) bağlayın;
+telefonun mobil verisi kapalı olabilir. Ayarlar › Sunucu Adresi'ndeki yeni adresle 3. ve 4. adımları
+kısaca tekrarlayın.
+
+**Beklenen:** Tablet kasaya bağlanır ve sipariş alınır. Bağlanamıyorsa telefon cihazların birbirini
+görmesine izin vermiyordur; internetsiz basit bir modem/router kullanın (kılavuz 6. bölüm › İşletmede
+WiFi yoksa).
+
+## 15. (Test ortamı kurulunca) İşletme paneli uygulaması
+
+**Yap:** `apps/cloud/README.md` › **Test ortamı** kurulduktan sonra aynı dosyadaki **Telefonla
+deneme** adımlarını yapın: paneli telefona yükleyin, uçak modunda fotoğraflı ürün ekleyip **Kaydet ve
+yayınla**, uçak modunu kapatın, **Çıkış** yapın.
+
+**Beklenen:** Panel uçak modunda açılır ve değişiklik cihazda saklanır; internet gelince birkaç
+saniyede yayınlanır ve müşteri sayfasında ürün ile fotoğraf görünür. Çıkıştan sonra uçak modunda
+panel menüyü göstermez, giriş için internet ister (cihaz verisi silinmiştir).

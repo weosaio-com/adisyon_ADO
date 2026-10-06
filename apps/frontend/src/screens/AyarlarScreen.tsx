@@ -1,10 +1,13 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, apiUpload, ApiError, hasPerm } from '../lib/api';
+import QRCode from 'qrcode';
 import { downloadText } from '../lib/export';
+import { InstallButton } from '../lib/install';
 import type { AppSetting, Backup } from '../lib/types';
 import BusinessInfoCard from './BusinessInfoCard';
+import CloudMenuCard from './CloudMenuCard';
 import PrinterSettingsCard from './PrinterSettingsCard';
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString('tr-TR');
@@ -46,6 +49,15 @@ export default function AyarlarScreen() {
         <ServerInfoCard />
         {hasPerm('settings.manage') && (
           <BusinessInfoCard
+            onError={fail}
+            onInfo={(m) => {
+              setError('');
+              setInfo(m);
+            }}
+          />
+        )}
+        {hasPerm('settings.manage') && (
+          <CloudMenuCard
             onError={fail}
             onInfo={(m) => {
               setError('');
@@ -97,22 +109,100 @@ function ServerInfoCard() {
   const caUrls = info.data?.caUrls ?? [];
   return (
     <div className="rounded-2xl bg-white p-4 shadow">
-      <h2 className="mb-1 font-bold text-slate-800">Sunucu Adresi (garson tableti)</h2>
+      <h2 className="mb-1 font-bold text-slate-800">Sunucu Adresi (tablet ve telefon)</h2>
       <p className="mb-2 text-sm text-slate-500">
         {httpsUrls.length > 0
-          ? 'Tabletlerde HTTPS adresini kullanın: bağlantı koptuğunda da uygulama açılır. Her tablete bir kez güvenlik sertifikasını kurun (kullanım kılavuzu, 6. bölüm).'
-          : 'Garson tabletinde tarayıcıya aşağıdaki adresi yazın. Ağ/IP değişirse buradan güncel adresi görebilirsiniz.'}
+          ? 'Tablet ve telefonlarda HTTPS adresini kullanın: bağlantı koptuğunda da uygulama açılır. Her cihaza bir kez güvenlik sertifikasını kurun (kullanım kılavuzu, 6. bölüm).'
+          : 'Tablet ya da telefonun tarayıcısında aşağıdaki adresi açın. Ağ/IP değişirse buradan güncel adresi görebilirsiniz.'}
       </p>
       {info.isLoading && <p className="text-sm text-slate-400">Yükleniyor…</p>}
       {!info.isLoading && urls.length === 0 && (
         <p className="text-sm text-slate-400">Ağ adresi bulunamadı.</p>
       )}
+      <QrSetup appUrl={httpsUrls[0] ?? urls[0]} caUrl={caUrls[0]} />
+      <InstallButton
+        label="Bu cihaza uygulama olarak yükle"
+        className="mt-3 rounded-lg bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-800"
+      />
       <UrlGroup title="HTTPS (önerilen)" urls={httpsUrls} />
       <UrlGroup title="Sertifika indirme adresi (tablette bir kez açın)" urls={caUrls} />
       <UrlGroup
         title={httpsUrls.length > 0 ? 'HTTP (sertifikasız; çevrimdışı açılmaz)' : ''}
         urls={urls}
       />
+      <details className="mt-3 rounded-xl bg-slate-50 p-3 text-sm" data-testid="no-wifi-help">
+        <summary className="cursor-pointer font-semibold text-slate-700">
+          İşletmede WiFi yoksa
+        </summary>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-600">
+          <li>
+            İnternet gerekmez; bu bilgisayarla tablet ve telefonların aynı ağda olması yeterli.
+          </li>
+          <li>
+            Önerilen: internet bağlantısı olmayan basit bir modem/router. Bu bilgisayarı kabloyla,
+            tablet ve telefonları WiFi ile bağlayın.
+          </li>
+          <li>
+            Geçici çözüm: bir Android telefonun erişim noktasını (hotspot) açıp bu bilgisayarı ve
+            diğer cihazları ona bağlayın; mobil veri kapalı olabilir. İlk kurulumda deneyin.
+          </li>
+          <li>Hiç ağ yoksa bu bilgisayar tek başına çalışır; siparişler buradan alınır.</li>
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+// Tablet/telefon kameraya okutup kurulumu tamamlasin: once sertifika (bir kez), sonra adisyon.
+function QrSetup({ appUrl, caUrl }: { appUrl: string | undefined; caUrl: string | undefined }) {
+  const [images, setImages] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const targets = [appUrl, caUrl].filter((url): url is string => Boolean(url));
+    void Promise.all(
+      targets.map(async (url) => {
+        const svg = await QRCode.toString(url, {
+          type: 'svg',
+          errorCorrectionLevel: 'M',
+          margin: 1,
+        });
+        return [url, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`] as const;
+      }),
+    ).then((entries) => {
+      if (!cancelled) setImages(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [appUrl, caUrl]);
+  if (!appUrl) return null;
+  const tiles = [
+    ...(caUrl ? [{ url: caUrl, caption: '1. Sertifika (her cihaza bir kez)' }] : []),
+    { url: appUrl, caption: caUrl ? '2. Adisyonu aç' : 'Adisyonu aç' },
+  ];
+  return (
+    <div className="mt-3">
+      <div className="grid max-w-md grid-cols-2 gap-3" data-testid="server-qr">
+        {tiles.map((tile) => (
+          <figure key={tile.url} className="rounded-xl bg-slate-50 p-2 text-center">
+            {images[tile.url] ? (
+              <img
+                src={images[tile.url]}
+                alt={tile.caption}
+                className="mx-auto aspect-square w-full"
+              />
+            ) : (
+              <div className="aspect-square w-full animate-pulse rounded bg-slate-100" />
+            )}
+            <figcaption className="mt-1 text-xs font-semibold text-slate-600">
+              {tile.caption}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        Tablet ya da telefonun kamerasıyla okutun; açılan sayfada “Uygulamayı yükle”ye dokunun.
+      </p>
     </div>
   );
 }

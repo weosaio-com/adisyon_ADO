@@ -6,6 +6,45 @@ Sürümleme: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Uygulama olarak yükleme ve internetsiz çalışma (2026-10-05):** işletme paneli ve adisyon,
+  telefona ve bilgisayara mağazasız yüklenen uygulama (PWA) oldu; web'den açılmaya devam eder. QR
+  menü yalnız web'de kalır.
+  - **İşletme paneli (`apps/qr-web` `/panel`):** "Uygulamayı yükle" (iPhone/iPad'de Ana Ekrana Ekle
+    yönergesi), simgeler ve manifest; service worker yalnız `/panel` kapsamında, müşteri sayfasında
+    yok. Son menü, masalar ve QR kartları cihazda saklanır (IndexedDB); panel internetsiz açılır.
+    Menü ve fotoğraflar internetsiz düzenlenir, **internet gelince kendiliğinden yayınlanır**
+    (sürüm kontrollü; çakışmada üzerine yazmaz). Çıkışta cihaz verisi silinir.
+  - **Adisyon (`apps/frontend`):** giriş ekranında ve Ayarlar › Sunucu Adresi kartında "Uygulamayı
+    yükle"; kartta tablet/telefonun kamerayla okutacağı **sertifika** ve **adisyon** QR kodları ile
+    "İşletmede WiFi yoksa" yönergesi. Bağlantısız cihazda **Ödeme al** pasif ve nedeni yazılı
+    (ödeme yalnız ana makinede). Telefonda ürünler ve adisyon ayrı görünüm (alt şeritte özet).
+    Çevrimdışı taslakta yanlış "Gel-al" rozeti düzeltildi.
+  - **Masaüstü:** QR menü kartından işletme paneli açılır; dış bağlantılar sistem tarayıcısında açılır.
+  - **Bulut test ortamı:** `wrangler.jsonc` › `env.test` (ayrı Worker `ado-qr-test`, D1 ve R2),
+    `deploy:test` ve `db:migrate:test` betikleri; kurulum `apps/cloud/README.md` › Test ortamı.
+  - **Testler:** `qr-menu.spec.ts` panel uygulaması ve internetsiz yayın; `offline.spec.ts` ödeme
+    notu; `pos-flow.spec.ts` 390 px garson akışı ve kurulum QR kodları; qr-web self-check'leri
+    `image-key` ve `sync-core`.
+- **QR menü — dijital menü (QR-1, 2026-09-30):** müşteri masadaki QR kodu okutur, menüyü telefonda
+  görür: fotoğraf, açıklama, 14 alerjen, diyet etiketleri, TR/EN, "tükendi". Bkz.
+  `QR_MENU_DESIGN.md`.
+  - **POS:** üründe **QR menü bilgileri** (açıklama, alerjen, diyet, İngilizce ad, görsel — tarayıcıda
+    800 px WebP), **Tükendi** düğmesi (`PATCH /products/:id/availability`; tükenen ürün siparişe
+    eklenemez, `PRODUCT_UNAVAILABLE`), masaya tahmin edilemez QR kodu (`POST /tables/:id/public-code`).
+    **Ayarlar › QR Menü (Bulut)** kartı: eşleştirme kodu ile bağlanma, ürün/kategori/masa değişince
+    5 sn birleştirilmiş otomatik yayın ve yeniden deneme (`/cloud/*`); yazdırılabilir masa QR
+    kartları (`/qr-codes`). Veritabanı: `20260928120000_qr_menu_fields` (yalnız sütun ekler).
+  - **Bulut `apps/cloud`** (Cloudflare Worker + D1 + R2): müşteri menüsü (`/api/m/:code`, ETag),
+    içerik adresli görseller, POS yayın API'si, işletme paneli API'si (çerez oturumu, CSRF, sürüm
+    kontrollü kayıt), satıcı API'si (`ADMIN_TOKEN`), paketler (`menu`/`order`/`pay`/`full`). Kurulum
+    ve yayına alma: `apps/cloud/README.md`.
+  - **`apps/qr-web`:** müşteri menüsü `/m/:code` (arama, kategori sekmeleri, diyet ve "içermesin"
+    alerjen filtresi, ürün ayrıntısı, durum ekranları) ve işletme paneli `/panel` (POS'suz işletmede
+    menü yönetimi, masalar ve QR yazdırma, işletme bilgileri, POS eşleştirme, parola değiştirme).
+  - **Ortak şema:** `@ado/shared/menu` (zod) ve tarayıcı için bağımlılıksız `@ado/shared/menu-core`.
+  - **Testler:** bulut vitest 30 (gerçek workerd), backend smoke 86 → 112 kontrol, Playwright
+    `menu-screen.spec.ts` ve `qr-menu.spec.ts` (POS + yerel bulut; POS'lu ve POS'suz akış); CI'da
+    yeni `e2e-cloud` işi.
 - **Yazıcı kurulumu (2026-09-27):** Ayarlar > Yazıcılar — Windows'ta yüklü yazıcıyı seçip ekleme
   (`GET /printers/discover`), test sayfası, mutfak/müşteri fişi ve kategoriye özel (bar)
   yönlendirme, son 24 saatin fişleri (önizleme), yazdırılamayan fişi tekrar dene/kaldır

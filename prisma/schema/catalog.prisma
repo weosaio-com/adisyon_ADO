@@ -9,16 +9,18 @@
 // =============================================================================
 
 model Category {
-  id        String     @id
-  branchId  String     @map("branch_id")
-  name      String
-  parentId  String?    @map("parent_id")
-  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
-  children  Category[] @relation("CategoryTree")
-  sortOrder Int        @default(0) @map("sort_order")
-  color     String?
-  isActive  Boolean    @default(true) @map("is_active")
-  products  Product[]
+  id               String     @id
+  branchId         String     @map("branch_id")
+  name             String
+  parentId         String?    @map("parent_id")
+  parent           Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children         Category[] @relation("CategoryTree")
+  sortOrder        Int        @default(0) @map("sort_order")
+  color            String?
+  isActive         Boolean    @default(true) @map("is_active")
+  // QR menu cevirileri — JSON (TEXT), @ado/shared MenuTranslations
+  translationsJson String     @default("{}") @map("translations")
+  products         Product[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -87,30 +89,36 @@ model Tax {
 }
 
 model Product {
-  id             String          @id
-  branchId       String          @map("branch_id")
-  categoryId     String          @map("category_id")
-  category       Category        @relation(fields: [categoryId], references: [id])
-  brandId        String?         @map("brand_id")
-  brand          Brand?          @relation(fields: [brandId], references: [id])
-  unitId         String          @map("unit_id")
-  unit           Unit            @relation(fields: [unitId], references: [id])
-  taxId          String          @map("tax_id")
-  tax            Tax             @relation(fields: [taxId], references: [id])
-  name           String
-  barcode        String?
-  sku            String?
-  purchasePrice  Int             @default(0) @map("purchase_price") // kurus
-  salePrice      Int             @map("sale_price") // kurus
-  trackStock     Boolean         @default(false) @map("track_stock")
-  minStock       Int?            @map("min_stock") // milis
-  imagePath      String?         @map("image_path")
-  isActive       Boolean         @default(true) @map("is_active")
-  isFavorite     Boolean         @default(false) @map("is_favorite")
-  sortOrder      Int             @default(0) @map("sort_order")
-  orderItems     OrderItem[]
-  purchaseItems  PurchaseItem[]
-  stockMovements StockMovement[]
+  id               String          @id
+  branchId         String          @map("branch_id")
+  categoryId       String          @map("category_id")
+  category         Category        @relation(fields: [categoryId], references: [id])
+  brandId          String?         @map("brand_id")
+  brand            Brand?          @relation(fields: [brandId], references: [id])
+  unitId           String          @map("unit_id")
+  unit             Unit            @relation(fields: [unitId], references: [id])
+  taxId            String          @map("tax_id")
+  tax              Tax             @relation(fields: [taxId], references: [id])
+  name             String
+  barcode          String?
+  sku              String?
+  purchasePrice    Int             @default(0) @map("purchase_price") // kurus
+  salePrice        Int             @map("sale_price") // kurus
+  trackStock       Boolean         @default(false) @map("track_stock")
+  minStock         Int?            @map("min_stock") // milis
+  imagePath        String?         @map("image_path") // gorsel anahtari <sha256>.<uzanti> (<veri dizini>/images)
+  // QR menu alanlari (@ado/shared menu.ts). JSON'lar TEXT olarak saklanir; API cozulmus doner.
+  description      String?
+  allergensJson    String          @default("[]") @map("allergens") // Allergen[]
+  dietTagsJson     String          @default("[]") @map("diet_tags") // DietTag[]
+  translationsJson String          @default("{}") @map("translations") // MenuTranslations
+  isAvailable      Boolean         @default(true) @map("is_available") // false = tukendi (pasiften ayri: listede kalir)
+  isActive         Boolean         @default(true) @map("is_active")
+  isFavorite       Boolean         @default(false) @map("is_favorite")
+  sortOrder        Int             @default(0) @map("sort_order")
+  orderItems       OrderItem[]
+  purchaseItems    PurchaseItem[]
+  stockMovements   StockMovement[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")

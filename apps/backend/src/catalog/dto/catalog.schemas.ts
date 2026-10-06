@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  allergenListSchema,
+  dietTagListSchema,
+  MENU_LIMITS,
+  menuTranslationsSchema,
+} from '@ado/shared';
 
 /** Query string 'true'/'false' -> boolean. z.coerce.boolean 'false'i true yapar; kullanmiyoruz. */
 const boolQuery = z
@@ -13,6 +19,7 @@ export const createCategorySchema = z.object({
   sortOrder: z.number().int().optional(),
   color: z.string().nullish(),
   isActive: z.boolean().optional(),
+  translations: menuTranslationsSchema.optional(),
 });
 export const updateCategorySchema = createCategorySchema.partial();
 export type CreateCategoryDto = z.infer<typeof createCategorySchema>;
@@ -34,6 +41,12 @@ export const createProductSchema = z.object({
   isActive: z.boolean().optional(),
   isFavorite: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  // QR menu (@ado/shared menu.ts)
+  description: z.string().trim().max(MENU_LIMITS.description).nullish(),
+  allergens: allergenListSchema.optional(),
+  dietTags: dietTagListSchema.optional(),
+  translations: menuTranslationsSchema.optional(),
+  isAvailable: z.boolean().optional(),
 });
 export const updateProductSchema = createProductSchema.partial();
 export type CreateProductDto = z.infer<typeof createProductSchema>;
@@ -47,6 +60,9 @@ export const productQuerySchema = z.object({
   search: z.string().optional(),
 });
 export type ProductQueryDto = z.infer<typeof productQuerySchema>;
+
+export const productAvailabilitySchema = z.object({ isAvailable: z.boolean() });
+export type ProductAvailabilityDto = z.infer<typeof productAvailabilitySchema>;
 
 // --- Birim ---
 export const createUnitSchema = z.object({

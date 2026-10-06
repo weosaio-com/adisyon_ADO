@@ -49,8 +49,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # Tum paketlerin self-check'leri (backend + frontend + desktop).
-      - name: Unit tests (self-check)
+      # Tum paketlerin testleri: self-check'ler (shared, backend, frontend, qr-web, desktop) ve
+      # bulut Worker'inin vitest'i (gercek workerd; D1/R2 yerel simulasyon).
+      - name: Unit tests (self-check + cloud vitest)
         run: pnpm test
 
   # Kritik para yollari e2e: sunucu + seed + smoke (merge/split/iade/idempotency).
@@ -164,5 +165,81 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
+          path: apps/frontend/playwright-report/
+          retention-days: 7
+
+  # QR menu uctan uca: POS + bulut (Cloudflare Worker yerelde `wrangler dev`, D1/R2 simulasyonu).
+  # POS'lu akis (eslestirme, otomatik yayin, tukendi) ve POS'suz akis (panel, 390 px musteri).
+  e2e-cloud:
+    runs-on: ubuntu-latest
+    env:
+      HUSKY: '0'
+      DATABASE_URL: 'file:./e2e-cloud.db'
+      JWT_ACCESS_SECRET: 'ci-test-access-secret-0123456789'
+      JWT_REFRESH_SECRET: 'ci-test-refresh-secret-0123456789'
+      BACKUP_ENCRYPTION_KEY: 'ci-test-backup-key-0123456789abcdef'
+      SEED_OWNER_USERNAME: 'owner'
+      SEED_OWNER_PASSWORD: 'owner1234'
+      API_PORT: '3001'
+      E2E_CLOUD_URL: 'http://127.0.0.1:8787'
+      E2E_CLOUD_ADMIN_TOKEN: 'ci-test-admin-token-0123456789'
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm prisma:generate
+
+      - name: Build shared (@ado/shared dist -> backend bagimliligi)
+        run: pnpm --filter @ado/shared build
+
+      # POS arayuzu backend'den, musteri menusu ve panel buluttan (qr-web dist) sunulur.
+      - name: Build frontend + qr-web
+        run: |
+          pnpm --filter @ado/frontend build
+          pnpm --filter @ado/qr-web build
+
+      - name: Migrate + seed (temiz e2e DB)
+        run: |
+          pnpm exec prisma migrate deploy
+          pnpm --filter @ado/backend run seed
+
+      - name: Playwright tarayici (chromium)
+        run: pnpm --filter @ado/frontend exec playwright install --with-deps chromium
+
+      - name: Bulut + sunucu + QR menu E2E
+        run: |
+          echo "ADMIN_TOKEN=${E2E_CLOUD_ADMIN_TOKEN}" > apps/cloud/.dev.vars
+          pnpm --filter @ado/cloud run db:migrate:local
+          pnpm --filter @ado/cloud exec wrangler dev --port 8787 --ip 127.0.0.1 > wrangler.log 2>&1 &
+          pnpm --filter @ado/backend run dev &
+          for i in $(seq 1 90); do
+            curl -sf "http://127.0.0.1:${API_PORT}/api/v1/health" >/dev/null \
+              && curl -sf "${E2E_CLOUD_URL}/api/health" >/dev/null && break
+            sleep 1
+          done
+          pnpm --filter @ado/frontend run test:e2e:cloud
+
+      - name: Bulut gunlugu (hata halinde)
+        if: failure()
+        run: tail -n 200 wrangler.log || true
+
+      - name: Playwright raporu (hata halinde)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-cloud
           path: apps/frontend/playwright-report/
           retention-days: 7

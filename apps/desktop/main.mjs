@@ -1,6 +1,6 @@
 // Electron ince kabuk: backend calismiyorsa cocuk surec olarak baslatir,
 // saglik kontrolu gecince pencereyi acar. UI tamamen backend'in sundugu web.
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
@@ -134,6 +134,13 @@ app.whenReady().then(async () => {
     }
     const win = new BrowserWindow({ width: 1280, height: 800 });
     win.removeMenu();
+    // Disari giden baglantilar (isletme paneli vb.) sistem tarayicisinda acilir; programin
+    // icinde menusuz, adres cubugusuz bir pencere olarak kalmaz.
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (url === BASE || url.startsWith(`${BASE}/`)) return { action: 'allow' };
+      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+      return { action: 'deny' };
+    });
     // Desktop her zaman paketle gelen UI'yi acsin; eski PWA app-shell'i kalmasin.
     await win.webContents.session.clearStorageData({
       storages: ['serviceworkers', 'cachestorage'],

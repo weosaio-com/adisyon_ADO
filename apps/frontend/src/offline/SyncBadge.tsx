@@ -13,12 +13,13 @@ const LABEL: Record<SyncMode, { text: string; cls: string }> = {
   degraded: { text: 'Owner onayı bekliyor', cls: 'bg-orange-100 text-orange-700' },
 };
 
-export default function SyncBadge() {
+// Ayni ekranda ikinci rozet (telefon basligi) ayri test kimligi alir: e2e seciciler tek ogeye cozulsun.
+export default function SyncBadge({ testId = 'sync-badge' }: { testId?: string }) {
   const { mode, pending } = useSyncState();
   const l = LABEL[mode];
   return (
     <span
-      data-testid="sync-badge"
+      data-testid={testId}
       data-mode={mode}
       className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${l.cls}`}
       title="Bağlantı durumu"

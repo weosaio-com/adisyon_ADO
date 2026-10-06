@@ -11,3 +11,5 @@ allowBuilds:
   esbuild: true
   prisma: true
   electron-winstaller: false
+  # Cloudflare yerel calisma zamani (bulut testleri/wrangler dev): platform ikilisini dogrular.
+  workerd: true

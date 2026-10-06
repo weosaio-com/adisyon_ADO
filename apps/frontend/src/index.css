@@ -75,6 +75,9 @@ textarea {
 }
 
 @media print {
+  @page {
+    margin: 10mm;
+  }
   html,
   body,
   #root {

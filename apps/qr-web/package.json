@@ -1,0 +1,33 @@
+{
+  "name": "@ado/qr-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QR menu musteri sayfasi (/m/<kod>) ve isletme paneli (/panel); apps/cloud Worker'inin statik varliklari",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types src/lib/menu-view.selfcheck.ts && node --experimental-strip-types src/lib/money.selfcheck.ts && node --experimental-strip-types src/lib/tables.selfcheck.ts && node --experimental-strip-types src/lib/image-key.selfcheck.ts && node --experimental-strip-types src/panel/sync-core.selfcheck.ts"
+  },
+  "dependencies": {
+    "@ado/shared": "workspace:*",
+    "@tanstack/react-query": "^5.62.0",
+    "idb": "^8.0.3",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^1.3.0"
+  }
+}

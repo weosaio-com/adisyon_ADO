@@ -1,0 +1,46 @@
+{
+  // QR menu bulutu: tek Worker. /api/* ve /img/* Worker'a, gerisi qr-web statik varliklarina
+  // (musteri menusu /m/<kod> + /panel; SPA). Yayina alma: apps/cloud/README.md
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ado-qr",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../qr-web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/img/*"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ado-qr",
+      // Yayina alirken `wrangler d1 create ado-qr` ciktisindaki kimlikle degistirin.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ado-qr-images" }],
+  // Gizli: ADMIN_TOKEN (satici API'si) — `wrangler secret put ADMIN_TOKEN`; yerelde .dev.vars.
+  "env": {
+    // Deneme ortami: ayri Worker, veritabani ve gorsel deposu; gercek isletme verisine dokunmaz.
+    // Adres https://ado-qr-test.<hesap>.workers.dev (alan adi gerekmez). Kurulum: README › Test ortami.
+    // D1 ve R2 baglantilari ortamlar arasinda miras alinmaz; burada yeniden yazilir.
+    "test": {
+      "name": "ado-qr-test",
+      "workers_dev": true,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ado-qr-test",
+          // `wrangler d1 create ado-qr-test` ciktisindaki kimlikle degistirin.
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ado-qr-images-test" }],
+      // Gizli: `wrangler secret put ADMIN_TOKEN --env test` (canli ortamdan farkli bir deger).
+    },
+  },
+}

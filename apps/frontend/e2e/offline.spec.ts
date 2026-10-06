@@ -74,6 +74,13 @@ test('offline siparis alma + yenileme kaliciligi + reconnect senkron (kayipsiz)'
   await expect(page.getByTestId('order-item')).toHaveCount(1);
   await expect(page.locator('aside').getByText(f.productName)).toBeVisible();
 
+  // Odeme ana bilgisayarda: baglanti yokken alinmaz ve nedeni yazilir (siparis saklanir).
+  const pay = page.getByRole('button', { name: 'Ödeme al' });
+  await expect(pay).toBeDisabled();
+  await expect(page.getByTestId('pay-offline-hint')).toContainText(
+    'Ödeme için ana bilgisayara bağlantı gerekir',
+  );
+
   // mutfaga gonder (offline)
   await page.getByTestId('send-kitchen').click();
 
@@ -91,4 +98,7 @@ test('offline siparis alma + yenileme kaliciligi + reconnect senkron (kayipsiz)'
   });
   // sunucu adisyonu offline kalemi tasidi (kayipsiz)
   await expect(page.getByTestId('order-item')).toHaveCount(1);
+  // Baglanti geldi: odeme alinabilir, uyari kalkar.
+  await expect(page.getByTestId('pay-offline-hint')).toHaveCount(0);
+  await expect(pay).toBeEnabled();
 });

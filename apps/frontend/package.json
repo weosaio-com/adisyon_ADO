@@ -8,12 +8,15 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types src/offline/sync-core.selfcheck.ts && node --experimental-strip-types src/lib/api.selfcheck.ts && node --experimental-strip-types src/lib/format.selfcheck.ts && node --experimental-strip-types src/lib/export.selfcheck.ts && node --experimental-strip-types src/screens/report-audit.selfcheck.ts && node --experimental-strip-types src/screens/KasaScreen.selfcheck.ts && node --experimental-strip-types src/screens/payment-input.selfcheck.ts",
-    "test:e2e": "playwright test"
+    "test": "node --experimental-strip-types src/offline/sync-core.selfcheck.ts && node --experimental-strip-types src/lib/api.selfcheck.ts && node --experimental-strip-types src/lib/format.selfcheck.ts && node --experimental-strip-types src/lib/export.selfcheck.ts && node --experimental-strip-types src/screens/report-audit.selfcheck.ts && node --experimental-strip-types src/screens/KasaScreen.selfcheck.ts && node --experimental-strip-types src/screens/payment-input.selfcheck.ts && node --experimental-strip-types src/lib/image.selfcheck.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:cloud": "playwright test qr-menu"
   },
   "dependencies": {
+    "@ado/shared": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "idb": "^8.0.3",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0",
@@ -22,6 +25,7 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

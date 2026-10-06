@@ -5,11 +5,14 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
-import { newId, createDomainEvent, DomainEventName } from '@ado/shared';
+import type { Readable } from 'node:stream';
+import { newId, createDomainEvent, DomainEventName, type MenuTranslations } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import { DEFAULT_UNITS, DEFAULT_TAXES } from './catalog.defaults';
+import { categoryView, compactTranslations, productView } from './catalog.views';
+import { storeMenuImage } from './catalog.images';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type {
   CreateCategoryDto,
@@ -28,6 +31,8 @@ import type {
  * Ortak kurallar: her islem branchId ile izole, soft-delete (deletedAt),
  * her mutasyonda version++ + syncState='pending' (Faz 2 outbox) + audit kaydi.
  * Para/oran integer (kurus/binde) -> DTO seviyesinde zorlanir (float yok).
+ * QR menu alanlari (aciklama, alerjen, diyet, ceviri) TEXT JSON saklanir; yanitlar
+ * `catalog.views` ile cozulmus doner.
  */
 @Injectable()
 export class CatalogService implements OnModuleInit {
@@ -108,18 +113,42 @@ export class CatalogService implements OnModuleInit {
     );
   }
 
+  // Kategori event'i: QR menu yayini kategori ad/ceviri/sira degisikligini buradan duyar.
+  private async publishCategoryEvent(
+    user: AuthUser,
+    name: (typeof DomainEventName)[keyof typeof DomainEventName],
+    category: { id: string; name: string },
+  ): Promise<void> {
+    await this.events.publish(
+      createDomainEvent(
+        name,
+        { categoryId: category.id, name: category.name },
+        {
+          branchId: user.branchId,
+          actorId: user.userId,
+          ...(user.deviceId ? { deviceId: user.deviceId } : {}),
+        },
+      ),
+    );
+  }
+
+  private translationsJson(translations: MenuTranslations): string {
+    return JSON.stringify(compactTranslations(translations));
+  }
+
   // ===========================================================================
   // Kategori
   // ===========================================================================
-  listCategories(user: AuthUser) {
-    return this.prisma.category.findMany({
+  async listCategories(user: AuthUser) {
+    const rows = await this.prisma.category.findMany({
       where: { branchId: user.branchId, deletedAt: null },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    return rows.map(categoryView);
   }
 
   async getCategory(user: AuthUser, id: string) {
-    return this.categoryOrThrow(user.branchId, id);
+    return categoryView(await this.categoryOrThrow(user.branchId, id));
   }
 
   async createCategory(user: AuthUser, dto: CreateCategoryDto) {
@@ -135,6 +164,7 @@ export class CatalogService implements OnModuleInit {
         sortOrder: dto.sortOrder ?? 0,
         color: dto.color ?? null,
         isActive: dto.isActive ?? true,
+        translationsJson: this.translationsJson(dto.translations ?? {}),
         ...this.provenance(user),
       },
     });
@@ -147,7 +177,8 @@ export class CatalogService implements OnModuleInit {
       newValue: created,
       ...this.provenance(user),
     });
-    return created;
+    await this.publishCategoryEvent(user, DomainEventName.CategoryCreated, created);
+    return categoryView(created);
   }
 
   async updateCategory(user: AuthUser, id: string, dto: UpdateCategoryDto) {
@@ -170,6 +201,9 @@ export class CatalogService implements OnModuleInit {
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.color !== undefined ? { color: dto.color } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.translations !== undefined
+          ? { translationsJson: this.translationsJson(dto.translations) }
+          : {}),
         version: { increment: 1 },
         syncState: 'pending',
       },
@@ -184,7 +218,8 @@ export class CatalogService implements OnModuleInit {
       newValue: after,
       ...this.provenance(user),
     });
-    return after;
+    await this.publishCategoryEvent(user, DomainEventName.CategoryUpdated, after);
+    return categoryView(after);
   }
 
   async deleteCategory(user: AuthUser, id: string) {
@@ -205,7 +240,10 @@ export class CatalogService implements OnModuleInit {
       });
     }
 
-    const after = await this.softDelete('category', id);
+    const after = await this.prisma.category.update({
+      where: { id },
+      data: { deletedAt: new Date(), version: { increment: 1 }, syncState: 'pending' },
+    });
     await this.audit.record({
       branchId: user.branchId,
       action: 'category.delete',
@@ -215,14 +253,15 @@ export class CatalogService implements OnModuleInit {
       oldValue: before,
       ...this.provenance(user),
     });
-    return after;
+    await this.publishCategoryEvent(user, DomainEventName.CategoryDeleted, before);
+    return categoryView(after);
   }
 
   // ===========================================================================
   // Urun
   // ===========================================================================
-  listProducts(user: AuthUser, query: ProductQueryDto) {
-    return this.prisma.product.findMany({
+  async listProducts(user: AuthUser, query: ProductQueryDto) {
+    const rows = await this.prisma.product.findMany({
       where: {
         branchId: user.branchId,
         deletedAt: null,
@@ -234,10 +273,11 @@ export class CatalogService implements OnModuleInit {
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    return rows.map(productView);
   }
 
   async getProduct(user: AuthUser, id: string) {
-    return this.productOrThrow(user.branchId, id);
+    return productView(await this.productOrThrow(user.branchId, id));
   }
 
   async createProduct(user: AuthUser, dto: CreateProductDto) {
@@ -262,6 +302,11 @@ export class CatalogService implements OnModuleInit {
         isActive: dto.isActive ?? true,
         isFavorite: dto.isFavorite ?? false,
         sortOrder: dto.sortOrder ?? 0,
+        description: dto.description?.trim() || null,
+        allergensJson: JSON.stringify(dto.allergens ?? []),
+        dietTagsJson: JSON.stringify(dto.dietTags ?? []),
+        translationsJson: this.translationsJson(dto.translations ?? {}),
+        isAvailable: dto.isAvailable ?? true,
         ...this.provenance(user),
       },
     });
@@ -275,7 +320,7 @@ export class CatalogService implements OnModuleInit {
       ...this.provenance(user),
     });
     await this.publishProductEvent(user, DomainEventName.ProductCreated, created);
-    return created;
+    return productView(created);
   }
 
   async updateProduct(user: AuthUser, id: string, dto: UpdateProductDto) {
@@ -299,6 +344,13 @@ export class CatalogService implements OnModuleInit {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.isFavorite !== undefined ? { isFavorite: dto.isFavorite } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+        ...(dto.description !== undefined ? { description: dto.description?.trim() || null } : {}),
+        ...(dto.allergens !== undefined ? { allergensJson: JSON.stringify(dto.allergens) } : {}),
+        ...(dto.dietTags !== undefined ? { dietTagsJson: JSON.stringify(dto.dietTags) } : {}),
+        ...(dto.translations !== undefined
+          ? { translationsJson: this.translationsJson(dto.translations) }
+          : {}),
+        ...(dto.isAvailable !== undefined ? { isAvailable: dto.isAvailable } : {}),
         version: { increment: 1 },
         syncState: 'pending',
       },
@@ -314,12 +366,73 @@ export class CatalogService implements OnModuleInit {
       ...this.provenance(user),
     });
     await this.publishProductEvent(user, DomainEventName.ProductUpdated, after);
-    return after;
+    return productView(after);
+  }
+
+  /** "Tukendi" anahtari: urun listede kalir, siparis verilemez (orders: PRODUCT_UNAVAILABLE). */
+  async setAvailability(user: AuthUser, id: string, isAvailable: boolean) {
+    const before = await this.productOrThrow(user.branchId, id);
+    if (before.isAvailable === isAvailable) return productView(before);
+    const after = await this.prisma.product.update({
+      where: { id },
+      data: { isAvailable, version: { increment: 1 }, syncState: 'pending' },
+    });
+    await this.audit.record({
+      branchId: user.branchId,
+      action: 'product.availability',
+      entityType: 'product',
+      entityId: id,
+      userId: user.userId,
+      oldValue: { isAvailable: before.isAvailable },
+      newValue: { isAvailable },
+      ...this.provenance(user),
+    });
+    await this.publishProductEvent(user, DomainEventName.ProductUpdated, after);
+    return productView(after);
+  }
+
+  /** Gorsel yukle (govde: JPEG/PNG/WebP, en fazla 1 MB). Ayni icerik bir kez saklanir. */
+  async setImage(user: AuthUser, id: string, body: Readable) {
+    const before = await this.productOrThrow(user.branchId, id);
+    const imagePath = await storeMenuImage(body);
+    return this.updateImage(user, before, imagePath);
+  }
+
+  async clearImage(user: AuthUser, id: string) {
+    const before = await this.productOrThrow(user.branchId, id);
+    return this.updateImage(user, before, null);
+  }
+
+  private async updateImage(
+    user: AuthUser,
+    before: Awaited<ReturnType<CatalogService['productOrThrow']>>,
+    imagePath: string | null,
+  ) {
+    if (before.imagePath === imagePath) return productView(before);
+    const after = await this.prisma.product.update({
+      where: { id: before.id },
+      data: { imagePath, version: { increment: 1 }, syncState: 'pending' },
+    });
+    await this.audit.record({
+      branchId: user.branchId,
+      action: imagePath ? 'product.image.set' : 'product.image.clear',
+      entityType: 'product',
+      entityId: before.id,
+      userId: user.userId,
+      oldValue: { imagePath: before.imagePath },
+      newValue: { imagePath },
+      ...this.provenance(user),
+    });
+    await this.publishProductEvent(user, DomainEventName.ProductUpdated, after);
+    return productView(after);
   }
 
   async deleteProduct(user: AuthUser, id: string) {
     const before = await this.productOrThrow(user.branchId, id);
-    const after = await this.softDelete('product', id);
+    const after = await this.prisma.product.update({
+      where: { id },
+      data: { deletedAt: new Date(), version: { increment: 1 }, syncState: 'pending' },
+    });
     await this.audit.record({
       branchId: user.branchId,
       action: 'product.delete',
@@ -330,7 +443,7 @@ export class CatalogService implements OnModuleInit {
       ...this.provenance(user),
     });
     await this.publishProductEvent(user, DomainEventName.ProductDeleted, before);
-    return after;
+    return productView(after);
   }
 
   // ===========================================================================
@@ -590,18 +703,15 @@ export class CatalogService implements OnModuleInit {
     }
   }
 
-  // Ortak soft-delete: deletedAt + version++ + syncState.
-  private softDelete(model: 'category' | 'product' | 'unit' | 'tax', id: string) {
+  // Ortak soft-delete: deletedAt + version++ + syncState. Kategori/urun kendi yanit
+  // gorunumleriyle (catalog.views) silindigi icin burada yalniz birim/vergi var.
+  private softDelete(model: 'unit' | 'tax', id: string) {
     const data = {
       deletedAt: new Date(),
       version: { increment: 1 },
       syncState: 'pending',
     };
     switch (model) {
-      case 'category':
-        return this.prisma.category.update({ where: { id }, data });
-      case 'product':
-        return this.prisma.product.update({ where: { id }, data });
       case 'unit':
         return this.prisma.unit.update({ where: { id }, data });
       case 'tax':

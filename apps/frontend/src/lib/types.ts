@@ -1,4 +1,6 @@
 // Backend yanit sekilleri (Faz-1 kullanilan alt kume).
+import type { Allergen, DietTag, MenuTranslations } from '@ado/shared/menu-core';
+
 export interface Hall {
   id: string;
   name: string;
@@ -13,6 +15,7 @@ export interface Table {
   status: string; // empty | occupied | ...
   seats?: number;
   isActive?: boolean;
+  publicCode?: string | null; // QR menu masa kodu (/m/<kod>)
 }
 
 export interface OrderItemNote {
@@ -108,6 +111,7 @@ export interface Category {
   id: string;
   name: string;
   sortOrder?: number;
+  translations?: MenuTranslations;
 }
 
 export interface Product {
@@ -119,6 +123,13 @@ export interface Product {
   taxId?: string;
   isActive?: boolean;
   isFavorite?: boolean;
+  // QR menu alanlari
+  description?: string | null;
+  allergens?: Allergen[];
+  dietTags?: DietTag[];
+  translations?: MenuTranslations;
+  isAvailable?: boolean; // false = tukendi (listede kalir, siparise eklenemez)
+  imagePath?: string | null; // gorsel anahtari -> catalogImageUrl()
 }
 
 export interface Unit {
@@ -217,4 +228,21 @@ export interface PrintJobRow {
   printerName: string;
   summary: string;
   text: string; // yaziciya giden metin (onizleme)
+}
+
+// QR menu bulut baglantisi (GET /cloud/status).
+export interface CloudStatus {
+  enabled: boolean; // lisans QR menuyu kapatmadiysa true
+  connected: boolean;
+  url: string | null;
+  branchName: string | null;
+  tenantName: string | null;
+  planLabel: string | null;
+  menuEnabled: boolean | null; // paket QR menuyu iceriyor mu
+  pairedAt: string | null;
+  lastPublishedAt: string | null;
+  lastMenuVersion: number | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  publishing: boolean;
 }

@@ -107,4 +107,11 @@ export class TablesController {
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.tables.deleteTable(user, id);
   }
+
+  // QR menu kodunu yenile (eski QR gecersiz olur).
+  @Post(':id/public-code')
+  @RequirePermissions(Permission.TableManage)
+  rotatePublicCode(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.tables.rotatePublicCode(user, id);
+  }
 }

@@ -114,6 +114,11 @@ export async function api<T = unknown>(
   return parse<T>(res);
 }
 
+/** Urun gorselinin adresi (herkese acik, suresiz onbellekli; anahtar icerik ozetidir). */
+export function catalogImageUrl(key: string): string {
+  return `${BASE}/catalog/images/${encodeURIComponent(key)}`;
+}
+
 /** Dosya yukle (application/octet-stream); JWT + 401'de refresh api() ile ayni. */
 export function apiUpload<T = unknown>(path: string, file: Blob): Promise<T> {
   return api<T>(path, { method: 'POST', file });

@@ -2,6 +2,7 @@ node_modules
 dist
 build
 coverage
+.wrangler
 **/.prisma
 **/generated
 pnpm-lock.yaml
