@@ -368,7 +368,11 @@ function SaveBar() {
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 backdrop-blur print:hidden">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <p className="w-full text-sm sm:w-auto sm:min-w-0 sm:flex-1" data-testid="save-status">
+        <p
+          className="w-full text-sm sm:w-auto sm:min-w-0 sm:flex-1"
+          data-testid="save-status"
+          data-state={state.kind}
+        >
           {message}
         </p>
         {actions}
