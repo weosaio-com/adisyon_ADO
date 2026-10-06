@@ -34,8 +34,7 @@
         {
           "binding": "DB",
           "database_name": "ado-qr-test",
-          // `wrangler d1 create ado-qr-test` ciktisindaki kimlikle degistirin.
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "c458654c-23da-47dc-94fc-d7cdfe5cf02a",
           "migrations_dir": "migrations",
         },
       ],
