@@ -305,8 +305,21 @@ export function MenuDraftProvider({
     },
     save: () => {
       setError('');
-      if (online) void publish();
-      else setPublishPending(true);
+      if (online) {
+        void publish();
+        return;
+      }
+      // Internetsiz: "yayin bekliyor" isareti once cihaza yazilir, sonra "Kaydedildi" gorunur.
+      // Uygulama hemen ardindan kapansa da internet gelince kendiliginden yayinlanir.
+      const pending = latest.current.draft;
+      if (!pending) return;
+      void saveDraft({
+        branchId: branch.id,
+        menu: pending.menu,
+        baseVersion: pending.baseVersion,
+        publishPending: true,
+        updatedAt: new Date().toISOString(),
+      }).then(() => setPublishPending(true));
     },
     // Degisiklikleri at ve buluttaki guncel menuyu yukle (surum cakismasinda da).
     discard: () => {

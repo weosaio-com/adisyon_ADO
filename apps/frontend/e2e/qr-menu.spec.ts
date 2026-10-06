@@ -207,14 +207,20 @@ test('panel uygulama olarak yüklenir, internetsiz düzenlenir, internet gelince
   });
   await expect(panel.getByTestId('product-image')).toBeVisible();
   await panel.getByTestId('product-ok').click();
-  await expect(panel.getByTestId('save-status')).toContainText('İnternet yok');
+  const status = panel.getByTestId('save-status');
+  await expect(status).toHaveAttribute('data-state', 'dirty');
+  await expect(status).toContainText('İnternet yok');
+  // "Kaydederseniz…" ve "Kaydedildi…" metinlerinin ikisinde de "internet gelince" gecer; durum
+  // niteligi ayirir. "Kaydedildi" ancak bekleyen yayin cihaza yazildiktan sonra gorunur.
   await panel.getByTestId('save-menu').click();
-  await expect(panel.getByTestId('save-status')).toContainText('internet gelince');
+  await expect(status).toHaveAttribute('data-state', 'queued');
+  await expect(status).toContainText('Kaydedildi; internet gelince');
 
   // Uygulama kapanip acilsa da bekleyen kayit ve fotograf cihazda durur.
   await panel.reload();
   await expect(panel.getByTestId('panel-product-Filtre Kahve')).toBeVisible();
-  await expect(panel.getByTestId('save-status')).toContainText('internet gelince');
+  await expect(status).toHaveAttribute('data-state', 'queued');
+  await expect(status).toContainText('Kaydedildi; internet gelince');
 
   // Internet gelir: kayit kendiliginden yayinlanir.
   await context.setOffline(false);
