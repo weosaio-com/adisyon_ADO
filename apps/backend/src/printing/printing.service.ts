@@ -6,7 +6,9 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { spawn } from 'node:child_process';
+import { DURABLE_LISTENER } from '../common/events/durable-listener';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { newId, PrintJobStatus, DocumentType, type DomainEvent } from '@ado/shared';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,25 +19,26 @@ import type {
   UpdatePrinterDto,
   CreatePrintRouteDto,
 } from './dto/printing.schemas';
+import {
+  decodePrinterList,
+  encodeForPowerShell,
+  POWERSHELL_LIST_PRINTERS_SCRIPT,
+  POWERSHELL_PRINT_SCRIPT,
+  PRINTER_ENV,
+  printSummary,
+  printText,
+  type PrintPaymentLine,
+  type PrintPayload,
+} from './print-text';
 
-type PrintItem = {
-  name?: string;
-  quantity?: number;
-  price?: number;
-  total?: number;
-};
+const execFileAsync = promisify(execFile);
+// Adisyon/bilgi fisi mali belge degildir; ÖKC fisi/e-Arsiv ayrica duzenlenir.
+const FISCAL_NOTE = 'Bilgi fişidir — mali değeri yoktur.';
+// Basarisiz fis listesi (ve masa ekranindaki uyari) bu pencereye bakar.
+const JOB_LIST_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-type PrintPayload = {
-  text?: string;
-  title?: string;
-  orderNo?: string;
-  date?: string;
-  items?: PrintItem[];
-  discount?: number;
-  grandTotal?: number;
-};
-
-type DiscoveredPrinter = { id: string; name: string };
+/** Surucunun buldugu yazici: kaydederken connection/address aynen kullanilir. */
+type DiscoveredPrinter = { name: string; connection: string; address: string };
 type PrintableOrder = Prisma.OrderGetPayload<{
   include: { items: { include: { product: true } } };
 }>;
@@ -55,27 +58,14 @@ class MockPrinterDriver implements PrinterDriver {
   }
 
   async discover(): Promise<DiscoveredPrinter[]> {
-    return [{ id: 'mock-usb-1', name: 'Mock USB Thermal Printer' }];
+    return [
+      { name: 'Simülasyon yazıcı (fiş loga yazılır)', connection: 'usb', address: 'mock-usb-1' },
+    ];
   }
 
   getCapabilities() {
     return { cutter: true, drawer: true, qr: true };
   }
-}
-
-function printText(payload: PrintPayload): string {
-  if (payload.text) return `${payload.text}\r\n\r\n`;
-  const lines = [String(payload.title ?? ''), `Adisyon: ${payload.orderNo ?? '-'}`, ''];
-  for (const item of payload.items ?? []) {
-    const quantity = item.quantity ?? 1;
-    const total = item.total === undefined ? '' : `  ${Number(item.total).toFixed(2)} TL`;
-    lines.push(`${quantity} x ${item.name ?? ''}${total}`);
-  }
-  if (payload.discount) lines.push(`Indirim: ${Number(payload.discount).toFixed(2)} TL`);
-  if (payload.grandTotal !== undefined) {
-    lines.push('', `TOPLAM: ${Number(payload.grandTotal).toFixed(2)} TL`);
-  }
-  return `${lines.join('\r\n')}\r\n\r\n`;
 }
 
 class WindowsSpoolerDriver implements PrinterDriver {
@@ -84,16 +74,15 @@ class WindowsSpoolerDriver implements PrinterDriver {
       throw new Error('Windows spooler yazici adi tanimli degil.');
     }
     await new Promise<void>((resolve, reject) => {
+      // Yazici adi env ile (bosluk/Turkce karakter guvenli); metin stdin'den base64.
       const child = spawn(
         'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          '$input | Out-Printer -Name $args[0]',
-          address,
-        ],
-        { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
+        ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_PRINT_SCRIPT],
+        {
+          env: { ...process.env, [PRINTER_ENV]: address },
+          stdio: ['pipe', 'ignore', 'pipe'],
+          windowsHide: true,
+        },
       );
       let error = '';
       child.stderr.setEncoding('utf8');
@@ -102,12 +91,23 @@ class WindowsSpoolerDriver implements PrinterDriver {
       child.on('close', (code) =>
         code === 0 ? resolve() : reject(new Error(error.trim() || `Print exit ${code}`)),
       );
-      child.stdin.end(printText(payload), 'utf8');
+      // Base64: PowerShell stdin'i OEM kod sayfasiyla okur; Turkce karakterler bozulmasin.
+      child.stdin.end(encodeForPowerShell(printText(payload)), 'ascii');
     });
   }
 
   async discover(): Promise<DiscoveredPrinter[]> {
-    return [];
+    if (process.platform !== 'win32') return [];
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_LIST_PRINTERS_SCRIPT],
+      { timeout: 10_000, windowsHide: true, encoding: 'utf8' },
+    );
+    return decodePrinterList(stdout).map((name) => ({
+      name,
+      connection: 'windows_spooler',
+      address: name,
+    }));
   }
 
   getCapabilities() {
@@ -225,13 +225,18 @@ export class PrintingService implements OnModuleInit {
     });
     if (!printer) throw new NotFoundException('Yazıcı bulunamadı.');
 
-    await this.prisma.printer.update({
-      where: { id },
-      data: {
-        deletedAt: new Date(),
-        version: { increment: 1 },
-      },
-    });
+    // Yaziciya bagli rotalar da kalkar: yoksa ayni fis turune yeni rota "zaten tanimli" hatasi verir.
+    const deletedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.printer.update({
+        where: { id },
+        data: { deletedAt, version: { increment: 1 } },
+      }),
+      this.prisma.printRoute.updateMany({
+        where: { printerId: id, deletedAt: null },
+        data: { deletedAt, version: { increment: 1 } },
+      }),
+    ]);
     return { success: true };
   }
 
@@ -264,6 +269,7 @@ export class PrintingService implements OnModuleInit {
         documentType: dto.documentType,
         categoryId: dto.categoryId ?? null,
         deletedAt: null,
+        printer: { deletedAt: null },
       },
     });
     if (existing) {
@@ -301,9 +307,122 @@ export class PrintingService implements OnModuleInit {
 
   async listRoutes(user: AuthUser) {
     return this.prisma.printRoute.findMany({
-      where: { branchId: user.branchId, deletedAt: null },
+      where: { branchId: user.branchId, deletedAt: null, printer: { deletedAt: null } },
       include: { printer: true },
     });
+  }
+
+  // Test sayfası: işletme başlığı + Türkçe karakter satırı (kod sayfası sorununu gösterir).
+  async printTestPage(user: AuthUser, printerId: string): Promise<string> {
+    const printer = await this.prisma.printer.findFirst({
+      where: { id: printerId, branchId: user.branchId, deletedAt: null },
+    });
+    if (!printer) throw new NotFoundException('Yazıcı bulunamadı.');
+    return this.enqueuePrintJob(
+      user.branchId,
+      printer.id,
+      'test_page',
+      {
+        header: await this.businessHeader(user.branchId),
+        title: 'YAZICI TEST SAYFASI',
+        date: new Date().toISOString(),
+        footer: [
+          'Türkçe karakter testi: ÇĞİÖŞÜ çğıöşü',
+          'Bu sayfa düzgün okunuyorsa yazıcı hazır.',
+        ],
+      },
+      user.userId,
+    );
+  }
+
+  // Kurulum ekrani: suruculerin buldugu yazicilar. Bir surucu hata verirse
+  // (PowerShell yok/zaman asimi) digerleri yine listelenir; yazici adi elle de girilebilir.
+  async discoverPrinters() {
+    const found: Array<DiscoveredPrinter & { driverId: string }> = [];
+    for (const [driverId, driver] of this.drivers) {
+      try {
+        for (const printer of await driver.discover()) found.push({ driverId, ...printer });
+      } catch (err) {
+        this.logger.warn(`Yazici taramasi basarisiz (${driverId}): ${String(err)}`);
+      }
+    }
+    return found;
+  }
+
+  // Son 24 saatin fisleri (en yeni once). `text`: yaziciya giden metnin aynisi (onizleme).
+  async listJobs(user: AuthUser, status?: string) {
+    const jobs = await this.prisma.printJob.findMany({
+      where: {
+        branchId: user.branchId,
+        deletedAt: null,
+        createdAt: { gte: new Date(Date.now() - JOB_LIST_WINDOW_MS) },
+        ...(status ? { status } : {}),
+      },
+      include: { printer: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return jobs.map((job) => {
+      const payload = JSON.parse(job.payload) as PrintPayload;
+      return {
+        id: job.id,
+        documentType: job.documentType,
+        status: job.status,
+        attempts: job.attempts,
+        lastError: job.lastError,
+        createdAt: job.createdAt,
+        printedAt: job.printedAt,
+        printerId: job.printerId,
+        printerName: job.printer.name,
+        summary: printSummary(payload),
+        text: printText(payload),
+      };
+    });
+  }
+
+  // Basarisiz fisi yeniden kuyruga alir (kagit bitti, yazici kapaliydi...).
+  async retryJob(user: AuthUser, id: string) {
+    const job = await this.failedJobOrThrow(user, id);
+    await this.prisma.$transaction([
+      this.prisma.printJob.update({
+        where: { id: job.id },
+        data: { status: PrintJobStatus.Queued, lastError: null },
+      }),
+      this.prisma.backgroundJob.create({
+        data: {
+          id: newId(),
+          branchId: user.branchId,
+          taskName: 'print.job',
+          payload: JSON.stringify({ jobId: job.id }),
+          status: 'pending',
+          runAt: new Date(),
+        },
+      }),
+    ]);
+    return { ok: true };
+  }
+
+  // Basarisiz fisi listeden kaldirir (artik basilmasi gerekmiyor).
+  async dismissJob(user: AuthUser, id: string) {
+    const job = await this.failedJobOrThrow(user, id);
+    await this.prisma.printJob.update({ where: { id: job.id }, data: { deletedAt: new Date() } });
+    return { ok: true };
+  }
+
+  private async failedJobOrThrow(user: AuthUser, id: string) {
+    const job = await this.prisma.printJob.findFirst({
+      where: { id, branchId: user.branchId, deletedAt: null },
+    });
+    if (!job) {
+      throw new NotFoundException({ code: 'PRINT_JOB_NOT_FOUND', message: 'Fiş bulunamadı.' });
+    }
+    if (job.status !== PrintJobStatus.Failed) {
+      throw new ConflictException({
+        code: 'PRINT_JOB_NOT_FAILED',
+        message: 'Yalnız yazdırılamayan fiş tekrar denenebilir veya kaldırılabilir.',
+      });
+    }
+    return job;
   }
 
   // ===========================================================================
@@ -406,7 +525,8 @@ export class PrintingService implements OnModuleInit {
       include: { printer: true },
     });
 
-    if (!job || job.status === PrintJobStatus.Done) return;
+    // Kaldirilan (yoksayilan) fis, bekleyen otomatik denemede de basilmaz.
+    if (!job || job.deletedAt || job.status === PrintJobStatus.Done) return;
     if (!job.printer.isActive || job.printer.deletedAt) {
       throw new Error('Yazici aktif degil.');
     }
@@ -455,7 +575,7 @@ export class PrintingService implements OnModuleInit {
   // ===========================================================================
   // Domain Event Abonesi
   // ===========================================================================
-  @OnEvent('order.paid', { async: true })
+  @OnEvent('order.paid', DURABLE_LISTENER)
   async handleOrderPaid(event: DomainEvent<'order.paid', { orderId: string }>) {
     const { orderId } = event.payload;
     this.logger.log(`Received order.paid event for order: ${orderId}`);
@@ -488,7 +608,7 @@ export class PrintingService implements OnModuleInit {
       return;
     }
 
-    const printDoc = this.buildCustomerDoc(order, 'MÜŞTERİ FİŞİ — ÖDENDİ');
+    const printDoc = await this.buildCustomerDoc(order, 'MÜŞTERİ FİŞİ — ÖDENDİ', true);
     await this.enqueuePrintJob(
       event.branchId,
       printerId,
@@ -517,12 +637,19 @@ export class PrintingService implements OnModuleInit {
     return defaultPrinter?.id;
   }
 
-  // Soyut PrintDocument (müşteri fişi / hesap fişi ortak gövde). Başlık ayırt eder.
-  private buildCustomerDoc(order: PrintableOrder, title: string): PrintPayload {
+  // Soyut PrintDocument (müşteri fişi / hesap fişi ortak gövde). Başlık ayırt eder;
+  // ödenmiş fişte geçerli tahsilatlar ve nakit para üstü de basılır.
+  private async buildCustomerDoc(
+    order: PrintableOrder,
+    title: string,
+    paid: boolean,
+  ): Promise<PrintPayload> {
     return {
+      header: await this.businessHeader(order.branchId),
       title,
+      table: await this.tableLabel(order),
       orderNo: order.orderNo,
-      date: order.openedAt.toISOString(),
+      date: ((paid && order.closedAt) || new Date()).toISOString(),
       items: order.items.map((item) => ({
         name: item.productNameSnapshot || item.product.name,
         quantity: item.quantity / 1000,
@@ -531,7 +658,88 @@ export class PrintingService implements OnModuleInit {
       })),
       discount: (order.discountTotal || 0) / 100,
       grandTotal: (order.grandTotal || 0) / 100,
+      ...(paid ? { payments: await this.paymentLines(order.id) } : {}),
+      footer: [FISCAL_NOTE],
     };
+  }
+
+  // Fiş başlığı: işletme adı, adres, telefon (Ayarlar › İşletme bilgileri).
+  private async businessHeader(branchId: string): Promise<string[]> {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { name: true, address: true, phone: true },
+    });
+    if (!branch) return [];
+    return [branch.name, branch.address, branch.phone ? `Tel: ${branch.phone}` : null].filter(
+      (line): line is string => !!line?.trim(),
+    );
+  }
+
+  // "Salon · Masa 5"; masasız adisyonda sipariş türü.
+  private async tableLabel(order: { tableId: string | null; type: string }): Promise<string> {
+    if (order.tableId) {
+      const table = await this.prisma.table.findUnique({
+        where: { id: order.tableId },
+        select: { name: true, hall: { select: { name: true } } },
+      });
+      if (table) return `${table.hall.name} · ${table.name}`;
+    }
+    return order.type === 'delivery' ? 'Paket' : 'Gel-al';
+  }
+
+  // Geçerli tahsilatlar: iade edilen ödemeler (ve iade satırları) fişe girmez.
+  private async paymentLines(orderId: string): Promise<PrintPaymentLine[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { orderId, deletedAt: null },
+      orderBy: { paidAt: 'asc' },
+    });
+    const reversed = new Set(rows.map((row) => row.reversesPaymentId).filter(Boolean));
+    return rows
+      .filter((row) => row.direction === 'charge' && !reversed.has(row.id))
+      .map((row) => ({
+        method: row.method,
+        amount: row.amount / 100,
+        ...(row.change ? { change: row.change / 100 } : {}),
+      }));
+  }
+
+  // Ödenmiş adisyonun müşteri fişini elle yeniden basar. Otomatik fiş adisyon başına
+  // bir kez basılır; iade + yeniden ödemede düzeltilmiş fiş (ya da kaybolan fiş) buradan.
+  async reprintReceipt(user: AuthUser, orderId: string): Promise<{ ok: boolean }> {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, branchId: user.branchId, deletedAt: null },
+      include: {
+        items: {
+          where: { deletedAt: null, status: { not: 'cancelled' } },
+          include: { product: true },
+        },
+      },
+    });
+    if (!order) {
+      throw new NotFoundException({ code: 'ORDER_NOT_FOUND', message: 'Adisyon bulunamadı.' });
+    }
+    if (!order.isPaid) {
+      throw new ConflictException({
+        code: 'ORDER_NOT_PAID',
+        message: 'Adisyon henüz ödenmedi; ödeme öncesi fiş için "Hesap"ı kullanın.',
+      });
+    }
+    const printerId = await this.resolveCustomerPrinterId(user.branchId);
+    if (!printerId) {
+      throw new ConflictException({
+        code: 'NO_CUSTOMER_PRINTER',
+        message: 'Müşteri fişi için yazıcı/rota tanımlı değil.',
+      });
+    }
+    await this.enqueuePrintJob(
+      user.branchId,
+      printerId,
+      DocumentType.Customer,
+      await this.buildCustomerDoc(order, 'MÜŞTERİ FİŞİ — ÖDENDİ (tekrar)', true),
+      user.userId,
+      { orderId: order.id, orderNo: order.orderNo, type: DocumentType.Customer },
+    );
+    return { ok: true };
   }
 
   // Ödeme ÖNCESİ hesap/adisyon fişi (talep üzerine). Ödeme almaz; fiş
@@ -558,7 +766,7 @@ export class PrintingService implements OnModuleInit {
       });
     }
 
-    const printDoc = this.buildCustomerDoc(order, '*** HESAP *** (Ödeme alınmadı)');
+    const printDoc = await this.buildCustomerDoc(order, '*** HESAP *** (Ödeme alınmadı)', false);
     await this.enqueuePrintJob(
       user.branchId,
       printerId,
@@ -570,7 +778,7 @@ export class PrintingService implements OnModuleInit {
     return { ok: true };
   }
 
-  @OnEvent('order.item.sent', { async: true })
+  @OnEvent('order.item.sent', DURABLE_LISTENER)
   async handleOrderItemSent(
     event: DomainEvent<
       'order.item.sent',
@@ -653,15 +861,37 @@ export class PrintingService implements OnModuleInit {
       return;
     }
 
+    // Mutfak masayı, gönderen garsonu ve kalem notlarını görsün.
+    const [table, waiter, notes] = await Promise.all([
+      this.tableLabel(order),
+      event.actorId
+        ? this.prisma.user.findUnique({
+            where: { id: event.actorId },
+            select: { displayName: true },
+          })
+        : null,
+      this.prisma.orderItemNote.findMany({
+        where: { orderItemId: { in: items.map((i) => i.orderItemId) }, deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+    const noteOf = new Map<string, string>();
+    for (const n of notes) {
+      const prev = noteOf.get(n.orderItemId);
+      noteOf.set(n.orderItemId, prev ? `${prev}; ${n.note}` : n.note);
+    }
+
     for (const g of groups.values()) {
-      const printDoc = {
+      const printDoc: PrintPayload = {
         title: g.documentType === DocumentType.Bar ? 'BAR FİŞİ' : 'MUTFAK FİŞİ',
+        table,
+        ...(waiter?.displayName ? { waiter: waiter.displayName } : {}),
         orderNo: order.orderNo,
         date: new Date().toISOString(),
-        items: g.items.map((i: { productName: string; quantity: number }) => ({
-          name: i.productName,
-          quantity: i.quantity / 1000,
-        })),
+        items: g.items.map((i) => {
+          const note = noteOf.get(i.orderItemId);
+          return { name: i.productName, quantity: i.quantity / 1000, ...(note ? { note } : {}) };
+        }),
       };
       await this.enqueuePrintJob(
         event.branchId,

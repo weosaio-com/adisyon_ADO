@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, ApiError, getUser, hasPerm } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus } from '../lib/format';
-import type { Order, Table } from '../lib/types';
+import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
 import { offlineOpenTable } from '../offline/actions';
 import { isOffline } from '../offline/engine';
@@ -40,6 +40,16 @@ export default function TablesScreen() {
     refetchInterval: 30_000,
   });
   const cashBlocked = cashStatus.data?.open === false;
+  // Kagit bitti / yazici kapali: fis sessizce kaybolmasin, yonetici gorsun.
+  const canManagePrinters = hasPerm('printer.manage');
+  const failedPrints = useQuery({
+    queryKey: ['printers', 'jobs', 'failed'],
+    queryFn: () => api<PrintJobRow[]>('/printers/jobs?status=failed'),
+    enabled: canManagePrinters,
+    retry: false,
+    refetchInterval: 30_000,
+  });
+  const failedPrintCount = failedPrints.data?.length ?? 0;
 
   const openByTable = new Map<string, Order>();
   for (const order of openOrders.data ?? [])
@@ -85,6 +95,7 @@ export default function TablesScreen() {
       alert(error instanceof ApiError ? error.message : 'Adisyon yeniden açılamadı.'),
   });
 
+  const canCancel = hasPerm('order.cancel');
   const askCancel = (order: Order) => {
     const type = order.type === 'delivery' ? 'paket' : 'gel-al';
     if (confirm(`Bu ${type} adisyonunu iptal etmek istiyor musunuz?`)) cancelOrder.mutate(order.id);
@@ -162,6 +173,26 @@ export default function TablesScreen() {
           </div>
         )}
 
+        {failedPrintCount > 0 && (
+          <div
+            data-testid="print-failed-banner"
+            className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-950 sm:flex-row sm:items-center"
+          >
+            <div>
+              <p className="font-black">{failedPrintCount} fiş yazdırılamadı</p>
+              <p className="text-sm text-red-800">
+                Yazıcının açık olduğunu ve kağıdı kontrol edin, sonra fişi tekrar gönderin.
+              </p>
+            </div>
+            <button
+              onClick={() => nav('/settings')}
+              className="min-h-10 rounded-xl bg-red-900 px-4 text-sm font-bold text-white"
+            >
+              Yazıcı ayarları
+            </button>
+          </div>
+        )}
+
         <section className="mb-6 grid grid-cols-3 gap-2 sm:max-w-xl sm:gap-3">
           <Summary label="Aktif masa" value={activeTableCount} tone="dark" />
           <Summary label="Boş masa" value={freeTableCount} tone="green" />
@@ -216,14 +247,17 @@ export default function TablesScreen() {
                     </span>
                     <span className="text-lg font-black">{formatKurus(order.grandTotal)}</span>
                   </button>
-                  <button
-                    onClick={() => askCancel(order)}
-                    disabled={busy || cancelOrder.isPending}
-                    title="İptal et"
-                    className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
-                  >
-                    ×
-                  </button>
+                  {/* Iptal yalniz yetkiliye (sunucu da order.cancel ister); bos adisyonu garson icinden kapatir. */}
+                  {canCancel && (
+                    <button
+                      onClick={() => askCancel(order)}
+                      disabled={busy || cancelOrder.isPending}
+                      title="İptal et"
+                      className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

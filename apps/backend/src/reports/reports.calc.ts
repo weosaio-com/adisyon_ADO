@@ -50,10 +50,22 @@ if (require.main === module) {
   assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(fallback.day), 'gecersiz tarih fallback');
 
   // businessDayOf: 06:00 oncesi dune, sonrasi bugune yazar (LOCAL).
-  assert.strictEqual(businessDayOf(new Date(2026, 6, 22, 2, 30)), '2026-07-21', 'gece 02:30 -> dun');
-  assert.strictEqual(businessDayOf(new Date(2026, 6, 22, 9, 0)), '2026-07-22', 'sabah 09:00 -> bugun');
+  assert.strictEqual(
+    businessDayOf(new Date(2026, 6, 22, 2, 30)),
+    '2026-07-21',
+    'gece 02:30 -> dun',
+  );
+  assert.strictEqual(
+    businessDayOf(new Date(2026, 6, 22, 9, 0)),
+    '2026-07-22',
+    'sabah 09:00 -> bugun',
+  );
   // Window ile ayni gun tanimi: window(day).day === day.
-  assert.strictEqual(businessDayWindow(businessDayOf(new Date(2026, 6, 22, 2, 30))).day, '2026-07-21', 'window uyumu');
+  assert.strictEqual(
+    businessDayWindow(businessDayOf(new Date(2026, 6, 22, 2, 30))).day,
+    '2026-07-21',
+    'window uyumu',
+  );
 
   console.log('✓ reports.calc self-check OK');
 }

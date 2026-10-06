@@ -4,7 +4,7 @@
 > Her başlık, konunun **yetkili detay dokümanına** işaret eder (bkz. §12).
 > Kod ile doküman çelişirse: davranış için **kod**, karar/gerekçe için **doküman** esastır.
 
-**Durum:** Sürüm 1.0 · **Oluşturuldu:** 2026-07-15 · **Tür:** Yaşayan doküman (her increment'te güncellenir)
+**Durum:** Sürüm 1.1 · **Oluşturuldu:** 2026-07-15 · **Güncellendi:** 2026-09-27 · **Tür:** Yaşayan doküman (her increment'te güncellenir)
 
 ---
 
@@ -32,9 +32,9 @@ pnpm workspace (`apps/*`, `packages/*`, `plugins/*`):
 ```
 ado/
 ├── apps/
-│   └── backend/          # NestJS API + WebSocket (Faz 1 çekirdek) — TEK uygulama şu an
-│   └── (frontend/)       # React+Vite+TS+Tailwind — HENÜZ YOK
-│   └── (desktop/)        # Electron ince kabuk — HENÜZ YOK
+│   ├── backend/          # NestJS API + SSE canlı sinyal + yerel HTTPS (Faz 1 çekirdek)
+│   ├── frontend/         # React 19 + Vite + TS + Tailwind 4 + TanStack Query, PWA (IndexedDB outbox)
+│   └── desktop/          # Electron ince kabuk: backend'i başlatır, restore/secrets, NSIS paketi
 ├── packages/
 │   └── shared/           # @ado/shared — backend+frontend ORTAK tek kaynak
 │       ├── enums.ts      #   sistem enum'ları (roller, offline tipleri, audit origin)
@@ -44,9 +44,8 @@ ado/
 │       └── index.ts
 ├── plugins/              # Rapor + yazıcı sürücüsü eklentileri (ileride)
 ├── prisma/
-│   ├── schema.prisma     # 40+ model (tüm domain)
-│   ├── migrations/
-│   └── dev.db            # SQLite (yerel)
+│   └── schema/           # domain başına *.prisma (40+ model) + migrations/
+│                         # SQLite dosyası yerel (geliştirmede dev.db, pakette userData/ado.db)
 └── *.md                  # tasarım dokümanları (§12)
 ```
 
@@ -62,22 +61,23 @@ Backend, Electron kabuğundan **bağımsız bir süreçtir**. Kabuk yalnızca bi
    [ Owner terminali (Windows) ]
    ┌─────────────────────────────────────────────┐
    │  Electron kabuğu (ince istemci - UI)         │
-   │             │ HTTP/WebSocket (localhost)      │
+   │             │ HTTP (localhost)                │
    │  ┌──────────▼───────────────────────────┐   │
    │  │  Backend süreci (NestJS)             │   │
-   │  │  - REST API + WebSocket (canlı masa) │   │
+   │  │  - REST API + SSE (canlı masa)       │   │
    │  │  - Domain / Application / Infra       │   │
    │  │  - Prisma → SQLite (yerel dosya)      │   │
    │  │  - Yazıcı sürücüleri, outbox, audit   │   │
    │  └──────────▲───────────────────────────┘   │
    └─────────────┼───────────────────────────────┘
-                 │ HTTP/WebSocket (LAN)
+                 │ HTTPS (LAN, yerel CA) · HTTP yedek yol
         ┌────────┴─────────┐
    [ Waiter tablet ]   [ Waiter telefon ]   ← tarayıcıdan bağlanır (PWA)
 ```
 
 - LAN'daki tabletler/telefonlar aynı backend'e tarayıcıdan bağlanan **ek terminallerdir**.
-- **Canlı güncelleme:** masa/sipariş durumları WebSocket ile tüm istemcilere anlık yansır (garson ekler → kasa görür).
+- **Canlı güncelleme:** masa/sipariş olayları SSE (`GET /events/stream`) ile tüm istemcilere sinyal olarak gider; istemci ilgili sorguyu REST'ten tazeler (garson ekler → kasa görür). 30 sn emniyet polling'i vardır.
+- **Yerel HTTPS (tabletler):** Tarayıcı LAN IP'sini yalnız HTTPS ile "güvenli bağlam" sayar; Service Worker (çevrimdışı açılış) buna bağlıdır. Her kurulum kendi yerel CA'sını bir kez üretir (`<veri dizini>/tls`), tabletlere bir kez kurulur (`GET /devices/ca.crt`); sunucu sertifikası IP değişince CA değişmeden yenilenir. Paketli sürümde HTTP 43127, HTTPS 43128. Detay: `apps/backend/src/tls/tls.certs.ts`.
 - Kabuğu değiştirmek (ör. Tauri) veya mobil uygulama eklemek backend'i **hiç değiştirmeden** mümkündür.
 
 Detay: `SYSTEM_ANALYSIS.md` §3.
@@ -116,21 +116,23 @@ apps/backend/src/
 ├── config/                 # env.schema.ts (zod fail-fast) + AppConfigService
 ├── prisma/                 # PrismaModule + PrismaService (lifecycle)
 │
-├── auth/                   # ── İLK DİKEY DİLİM (tamamlandı) ──
-│   ├── auth.controller.ts  #   /auth/login, /login-pin, /refresh, /logout, /me
-│   ├── auth.service.ts     #   argon2, oturum, brute-force kilit
-│   ├── token.service.ts    #   JWT üret/doğrula, TTL role-bağlı
+├── auth/                   # login / login-pin / refresh / setup / verify-owner / kurtarma kodu
 │   ├── guards/             #   JwtAuthGuard + PermissionsGuard (global)
 │   └── dto/auth.schemas.ts #   Zod
 │
-├── catalog/                # ── SIRADAKİ (kısmen: yalnız dto/) ──
-│   └── dto/catalog.schemas.ts
+├── catalog/ tables/ orders/ payments/ sync/          # satış hattı + istemci-offline
+├── cash/ customer/ finance/ reports/ inventory/      # kasa, veresiye, gelir-gider, rapor, stok
+├── printing/ backup/ license/ users/ devices/ settings/
+├── tls/                    # yerel HTTPS: CA + sunucu sertifikası (tabletler)
 │
 ├── common/                 # ── Kesişen ilgiler ──
-│   ├── http/               #   AllExceptionsFilter, ResponseInterceptor, ZodValidationPipe
+│   ├── http/               #   AllExceptionsFilter, ResponseInterceptor, ZodValidationPipe, API_PREFIX
 │   ├── audit/              #   AuditService (hash-zincirli) + AuditModule (@Global)
+│   ├── events/             #   EventBus (transactional outbox) + SSE + DURABLE_LISTENER
+│   ├── worker/ schedule/   #   SQLite-kalıcı iş kuyruğu + 1 sn'lik işleyici
+│   ├── health/ feature-flags/
 │   ├── decorators/         #   @Public, @RequirePermissions, @CurrentUser
-│   └── util/               #   duration (TTL ayrıştırma)
+│   └── util/               #   duration, data-dir, network
 │
 └── seed.ts                 # idempotent tohum (tenant, izinler, roller, owner+garson)
 ```
@@ -221,13 +223,16 @@ Detay: `OFFLINE_DESIGN.md` (B), `SYNC_AND_OFFLINE.md` (A, yazılacak).
 | Monorepo + `@ado/shared` + Prisma şema | ✅ |
 | Kimlik/Yetki (`auth/`) | ✅ |
 | Denetim (`common/audit/`) | ✅ |
-| **Katalog** (Ürün/Kategori/Birim/Vergi) | 🚧 dto hazır, service/controller sırada |
-| Masa/Salon | ⏭️ |
-| Sipariş/Adisyon (+ WebSocket canlı masa) | ⏭️ |
-| Ödeme | ⏭️ |
-| Sync modülü (`/sync/*` + idempotency guard) | ⏭️ |
-| Yazdırma | ⏭️ |
-| Frontend (React) + Electron kabuk | ⏭️ |
+| **Katalog** (Ürün/Kategori/Birim/Vergi) | ✅ |
+| Masa/Salon | ✅ |
+| Sipariş/Adisyon (+ SSE canlı masa) | ✅ |
+| Ödeme (idempotency, split, iade) | ✅ |
+| Sync modülü (`/sync/*` + idempotency defteri + Owner review) | ✅ |
+| Yazdırma (Windows spooler, mutfak/bar ayrımı) | ✅ düz metin; ESC/POS (kesme/çekmece) yok |
+| Kasa · Veresiye · Gelir/Gider · Raporlar · Yedek (+kurtarma anahtarı) | ✅ |
+| Frontend (React PWA) + Electron kabuk + yerel HTTPS | ✅ |
+| Lisans | 🟡 altyapı hazır, kapalı (gömülü açık anahtar yok) |
+| Otomatik güncelleme · kod imzalama · Faz 2 bulut senkron | ⏳ |
 
 ---
 
@@ -256,9 +261,9 @@ Kapsam dışı (Faz 1): ÖKC/GİB/ödeme-gateway → o işlem-başı maliyetler 
 | `DATABASE_DESIGN.md` | 40+ model, ilişkiler, indeksler | ✅ v1.0 |
 | `API_DESIGN.md` | REST/WS uçları, zarf, hata kodları, auth, sync uçları | ✅ v1.1 |
 | `OFFLINE_DESIGN.md` | İstemci-offline (B sınırı): IndexedDB outbox, merge, review | ✅ v1.0 |
-| `EVENT_BUS.md` · `DOMAIN_EVENTS.md` | Event Bus + domain event sözleşmesi (Tier A) | 🚧 inşa ediliyor |
-| `BACKGROUND_WORKERS.md` | Kalıcı iş kuyruğu + worker + scheduler (Tier A) | 🚧 inşa ediliyor |
-| `HEALTH_SYSTEM.md` · `FEATURE_FLAGS.md` | Health check + feature flag (Tier A) | 🚧 inşa ediliyor |
+| `EVENT_BUS.md` · `DOMAIN_EVENTS.md` | Event Bus + domain event sözleşmesi (Tier A) | ✅ |
+| `BACKGROUND_WORKERS.md` | Kalıcı iş kuyruğu + worker + scheduler (Tier A) | ⏳ yazılacak (sistem hazır: `common/worker`, `common/schedule`) |
+| `HEALTH_SYSTEM.md` · `FEATURE_FLAGS.md` | Health check + feature flag (Tier A) | ⏳ yazılacak (sistem hazır: `common/health`, `common/feature-flags`) |
 | `AUDIT_LOG.md` | Hash zinciri + imzalı arşiv detayı | ⏳ yazılacak |
 | `SYNC_AND_OFFLINE.md` | Faz 2 cloud senkron (A sınırı) | ⏳ yazılacak |
 | `LICENSING.md`, `UPDATE_SYSTEM.md`, `SECURITY.md`, `PLUGIN_SYSTEM.md`, `MODULES.md` | İlgili alt sistemler | ⏳ yazılacak |

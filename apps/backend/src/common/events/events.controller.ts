@@ -6,7 +6,8 @@ import type { DomainEvent } from '@ado/shared';
 /**
  * SSE canli sinyal akisi (GET /events/stream). Sunucu sadece olay ADINI yollar
  * ("order.created"); istemci ilgili veriyi REST'ten tazeler. Kimlik dogrulama
- * global JwtAuthGuard uzerinden (?token= destegi guard'da).
+ * global JwtAuthGuard uzerinden: yalniz `Authorization: Bearer` basligi (istemci
+ * fetch ile baglanir; ?token= sorgu parametresi bilerek desteklenmez, loga dusmesin).
  */
 @Controller('events')
 export class EventsController {

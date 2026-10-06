@@ -13,6 +13,7 @@ import { RecoveryService } from './recovery.service';
   imports: [JwtModule.register({})],
   controllers: [AuthController],
   providers: [AuthService, TokenService, RecoveryService],
-  exports: [TokenService],
+  // AuthService: yonetici sifre onayi (verifyOwner) baska modullerde de kullanilir.
+  exports: [TokenService, AuthService],
 })
 export class AuthModule {}

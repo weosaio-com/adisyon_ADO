@@ -247,7 +247,7 @@ function EodCloseModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const valid = password.trim() !== '' && countedTl.trim() !== '';
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
         <h2 className="mb-1 text-lg font-bold text-slate-800">Gün Sonu (Z) Al</h2>
         <p className="mb-4 text-sm text-slate-500">

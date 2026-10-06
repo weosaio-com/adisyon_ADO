@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, getUser } from '../lib/api';
+import TextPromptModal from '../components/TextPromptModal';
 
 interface UserRow {
   id: string;
@@ -18,6 +19,7 @@ export default function KullaniciScreen() {
   const qc = useQueryClient();
   const meId = getUser()?.id;
   const [error, setError] = useState('');
+  const [resetFor, setResetFor] = useState<UserRow | null>(null);
   const fail = (e: unknown) => setError(e instanceof ApiError ? e.message : 'İşlem başarısız.');
   const refresh = () => {
     setError('');
@@ -37,18 +39,6 @@ export default function KullaniciScreen() {
     onSuccess: refresh,
     onError: fail,
   });
-
-  // Yönetici şifreyle, garson PIN ile girer; sıfırlama da aynı alana yazar.
-  const resetCredential = (u: UserRow) => {
-    const isOwner = u.role === 'owner';
-    const value = window.prompt(
-      isOwner
-        ? `${u.displayName} için yeni şifre (en az 6 karakter):`
-        : `${u.displayName} için yeni PIN (en az 3 hane):`,
-    );
-    if (!value) return;
-    update.mutate({ id: u.id, body: isOwner ? { password: value } : { pin: value } });
-  };
 
   return (
     <div className="flex h-full flex-col bg-slate-100">
@@ -83,7 +73,7 @@ export default function KullaniciScreen() {
                   </span>
                 </span>
                 <button
-                  onClick={() => resetCredential(u)}
+                  onClick={() => setResetFor(u)}
                   disabled={update.isPending}
                   className="rounded-lg bg-slate-200 px-2 py-1 font-medium disabled:opacity-40"
                 >
@@ -116,6 +106,31 @@ export default function KullaniciScreen() {
 
         <CreateCard onDone={refresh} onError={fail} />
       </div>
+
+      {/* Yönetici şifreyle, garson PIN ile girer; sıfırlama da aynı alana yazar.
+          window.prompt kullanılmaz: kasa uygulamasında (Electron) desteklenmez. */}
+      {resetFor && (
+        <TextPromptModal
+          title={resetFor.role === 'owner' ? 'Şifreyi değiştir' : 'PIN değiştir'}
+          description={resetFor.displayName}
+          label={
+            resetFor.role === 'owner' ? 'Yeni şifre (en az 6 karakter)' : 'Yeni PIN (en az 3 hane)'
+          }
+          secret
+          numeric={resetFor.role !== 'owner'}
+          minLength={resetFor.role === 'owner' ? 6 : 3}
+          maxLength={64}
+          busy={update.isPending}
+          onConfirm={(value) => {
+            const isOwner = resetFor.role === 'owner';
+            update.mutate(
+              { id: resetFor.id, body: isOwner ? { password: value } : { pin: value } },
+              { onSuccess: () => setResetFor(null) },
+            );
+          }}
+          onClose={() => setResetFor(null)}
+        />
+      )}
     </div>
   );
 }

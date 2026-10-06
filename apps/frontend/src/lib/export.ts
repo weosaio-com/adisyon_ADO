@@ -17,17 +17,29 @@ export function toCsv(headers: string[], rows: (string | number | null)[][]): st
   return '﻿' + lines.join('\r\n'); // BOM + CRLF (Excel dostu)
 }
 
+// Tarayıcıda metin dosyası indir (CSV, kurtarma anahtarı vb.).
+export function downloadText(
+  filename: string,
+  text: string,
+  type = 'text/plain;charset=utf-8',
+): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Tarayıcıda CSV dosyası indir. filename'e .csv eklenir (yoksa).
 export function downloadCsv(
   filename: string,
   headers: string[],
   rows: (string | number | null)[][],
 ): void {
-  const blob = new Blob([toCsv(headers, rows)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadText(
+    filename.endsWith('.csv') ? filename : `${filename}.csv`,
+    toCsv(headers, rows),
+    'text/csv;charset=utf-8',
+  );
 }

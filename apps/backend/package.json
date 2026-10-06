@@ -10,7 +10,7 @@
     "seed": "ts-node --transpile-only src/seed.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit",
-    "test:unit": "ts-node --transpile-only src/payments/payments.calc.ts && ts-node --transpile-only src/orders/orders.calc.ts && ts-node --transpile-only src/reports/reports.calc.ts && ts-node --transpile-only src/license/license.keys.ts && ts-node --transpile-only src/auth/recovery.code.ts",
+    "test:unit": "ts-node --transpile-only src/payments/payments.calc.ts && ts-node --transpile-only src/orders/orders.calc.ts && ts-node --transpile-only src/reports/reports.calc.ts && ts-node --transpile-only src/license/license.keys.ts && ts-node --transpile-only src/license/license.paths.ts && ts-node --transpile-only src/auth/recovery.code.ts && ts-node --transpile-only src/backup/backup.keys.ts && ts-node --transpile-only src/tls/tls.certs.ts && ts-node --transpile-only src/printing/print-text.ts && ts-node --transpile-only src/catalog/catalog.defaults.selfcheck.ts && ts-node --transpile-only src/common/events/event-bus.selfcheck.ts",
     "test:e2e": "node test/smoke.e2e.mjs"
   },
   "dependencies": {
@@ -23,6 +23,7 @@
     "@nestjs/schedule": "^6.1.3",
     "@nestjs/terminus": "^11.1.1",
     "@node-rs/argon2": "^2.0.2",
+    "@peculiar/x509": "^2.1.0",
     "@prisma/client": "^6.2.0",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
