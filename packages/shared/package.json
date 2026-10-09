@@ -21,6 +21,11 @@
       "types": "./dist/menu-core.d.ts",
       "import": "./dist/menu-core.js",
       "require": "./dist/menu-core.cjs"
+    },
+    "./license": {
+      "types": "./dist/license.d.ts",
+      "import": "./dist/license.js",
+      "require": "./dist/license.cjs"
     }
   },
   "files": [
@@ -29,7 +34,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsup --silent && node --experimental-strip-types src/menu.selfcheck.ts"
+    "test": "tsup --silent && node --experimental-strip-types src/menu.selfcheck.ts && node --experimental-strip-types src/license.selfcheck.ts"
   },
   "dependencies": {
     "ulid": "^2.3.0",

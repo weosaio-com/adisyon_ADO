@@ -1,9 +1,15 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { newId } from '@ado/shared';
+import {
+  createDomainEvent,
+  DomainEventName,
+  newId,
+  type LicenseActivatedEventPayload,
+} from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureFlagService } from '../common/feature-flags/feature-flags.service';
+import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { hasPublicKey, licenseDates, parseLicenseKey } from './license.keys';
+import { hasPublicKey, licenseDates, parseLicenseKey, type LicensePayload } from './license.keys';
 
 export type LicenseState = 'none' | 'active' | 'grace' | 'expired';
 
@@ -19,6 +25,21 @@ export interface LicenseStatus {
   daysLeft: number | null;
   /** Bu kurulumda anahtar dogrulanabiliyor mu (acik anahtar gomulu mu). */
   verifiable: boolean;
+  /** Lisans kimligi (bulutta isletme anahtari). Eski lisanslarda null. */
+  licenseId: string | null;
+  /** Lisanstaki ozellik bayraklari (imzasi dogrulanmis anahtardan). */
+  features: Record<string, boolean>;
+  /** Kayitli bir anahtar var ama bu kurulumun acik anahtariyla dogrulanamiyor: yeniden girilmeli. */
+  needsReentry: boolean;
+}
+
+/** Imzasi dogrulanmis, kayitli lisans (bulut baglantisi gibi tuketiciler icin). */
+export interface ActiveLicense {
+  key: string;
+  payload: LicensePayload;
+  state: Exclude<LicenseState, 'none'>;
+  validUntil: Date;
+  graceUntil: Date;
 }
 
 const ENFORCE_KEY = 'license.enforce';
@@ -39,6 +60,7 @@ export class LicenseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly flags: FeatureFlagService,
+    private readonly events: EventBusService,
   ) {}
 
   /** Zorunluluk ayari. Ayar yoksa/bozuksa KAPALI kabul edilir (guvenli varsayilan). */
@@ -59,40 +81,59 @@ export class LicenseService {
     return this.prisma.licenseInfo.findFirst({ where: { deletedAt: null } });
   }
 
+  /**
+   * Kayitli anahtari HER OKUMADA yeniden dogrular: acik anahtar degistiyse (deneme -> uretim
+   * derlemesi) eski anahtar artik gecerli sayilmaz. Tarihler ve bayraklar imzali payload'dan
+   * okunur, veritabanindaki kopyalardan degil.
+   */
+  async getActiveLicense(): Promise<ActiveLicense | null> {
+    const lic = await this.current();
+    if (!lic?.licenseKey) return null;
+    const payload = parseLicenseKey(lic.licenseKey);
+    if (!payload) return null;
+    const { validUntil, graceUntil } = licenseDates(payload);
+    const now = Date.now();
+    const state =
+      now < validUntil.getTime() ? 'active' : now < graceUntil.getTime() ? 'grace' : 'expired';
+    return { key: lic.licenseKey, payload, state, validUntil, graceUntil };
+  }
+
   /** Kayitli lisansin o anki durumu. Yan etkisi yok. */
   async getStatus(branchId: string): Promise<LicenseStatus> {
     const enforced = await this.isEnforced(branchId);
-    const lic = await this.current();
     const verifiable = hasPublicKey();
+    const active = await this.getActiveLicense();
 
-    if (!lic || !lic.validUntil) {
+    if (!active) {
+      const lic = await this.current();
       return {
         enforced,
         state: 'none',
-        customerName: lic?.customerName ?? null,
-        plan: lic?.plan ?? null,
+        customerName: null,
+        plan: null,
         validUntil: null,
         graceUntil: null,
         daysLeft: null,
         verifiable,
+        licenseId: null,
+        features: {},
+        needsReentry: Boolean(lic?.licenseKey),
       };
     }
 
-    const now = Date.now();
-    const validUntil = lic.validUntil;
-    const graceUntil = lic.graceUntil ?? validUntil;
-    const state: LicenseState =
-      now < validUntil.getTime() ? 'active' : now < graceUntil.getTime() ? 'grace' : 'expired';
-
+    const { payload, state, validUntil, graceUntil } = active;
     return {
       enforced,
       state,
-      customerName: lic.customerName,
-      plan: lic.plan,
+      customerName: payload.c,
+      plan: payload.p ?? null,
       validUntil: validUntil.toISOString(),
       graceUntil: graceUntil.toISOString(),
-      daysLeft: Math.ceil((validUntil.getTime() - now) / DAY_MS),
+      daysLeft: Math.ceil((validUntil.getTime() - Date.now()) / DAY_MS),
       verifiable,
+      licenseId: payload.id ?? null,
+      features: payload.f ?? {},
+      needsReentry: false,
     };
   }
 
@@ -144,6 +185,19 @@ export class LicenseService {
     // Lisanstaki feature-flag'ler onbellekte -> yeni anahtar sonrasi tazele.
     await this.flags.reloadFlags();
     this.logger.log(`Lisans etkinlestirildi: ${payload.c} (${payload.exp})`);
+
+    // Yan etkiler (QR menu bulutunda lisansin yenilenmesi vb.) event ile. Anahtar event'e girmez.
+    await this.events.publish(
+      createDomainEvent<string, LicenseActivatedEventPayload>(
+        DomainEventName.LicenseActivated,
+        { licenseId: payload.id ?? null, customerName: payload.c, features: payload.f ?? {} },
+        {
+          branchId: user.branchId,
+          actorId: user.userId,
+          ...(user.deviceId ? { deviceId: user.deviceId } : {}),
+        },
+      ),
+    );
     return this.getStatus(user.branchId);
   }
 }

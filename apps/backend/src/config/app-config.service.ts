@@ -49,4 +49,17 @@ export class AppConfigService {
   get lockMinutes(): number {
     return this.env.AUTH_LOCK_MINUTES;
   }
+
+  /** QR menu bulutunun ham adresi (dogrulanmamis; bos = tanimsiz). */
+  get cloudApiUrl(): string {
+    return this.env.CLOUD_API_URL.trim();
+  }
+  /** Masaustu surumu (paketli surumde app.getVersion(); gelistirmede bos). */
+  get appVersion(): string {
+    return this.env.ADO_APP_VERSION.trim();
+  }
+  /** Derleme profili: 'test' | 'prod' (gelistirmede bos). */
+  get buildProfile(): string {
+    return this.env.ADO_BUILD_PROFILE.trim();
+  }
 }

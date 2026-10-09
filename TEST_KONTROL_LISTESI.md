@@ -151,7 +151,7 @@ oluşmaz.
 
 ## 11. (İsteğe bağlı) Kurulum paketi
 
-**Yap:** `pnpm --filter @ado/desktop dist` → `apps/desktop/dist` altındaki kurulum dosyasını
+**Yap:** `pnpm --filter @ado/desktop dist` (deneme profili; bkz. `LICENSING.md` §5) → `apps/desktop/dist` altındaki kurulum dosyasını
 çalıştırın → ilk açılışta yönetici hesabını oluşturun → 1, 4, 5 ve 8. adımları kısaca tekrarlayın.
 
 **Beklenen:** Program açılır. Tabletler Ayarlar › Sunucu Adresi'ndeki adreslerle bağlanır

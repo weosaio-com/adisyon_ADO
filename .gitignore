@@ -45,8 +45,9 @@ apps/frontend/playwright-report/
 apps/frontend/test-results/
 apps/frontend/blob-report/
 
-# Yedek geri yukleme isareti (yerel calistirmalarda veri dizini repo icinde olabilir)
+# Yedek geri yukleme isareti ve kurulum kimligi (yerel calistirmalarda veri dizini repo icinde olabilir)
 restore-pending.json
+ado-install.json
 
 # Yerel HTTPS sertifikalari/anahtarlari (veri dizini repo icindeyse). Klasoru degil
 # dosyalari yok say: apps/backend/src/tls kaynak kodu da "tls" adini tasiyor.

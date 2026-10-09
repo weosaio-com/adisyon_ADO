@@ -6,7 +6,9 @@
   "main": "main.mjs",
   "scripts": {
     "dev": "electron .",
-    "dist": "node build-bundle.mjs && electron-builder --win",
+    "dist": "pnpm run dist:test",
+    "dist:test": "node build-bundle.mjs --profile test && electron-builder --win",
+    "dist:prod": "node build-bundle.mjs --profile prod && electron-builder --win",
     "test": "node selfcheck.mjs"
   },
   "build": {
@@ -16,7 +18,8 @@
     "files": [
       "main.mjs",
       "rotating-log.mjs",
-      "restore.mjs"
+      "restore.mjs",
+      "app-config.mjs"
     ],
     "extraResources": [
       {
@@ -34,6 +37,10 @@
       {
         "from": "bundle/template.db",
         "to": "template.db"
+      },
+      {
+        "from": "bundle/app-config.json",
+        "to": "app-config.json"
       }
     ],
     "win": {

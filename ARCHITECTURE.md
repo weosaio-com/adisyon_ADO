@@ -266,4 +266,5 @@ Kapsam dışı (Faz 1): ÖKC/GİB/ödeme-gateway → o işlem-başı maliyetler 
 | `HEALTH_SYSTEM.md` · `FEATURE_FLAGS.md` | Health check + feature flag (Tier A) | ⏳ yazılacak (sistem hazır: `common/health`, `common/feature-flags`) |
 | `AUDIT_LOG.md` | Hash zinciri + imzalı arşiv detayı | ⏳ yazılacak |
 | `SYNC_AND_OFFLINE.md` | Faz 2 cloud senkron (A sınırı) | ⏳ yazılacak |
-| `LICENSING.md`, `UPDATE_SYSTEM.md`, `SECURITY.md`, `PLUGIN_SYSTEM.md`, `MODULES.md` | İlgili alt sistemler | ⏳ yazılacak |
+| `LICENSING.md` | Lisans biçimi, anahtarlar, satıcı aracı, derleme profilleri | ✅ |
+| `UPDATE_SYSTEM.md`, `SECURITY.md`, `PLUGIN_SYSTEM.md`, `MODULES.md` | İlgili alt sistemler | ⏳ yazılacak |
