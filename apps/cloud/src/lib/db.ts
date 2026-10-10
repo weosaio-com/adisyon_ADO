@@ -1,10 +1,14 @@
-/** D1 satir turleri (migrations/0001_init.sql). */
+/** D1 satir turleri (migrations/0001_init.sql, 0002_license_activation.sql). */
 export interface TenantRow {
   id: string;
   name: string;
   plan: string;
   features: string;
   status: 'active' | 'suspended';
+  /** Lisans kimligi; eski (panelden acilmis) kiracilarda null. */
+  license_id: string | null;
+  /** Lisans bitis ani (exp + ek sure, UTC ISO); lisanssiz kiracida null. */
+  license_expires_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -17,6 +21,9 @@ export interface BranchRow {
   pos_token_hash: string | null;
   pos_paired_at: string | null;
   pos_last_seen_at: string | null;
+  install_id: string | null;
+  pos_branch_id: string | null;
+  pos_app_version: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,7 +70,7 @@ export function tableView(row: TableRow) {
 export async function branchSummaries(db: D1Database, tenantId: string) {
   const { results } = await db
     .prepare(
-      `SELECT b.id, b.name, b.source, b.pos_paired_at, b.pos_last_seen_at,
+      `SELECT b.id, b.name, b.source, b.pos_paired_at, b.pos_last_seen_at, b.pos_app_version,
               m.version AS menu_version, m.updated_at AS menu_updated_at,
               (SELECT COUNT(*) FROM tables t WHERE t.branch_id = b.id) AS table_count
        FROM branches b LEFT JOIN menus m ON m.branch_id = b.id
@@ -76,6 +83,7 @@ export async function branchSummaries(db: D1Database, tenantId: string) {
       source: 'panel' | 'pos';
       pos_paired_at: string | null;
       pos_last_seen_at: string | null;
+      pos_app_version: string | null;
       menu_version: number | null;
       menu_updated_at: string | null;
       table_count: number;
@@ -85,7 +93,11 @@ export async function branchSummaries(db: D1Database, tenantId: string) {
     name: row.name,
     source: row.source,
     pos: row.pos_paired_at
-      ? { pairedAt: row.pos_paired_at, lastSeenAt: row.pos_last_seen_at }
+      ? {
+          pairedAt: row.pos_paired_at,
+          lastSeenAt: row.pos_last_seen_at,
+          appVersion: row.pos_app_version,
+        }
       : null,
     menu: row.menu_version ? { version: row.menu_version, updatedAt: row.menu_updated_at } : null,
     tableCount: row.table_count,

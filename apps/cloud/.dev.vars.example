@@ -1,3 +1,6 @@
 # Yerel gelistirme gizli degerleri: bu dosyayi .dev.vars olarak kopyalayin (git'e girmez).
 # Satici API anahtari (en az 16 karakter). Uretimde: wrangler secret put ADMIN_TOKEN
 ADMIN_TOKEN=yerel-gelistirme-anahtari-degistirin
+# Lisans imzasini dogrulayan Ed25519 acik anahtari (base64 SPKI). Bos = lisansla baglanma kapali.
+# Uretmek icin: node scripts/license.mjs gen-key --out <repo disi klasor> (LICENSING.md)
+LICENSE_PUBLIC_KEY=

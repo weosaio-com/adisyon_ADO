@@ -51,6 +51,23 @@ Sonra http://127.0.0.1:8787/panel adresinden bu e-posta ve parolayla girin.
   (Bulut)** kartına `http://127.0.0.1:8787` ve kodu girin. `http://` yalnız `localhost`/`127.0.0.1`
   için kabul edilir; gerçek adres `https://` olmalıdır.
 
+### Lisansla bağlanma
+
+POS buluta lisansıyla kendisi bağlanır: `POST /api/pos/activate` imzayı `LICENSE_PUBLIC_KEY` ile
+doğrular, işletmeyi lisans kimliğiyle açar ve belirteç döner (ayrıntı: `LICENSING.md`,
+`QR_MENU_DESIGN.md` §5). Yerelde denemek için bir anahtar çifti üretip açık anahtarı `.dev.vars`'a
+yazın; lisansı aynı araçla imzalayın:
+
+```bash
+node scripts/license.mjs gen-key --out ~/ado-lisans-yerel
+echo "LICENSE_PUBLIC_KEY=<açık anahtar>" >> apps/cloud/.dev.vars
+node scripts/license.mjs sign --key ~/ado-lisans-yerel/ado-license-private.pem \
+  --customer "Deneme Lokantası" --exp 2027-01-01 --feature qr.menu=true
+```
+
+`LICENSE_PUBLIC_KEY` boşsa etkinleştirme `503 ACTIVATION_DISABLED` döner; eşleştirme kodu yolu
+(panel) şimdilik çalışmaya devam eder.
+
 ### Testler
 
 ```bash
@@ -90,6 +107,9 @@ hesap başınadır, test ortamı da onu kullanır):
 6. Yukarıdaki **Deneme işletmesi açmak** komutuyla (adres ve `ADMIN_TOKEN` değişir) bir işletme açın.
 
 Sonraki denemeler yalnız 5. adımdır; yeni bir migration varsa önce 3. adım.
+
+Lisansla bağlanma için deneme açık anahtarı `wrangler.jsonc` › `env.test` › `vars.LICENSE_PUBLIC_KEY`
+ve programın `apps/desktop/profiles/test.json` dosyasına aynı değerle yazılır (`LICENSING.md` §5).
 
 ### Telefonla deneme (işletme paneli uygulaması)
 
@@ -161,10 +181,14 @@ Tüm istekler `Authorization: Bearer <ADMIN_TOKEN>` ister.
 | İşletme aç | `POST /api/admin/tenants` `{ name, plan, branchName?, owner: { email, password } }` |
 | İşletmeleri listele / ayrıntı | `GET /api/admin/tenants` · `GET /api/admin/tenants/:id` |
 | Paket değiştir, özellik aç/kapat, askıya al | `PATCH /api/admin/tenants/:id` `{ plan?, features?, status? }` |
-| POS için eşleştirme kodu | `POST /api/admin/branches/:id/pairing-code` |
+| POS bağlantısını kaldır (çalınan lisans, bilgisayar değişimi) | `POST /api/admin/tenants/:id/revoke` |
+| İşletmeyi sil (şube, menü, masalarla) | `DELETE /api/admin/tenants/:id` |
+| POS için eşleştirme kodu (eski yol) | `POST /api/admin/branches/:id/pairing-code` |
 | Parola sıfırla (tüm oturumlar kapanır) | `POST /api/admin/users/:id/password` `{ password }` |
 
 Paketler: `menu` (QR Menü), `order`, `pay`, `full`. QR-1'de yalnız `qr.menu` özelliği kullanılır.
+Lisansla bağlanan işletmede paket ve özellikler imzalı lisanstan gelir; her lisans yenilemesinde
+yeniden yazılır (satıcının `PATCH` ile yaptığı özellik değişikliği yenilemeye kadar geçerlidir).
 
 ### İşletim notları
 
