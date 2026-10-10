@@ -213,17 +213,19 @@ describe('POS yayini', () => {
     expect(table.body.error?.code).toBe('TABLES_MANAGED_BY_POS');
   });
 
-  it('baglanti kaldirilinca belirtec gecersizlesir, menu panelden yonetilir', async () => {
+  it('baglanti kaldirilinca belirtec gecersizlesir, menu yayindan kalkar', async () => {
     const { tenant, cookie, token } = await pairedBranch();
     await call('PUT', '/api/pos/menu', { token, json: sampleMenu() });
     expect((await call('POST', '/api/pos/unpair', { token })).status).toBe(200);
-    expect((await call('GET', '/api/pos/status', { token })).status).toBe(401);
+    const after = await call('GET', '/api/pos/status', { token });
+    expect([after.status, after.body.error?.code]).toEqual([401, 'POS_TOKEN_UNPAIRED']);
 
+    // Menu silindi: panel sifirdan yayinlayabilir.
     const saved = await call('PUT', `/api/panel/branches/${tenant.branchId}/menu`, {
       cookie,
-      json: { baseVersion: 1, menu: sampleMenu() },
+      json: { baseVersion: null, menu: sampleMenu() },
     });
-    expect(saved.body.data.version).toBe(2);
+    expect(saved.body.data.version).toBe(1);
 
     // Yeniden eslesme yeni belirtec verir; panelden kaldirma da eski belirteci iptal eder.
     const again = await pairPos(cookie, tenant.branchId);

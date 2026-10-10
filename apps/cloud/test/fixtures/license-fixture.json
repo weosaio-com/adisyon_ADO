@@ -1,0 +1,15 @@
+{
+  "_comment": "scripts/license.mjs ile uretildi (Node imzasi); ozel anahtar atildi. Worker dogrulamasinin capraz kontrolu.",
+  "publicKey": "MCowBQYDK2VwAyEAHVuMR1ur+XVFcnd0LYryoAHcdxAcCfy4b+UDag64ENU=",
+  "licenseKey": "ADO1.eyJpZCI6ImxpY19maXh0dXJlXzAwMDEiLCJjIjoiRml4dHVyZSBMb2thbnRhIiwiZXhwIjoiMjA5OS0xMi0zMSIsInAiOiJ5ZWFybHkiLCJnIjo3LCJmIjp7InFyLm1lbnUiOnRydWV9fQ.86C8MFVnCg3tpaTAscPKXHLiafhq77FyZsELBS0tvWJCPYm5EbfnKy9W3NwAn3WFt1XtS5CRW5KjWWSkTIRqDw",
+  "payload": {
+    "id": "lic_fixture_0001",
+    "c": "Fixture Lokanta",
+    "exp": "2099-12-31",
+    "p": "yearly",
+    "g": 7,
+    "f": {
+      "qr.menu": true
+    }
+  }
+}

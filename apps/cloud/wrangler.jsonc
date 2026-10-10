@@ -22,6 +22,9 @@
     },
   ],
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ado-qr-images" }],
+  // Lisans imzasini dogrulayan acik anahtar (gizli degil): programin uretim profiliyle ayni
+  // (apps/desktop/profiles/prod.json, LICENSING.md). Bos = lisansla baglanma kapali.
+  "vars": { "LICENSE_PUBLIC_KEY": "" },
   // Gizli: ADMIN_TOKEN (satici API'si) — `wrangler secret put ADMIN_TOKEN`; yerelde .dev.vars.
   "env": {
     // Deneme ortami: ayri Worker, veritabani ve gorsel deposu; gercek isletme verisine dokunmaz.
@@ -39,6 +42,8 @@
         },
       ],
       "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ado-qr-images-test" }],
+      // Deneme lisans anahtari (apps/desktop/profiles/test.json ile ayni). vars miras alinmaz.
+      "vars": { "LICENSE_PUBLIC_KEY": "" },
       // Gizli: `wrangler secret put ADMIN_TOKEN --env test` (canli ortamdan farkli bir deger).
     },
   },
