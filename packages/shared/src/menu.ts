@@ -31,7 +31,7 @@ function dedupe<T>(list: T[]): T[] {
   return Array.from(new Set(list));
 }
 
-/** POS'ta ULID; panelde uretilenler de ayni bicimde. */
+/** POS'ta ULID. */
 export const menuIdSchema = z
   .string()
   .min(1)
@@ -131,7 +131,7 @@ export const menuSnapshotSchema = z
     });
   });
 export type MenuSnapshot = z.infer<typeof menuSnapshotSchema>;
-/** Varsayilanlari doldurulmamis hali (ör. panelden gelen istek govdesi). */
+/** Varsayilanlari doldurulmamis hali (ör. POS'tan gelen istek govdesi). */
 export type MenuSnapshotInput = z.input<typeof menuSnapshotSchema>;
 
 /** Yayinlanan masa: QR kodu ve musteriye gorunen ad. */

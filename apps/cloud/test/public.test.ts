@@ -1,17 +1,29 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { call, createTenant, login, png, request, sampleMenu, sha256Hex } from './helpers';
+import {
+  activatedBranch,
+  call,
+  png,
+  request,
+  sampleMenu,
+  sha256Hex,
+  tableCode,
+  type CallOptions,
+} from './helpers';
 
-// Panelde masa ekleyip menu kaydeden POS'suz isletme.
-async function publishedTable(plan = 'menu') {
-  const tenant = await createTenant({ plan });
-  const cookie = await login(tenant.email, tenant.password);
-  const table = await call<{ code: string; id: string }>(
-    'POST',
-    `/api/panel/branches/${tenant.branchId}/tables`,
-    { cookie, json: { name: 'Masa 5', hall: 'Bahçe' } },
-  );
-  return { tenant, cookie, code: table.body.data.code };
+// Lisansla acilip masalarini yayinlamis (menusu henuz gitmemis) sube.
+async function publishedTable() {
+  const shop = await activatedBranch();
+  const code = tableCode();
+  await call('PUT', '/api/pos/tables', {
+    token: shop.token,
+    json: { tables: [{ code, name: 'Masa 5', hall: 'Bahçe' }] },
+  });
+  const publishMenu = (menu = sampleMenu()) =>
+    call('PUT', '/api/pos/menu', { token: shop.token, json: menu });
+  const patchTenant = (json: CallOptions['json']) =>
+    call('PATCH', `/api/admin/tenants/${shop.tenantId}`, { admin: true, json });
+  return { ...shop, code, publishMenu, patchTenant };
 }
 
 describe('genel menu /api/m/:code', () => {
@@ -28,14 +40,11 @@ describe('genel menu /api/m/:code', () => {
   });
 
   it('menu yayinlanmadan 404, yayinlaninca masa ve menu doner', async () => {
-    const { tenant, cookie, code } = await publishedTable();
+    const { code, publishMenu } = await publishedTable();
     const before = await call('GET', `/api/m/${code}`);
     expect(before.body.error?.code).toBe('MENU_NOT_PUBLISHED');
 
-    await call('PUT', `/api/panel/branches/${tenant.branchId}/menu`, {
-      cookie,
-      json: { baseVersion: null, menu: sampleMenu() },
-    });
+    await publishMenu();
     const res = await call('GET', `/api/m/${code}`);
     expect(res.status).toBe(200);
     expect(res.body.data.table).toEqual({ name: 'Masa 5', hall: 'Bahçe' });
@@ -47,11 +56,8 @@ describe('genel menu /api/m/:code', () => {
   });
 
   it('degismeyen menu 304, degisince yeni ETag', async () => {
-    const { tenant, cookie, code } = await publishedTable();
-    await call('PUT', `/api/panel/branches/${tenant.branchId}/menu`, {
-      cookie,
-      json: { baseVersion: null, menu: sampleMenu() },
-    });
+    const { code, publishMenu } = await publishedTable();
+    await publishMenu();
     const first = await request('GET', `/api/m/${code}`);
     const etag = first.headers.get('ETag') ?? '';
     expect(first.headers.get('Cache-Control')).toBe('no-cache');
@@ -60,54 +66,37 @@ describe('genel menu /api/m/:code', () => {
 
     const menu = sampleMenu();
     menu.products[0]!.available = false;
-    await call('PUT', `/api/panel/branches/${tenant.branchId}/menu`, {
-      cookie,
-      json: { baseVersion: 1, menu },
-    });
+    await publishMenu(menu);
     const changed = await request('GET', `/api/m/${code}`, { headers: { 'If-None-Match': etag } });
     expect(changed.status).toBe(200);
     expect(changed.headers.get('ETag')).not.toBe(etag);
   });
 
   it('paketinde QR menu olmayan ya da askiya alinan isletmede 403', async () => {
-    const { tenant, cookie, code } = await publishedTable();
-    await call('PUT', `/api/panel/branches/${tenant.branchId}/menu`, {
-      cookie,
-      json: { baseVersion: null, menu: sampleMenu() },
-    });
-    await call('PATCH', `/api/admin/tenants/${tenant.tenantId}`, {
-      admin: true,
-      json: { features: { 'qr.menu': false } },
-    });
+    const { code, publishMenu, patchTenant } = await publishedTable();
+    await publishMenu();
+    await patchTenant({ features: { 'qr.menu': false } });
     const off = await call('GET', `/api/m/${code}`);
     expect(off.status).toBe(403);
     expect(off.body.error?.code).toBe('MENU_DISABLED');
 
-    await call('PATCH', `/api/admin/tenants/${tenant.tenantId}`, {
-      admin: true,
-      json: { features: { 'qr.menu': null }, status: 'suspended' },
-    });
+    await patchTenant({ features: { 'qr.menu': null }, status: 'suspended' });
     expect((await call('GET', `/api/m/${code}`)).status).toBe(403);
-    await call('PATCH', `/api/admin/tenants/${tenant.tenantId}`, {
-      admin: true,
-      json: { status: 'active' },
-    });
+    await patchTenant({ status: 'active' });
     expect((await call('GET', `/api/m/${code}`)).status).toBe(200);
   });
 });
 
 describe('gorseller /img/:key', () => {
-  it('yuklenen gorsel suresiz onbellekle sunulur', async () => {
-    const tenant = await createTenant();
-    const cookie = await login(tenant.email, tenant.password);
+  it("POS'un yukledigi gorsel suresiz onbellekle sunulur", async () => {
+    const { token } = await activatedBranch();
     const bytes = png();
     const upload = await call<{ key: string }>(
-      'POST',
-      `/api/panel/branches/${tenant.branchId}/images`,
-      { cookie, body: bytes, headers: { 'Content-Type': 'application/octet-stream' } },
+      'PUT',
+      `/api/pos/images/${await sha256Hex(bytes)}.png`,
+      { token, body: bytes, headers: { 'Content-Type': 'application/octet-stream' } },
     );
     expect(upload.status).toBe(201);
-    expect(upload.body.data.key).toBe(`${await sha256Hex(bytes)}.png`);
 
     const res = await request('GET', `/img/${upload.body.data.key}`);
     expect(res.status).toBe(200);

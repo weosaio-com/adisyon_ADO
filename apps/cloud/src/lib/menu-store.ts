@@ -1,16 +1,14 @@
 import {
-  encodeTableCode,
   MENU_IMAGE_MAX_BYTES,
   MENU_IMAGE_TYPES,
   menuImageKey,
   sniffImageType,
-  TABLE_CODE_BYTES,
   type MenuImageExt,
   type MenuSnapshot,
   type MenuTable,
 } from '@ado/shared/menu';
 import type { Env } from '../env';
-import { randomBytes, sha256Hex } from './crypto';
+import { sha256Hex } from './crypto';
 import { ApiError, nowIso } from './http';
 
 // -----------------------------------------------------------------------------
@@ -77,15 +75,11 @@ export async function missingImages(db: D1Database, keys: string[]): Promise<str
 // Menu
 // -----------------------------------------------------------------------------
 
-/**
- * Menuyu kaydeder, surumu bir artirir. `baseVersion` verilirse (panel) yalniz mevcut surum
- * onunla ayniysa yazar; aksi halde 409 VERSION_CONFLICT (baska sekmede degismis).
- */
+/** Menuyu kaydeder, surumu bir artirir (subenin tek yayincisi POS'tur). */
 export async function saveMenu(
   env: Env,
   branchId: string,
   menu: MenuSnapshot,
-  baseVersion?: number | null,
 ): Promise<{ version: number; updatedAt: string }> {
   const missing = await missingImages(
     env.DB,
@@ -94,40 +88,16 @@ export async function saveMenu(
   if (missing.length) {
     throw new ApiError(409, 'IMAGES_MISSING', 'Menüdeki bazı görseller yüklenmemiş.', missing);
   }
-  const snapshot = JSON.stringify(menu);
   const updatedAt = nowIso();
-  let row: { version: number } | null;
-  if (baseVersion === undefined) {
-    row = await env.DB.prepare(
-      `INSERT INTO menus (branch_id, version, snapshot, updated_at) VALUES (?1, 1, ?2, ?3)
-       ON CONFLICT(branch_id) DO UPDATE SET
-         version = menus.version + 1, snapshot = excluded.snapshot, updated_at = excluded.updated_at
-       RETURNING version`,
-    )
-      .bind(branchId, snapshot, updatedAt)
-      .first<{ version: number }>();
-  } else if (baseVersion === null) {
-    row = await env.DB.prepare(
-      `INSERT INTO menus (branch_id, version, snapshot, updated_at) VALUES (?1, 1, ?2, ?3)
-       ON CONFLICT(branch_id) DO NOTHING RETURNING version`,
-    )
-      .bind(branchId, snapshot, updatedAt)
-      .first<{ version: number }>();
-  } else {
-    row = await env.DB.prepare(
-      `UPDATE menus SET version = version + 1, snapshot = ?3, updated_at = ?4
-       WHERE branch_id = ?1 AND version = ?2 RETURNING version`,
-    )
-      .bind(branchId, baseVersion, snapshot, updatedAt)
-      .first<{ version: number }>();
-  }
-  if (!row) {
-    throw new ApiError(
-      409,
-      'VERSION_CONFLICT',
-      'Menü bu arada değişmiş. Sayfayı yenileyip tekrar deneyin.',
-    );
-  }
+  const row = await env.DB.prepare(
+    `INSERT INTO menus (branch_id, version, snapshot, updated_at) VALUES (?1, 1, ?2, ?3)
+     ON CONFLICT(branch_id) DO UPDATE SET
+       version = menus.version + 1, snapshot = excluded.snapshot, updated_at = excluded.updated_at
+     RETURNING version`,
+  )
+    .bind(branchId, JSON.stringify(menu), updatedAt)
+    .first<{ version: number }>();
+  if (!row) throw new ApiError(500, 'MENU_SAVE_FAILED', 'Menü kaydedilemedi.');
   // Satici listesinde guncel isletme adi gorunsun.
   await env.DB.prepare('UPDATE branches SET name = ?, updated_at = ? WHERE id = ?')
     .bind(menu.branch.name, updatedAt, branchId)
@@ -138,10 +108,6 @@ export async function saveMenu(
 // -----------------------------------------------------------------------------
 // Masalar
 // -----------------------------------------------------------------------------
-
-export function newTableCode(): string {
-  return encodeTableCode(randomBytes(TABLE_CODE_BYTES));
-}
 
 /**
  * POS'un masa listesini esitler: koda gore gunceller/ekler, listede olmayanlari siler.

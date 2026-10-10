@@ -1,13 +1,13 @@
-/** D1 satir turleri (migrations/0001_init.sql, 0002_license_activation.sql). */
+/** D1 satir turleri (migrations/0001_init.sql, 0002_license_activation.sql, 0003_remove_panel.sql). */
 export interface TenantRow {
   id: string;
   name: string;
   plan: string;
   features: string;
   status: 'active' | 'suspended';
-  /** Lisans kimligi; eski (panelden acilmis) kiracilarda null. */
+  /** Lisans kimligi (isletme bununla taninir; 0003'ten sonra her kiracida dolu). */
   license_id: string | null;
-  /** Lisans bitis ani (exp + ek sure, UTC ISO); lisanssiz kiracida null. */
+  /** Lisans bitis ani (exp + ek sure, UTC ISO). */
   license_expires_at: string | null;
   created_at: string;
   updated_at: string;
@@ -17,7 +17,6 @@ export interface BranchRow {
   id: string;
   tenant_id: string;
   name: string;
-  source: 'panel' | 'pos';
   pos_token_hash: string | null;
   pos_paired_at: string | null;
   pos_last_seen_at: string | null;
@@ -61,16 +60,11 @@ export async function menuMeta(
   return row ? { version: row.version, updatedAt: row.updated_at } : null;
 }
 
-/** Istemciye giden masa gorunumu. */
-export function tableView(row: TableRow) {
-  return { id: row.id, code: row.code, name: row.name, hall: row.hall, sortOrder: row.sort_order };
-}
-
-/** Sube ozeti (panel ve satici listeleri). */
+/** Sube ozeti (satici API'si). */
 export async function branchSummaries(db: D1Database, tenantId: string) {
   const { results } = await db
     .prepare(
-      `SELECT b.id, b.name, b.source, b.pos_paired_at, b.pos_last_seen_at, b.pos_app_version,
+      `SELECT b.id, b.name, b.pos_paired_at, b.pos_last_seen_at, b.pos_app_version,
               m.version AS menu_version, m.updated_at AS menu_updated_at,
               (SELECT COUNT(*) FROM tables t WHERE t.branch_id = b.id) AS table_count
        FROM branches b LEFT JOIN menus m ON m.branch_id = b.id
@@ -80,7 +74,6 @@ export async function branchSummaries(db: D1Database, tenantId: string) {
     .all<{
       id: string;
       name: string;
-      source: 'panel' | 'pos';
       pos_paired_at: string | null;
       pos_last_seen_at: string | null;
       pos_app_version: string | null;
@@ -91,7 +84,6 @@ export async function branchSummaries(db: D1Database, tenantId: string) {
   return results.map((row) => ({
     id: row.id,
     name: row.name,
-    source: row.source,
     pos: row.pos_paired_at
       ? {
           pairedAt: row.pos_paired_at,

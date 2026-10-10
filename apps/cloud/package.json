@@ -2,7 +2,7 @@
   "name": "@ado/cloud",
   "version": "0.1.0",
   "private": true,
-  "description": "QR menu bulutu (Cloudflare Worker + D1 + R2): musteri menusu, panel, POS yayini",
+  "description": "QR menu bulutu (Cloudflare Worker + D1 + R2): musteri menusu ve POS yayini (lisansla)",
   "type": "module",
   "scripts": {
     "dev": "node -e \"require('fs').mkdirSync('../qr-web/dist',{recursive:true})\" && wrangler dev",

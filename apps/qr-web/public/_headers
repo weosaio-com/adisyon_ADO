@@ -10,6 +10,6 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-# Panel service worker'i her acilista denetlensin (guncelleme hemen gelsin).
+# Eski panel uygulamasini telefonlardan silen service worker her acilista denetlensin.
 /sw.js
   Cache-Control: no-cache

@@ -1,6 +1,4 @@
-import { reportReachable, reportUnreachable } from './connectivity';
-
-// Bulut API istemcisi: zarf { success, data } / { success: false, error }. Oturum cerezde (ayni koken).
+// Bulut API istemcisi: zarf { success, data } / { success: false, error }.
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -13,29 +11,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(
-  path: string,
-  opts: { method?: string; json?: unknown; body?: Blob } = {},
-): Promise<T> {
+export async function api<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
-      method: opts.method ?? (opts.json !== undefined || opts.body ? 'POST' : 'GET'),
-      headers:
-        opts.json !== undefined
-          ? { 'Content-Type': 'application/json' }
-          : opts.body
-            ? { 'Content-Type': 'application/octet-stream' }
-            : {},
-      ...(opts.json !== undefined ? { body: JSON.stringify(opts.json) } : {}),
-      ...(opts.body ? { body: opts.body } : {}),
-      credentials: 'same-origin',
-    });
+    res = await fetch(path, { credentials: 'same-origin' });
   } catch {
-    reportUnreachable();
     throw new ApiError(0, 'NETWORK', 'Bağlantı kurulamadı.');
   }
-  reportReachable();
   const text = await res.text();
   let parsed: {
     success?: boolean;

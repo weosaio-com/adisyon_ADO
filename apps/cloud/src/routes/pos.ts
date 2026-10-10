@@ -7,7 +7,7 @@ import {
   menuTableListSchema,
 } from '@ado/shared/menu';
 import type { AppEnv } from '../env';
-import { normalizePairingCode, randomToken, sha256Hex } from '../lib/crypto';
+import { randomToken, sha256Hex } from '../lib/crypto';
 import { menuMeta, type BranchRow, type TenantRow } from '../lib/db';
 import { ApiError, nowIso, ok, readJson } from '../lib/http';
 import { requireUsableLicense } from '../lib/license';
@@ -23,9 +23,9 @@ import {
 import { limit } from '../lib/rate-limit';
 
 /**
- * POS (yerel adisyon sunucusu) API'si. POS imzali lisansiyla buluta kendisi baglanir (/activate)
- * ya da eski yolla eslestirme koduyla eslesir (/pair); sonra Bearer belirteciyle menu, masa ve
- * gorsel yayinlar. Baglanan subenin menusunu POS yonetir. Tasarim: QR_MENU_DESIGN.md, LICENSING.md.
+ * POS (yerel adisyon sunucusu) API'si. POS imzali lisansiyla buluta kendisi baglanir (/activate),
+ * sonra Bearer belirteciyle menu, masa ve gorsel yayinlar. Subenin menusunu yalniz POS yonetir.
+ * Tasarim: QR_MENU_DESIGN.md, LICENSING.md.
  */
 export const posRoutes = new Hono<AppEnv>();
 
@@ -159,8 +159,8 @@ posRoutes.post('/activate', async (c) => {
     // Sube yoksa olustur (ayni anda iki istek iki sube acmasin).
     db
       .prepare(
-        `INSERT INTO branches (id, tenant_id, name, source, created_at, updated_at)
-         SELECT ?1, ?2, ?3, 'pos', ?4, ?4
+        `INSERT INTO branches (id, tenant_id, name, created_at, updated_at)
+         SELECT ?1, ?2, ?3, ?4, ?4
          WHERE NOT EXISTS (SELECT 1 FROM branches WHERE tenant_id = ?2)`,
       )
       .bind(crypto.randomUUID(), tenant.id, body.branchName ?? payload.c, now),
@@ -179,9 +179,8 @@ posRoutes.post('/activate', async (c) => {
   statements.push(
     db
       .prepare(
-        `UPDATE branches SET source = 'pos', pos_token_hash = ?1, pos_paired_at = ?2,
-           pos_last_seen_at = ?2, install_id = ?3, pos_branch_id = ?4, pos_app_version = ?5,
-           updated_at = ?2
+        `UPDATE branches SET pos_token_hash = ?1, pos_paired_at = ?2, pos_last_seen_at = ?2,
+           install_id = ?3, pos_branch_id = ?4, pos_app_version = ?5, updated_at = ?2
          WHERE id = (SELECT id FROM branches WHERE tenant_id = ?6 ORDER BY created_at LIMIT 1)`,
       )
       .bind(tokenHash, now, body.installId, body.posBranchId ?? null, appVersion(c), tenant.id),
@@ -200,47 +199,6 @@ posRoutes.post('/activate', async (c) => {
       'Aynı anda başka bir bağlanma denemesi yapıldı. Tekrar deneyin.',
     );
   }
-  // Belirtec yalniz bu yanitta duz metin doner; bulutta ozeti durur.
-  return ok(c, { token, ...posInfo(branch, tenant) }, 201);
-});
-
-// -----------------------------------------------------------------------------
-// Eski yol: eslestirme kodu (panel kaldirilinca silinecek)
-// -----------------------------------------------------------------------------
-
-posRoutes.post('/pair', async (c) => {
-  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
-  await limit(c.env.DB, [`pair:ip:${ip}`], 10, 15 * 60);
-  const { code } = await readJson(c, z.object({ code: z.string().min(1).max(32) }));
-  const codeHash = await sha256Hex(normalizePairingCode(code));
-  const now = nowIso();
-  // Tek kullanimlik: kod okunurken silinir (iki POS ayni kodla eslesemez).
-  const used = await c.env.DB.prepare(
-    'DELETE FROM pairing_codes WHERE code_hash = ? AND expires_at > ? RETURNING branch_id',
-  )
-    .bind(codeHash, now)
-    .first<{ branch_id: string }>();
-  if (!used) {
-    throw new ApiError(
-      400,
-      'PAIRING_CODE_INVALID',
-      'Eşleştirme kodu geçersiz ya da süresi dolmuş.',
-    );
-  }
-  const token = randomToken(POS_TOKEN_PREFIX);
-  const branch = await c.env.DB.prepare(
-    `UPDATE branches SET source = 'pos', pos_token_hash = ?, pos_paired_at = ?,
-       pos_last_seen_at = ?, updated_at = ?
-     WHERE id = ? RETURNING *`,
-  )
-    .bind(await sha256Hex(token), now, now, now, used.branch_id)
-    .first<BranchRow>();
-  const tenant = branch
-    ? await c.env.DB.prepare('SELECT * FROM tenants WHERE id = ?')
-        .bind(branch.tenant_id)
-        .first<TenantRow>()
-    : null;
-  if (!branch || !tenant) throw new ApiError(404, 'BRANCH_NOT_FOUND', 'Şube bulunamadı.');
   // Belirtec yalniz bu yanitta duz metin doner; bulutta ozeti durur.
   return ok(c, { token, ...posInfo(branch, tenant) }, 201);
 });
@@ -441,8 +399,8 @@ posRoutes.post('/unpair', async (c) => {
       .bind(branch.pos_token_hash, branch.id, now),
     db
       .prepare(
-        `UPDATE branches SET source = 'panel', pos_token_hash = NULL, pos_paired_at = NULL,
-           pos_last_seen_at = NULL, install_id = NULL, updated_at = ? WHERE id = ?`,
+        `UPDATE branches SET pos_token_hash = NULL, pos_paired_at = NULL, pos_last_seen_at = NULL,
+           install_id = NULL, updated_at = ? WHERE id = ?`,
       )
       .bind(now, branch.id),
   ]);
