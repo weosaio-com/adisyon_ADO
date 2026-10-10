@@ -68,6 +68,9 @@ jobs:
       SEED_OWNER_USERNAME: 'owner'
       SEED_OWNER_PASSWORD: 'owner1234'
       API_PORT: '3001'
+      # QR menu: smoke bu adreste sahte bulut acar (programa gomulu adres gibi); uzlastirma sik.
+      CLOUD_API_URL: 'http://127.0.0.1:3998'
+      CLOUD_RECONCILE_SECONDS: '2'
     steps:
       - uses: actions/checkout@v4
 
@@ -93,6 +96,11 @@ jobs:
         run: |
           pnpm exec prisma migrate deploy
           pnpm --filter @ado/backend run seed
+
+      # Her kosumda yeni test lisans anahtari: acik anahtar ADO_LICENSE_PUBLIC_KEY (POS dogrular),
+      # ozel anahtar runner'in gecici klasorunde (smoke test lisansi imzalar). Repoya girmez.
+      - name: Test lisans anahtari
+        run: node scripts/license.mjs gen-key --out "$RUNNER_TEMP/lic" --github-env
 
       - name: Sunucu + e2e smoke
         run: |
@@ -169,7 +177,7 @@ jobs:
           retention-days: 7
 
   # QR menu uctan uca: POS + bulut (Cloudflare Worker yerelde `wrangler dev`, D1/R2 simulasyonu).
-  # POS'lu akis (eslestirme, otomatik yayin, tukendi) ve POS'suz akis (panel, 390 px musteri).
+  # POS'lu akis (lisansla acma, otomatik yayin, tukendi, kapatma) ve POS'suz akis (panel, 390 px).
   e2e-cloud:
     runs-on: ubuntu-latest
     env:
@@ -184,6 +192,9 @@ jobs:
       E2E_CLOUD_URL: 'http://127.0.0.1:8787'
       E2E_CLOUD_ADMIN_TOKEN: 'ci-test-admin-token-0123456789'
       WRANGLER_SEND_METRICS: 'false'
+      # POS'un gomulu bulut adresi = yerel Worker; uzlastirma sik.
+      CLOUD_API_URL: 'http://127.0.0.1:8787'
+      CLOUD_RECONCILE_SECONDS: '2'
     steps:
       - uses: actions/checkout@v4
 
@@ -219,9 +230,15 @@ jobs:
       - name: Playwright tarayici (chromium)
         run: pnpm --filter @ado/frontend exec playwright install --with-deps chromium
 
+      # Test lisans anahtari: acik anahtari POS (ADO_LICENSE_PUBLIC_KEY) ve Worker
+      # (.dev.vars LICENSE_PUBLIC_KEY) bilir; ozel anahtarla Playwright test lisansi imzalar.
+      - name: Test lisans anahtari
+        run: node scripts/license.mjs gen-key --out "$RUNNER_TEMP/lic" --github-env
+
       - name: Bulut + sunucu + QR menu E2E
         run: |
-          echo "ADMIN_TOKEN=${E2E_CLOUD_ADMIN_TOKEN}" > apps/cloud/.dev.vars
+          printf 'ADMIN_TOKEN=%s\nLICENSE_PUBLIC_KEY=%s\n' \
+            "$E2E_CLOUD_ADMIN_TOKEN" "$ADO_LICENSE_PUBLIC_KEY" > apps/cloud/.dev.vars
           pnpm --filter @ado/cloud run db:migrate:local
           pnpm --filter @ado/cloud exec wrangler dev --port 8787 --ip 127.0.0.1 > wrangler.log 2>&1 &
           pnpm --filter @ado/backend run dev &

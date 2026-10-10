@@ -31,7 +31,9 @@ export default function QrCodesScreen() {
   });
   const [images, setImages] = useState<Record<string, string>>({});
 
-  const cloudUrl = status.data?.connected ? status.data.url : null;
+  // Adres programa gomulu: QR menu henuz acik olmasa da kartlar basilabilir (kodlar yereldir).
+  const cloudUrl = status.data?.url ?? null;
+  const menuOn = status.data?.mode === 'on';
   const hallOrder = useMemo(
     () => new Map((halls.data ?? []).map((hall, index) => [hall.id, { hall, index }])),
     [halls.data],
@@ -99,9 +101,9 @@ export default function QrCodesScreen() {
 
       {!status.isLoading && !cloudUrl ? (
         <div className="m-6 rounded-2xl bg-white p-6 text-center shadow">
-          <p className="font-semibold text-slate-800">QR menü bulutuna bağlı değil.</p>
+          <p className="font-semibold text-slate-800">Bu kurulumda QR menü tanımlı değil.</p>
           <p className="mt-1 text-sm text-slate-500">
-            Önce Ayarlar › QR Menü (Bulut) kartından eşleştirme kodu ile bağlanın.
+            QR menü bulutu bu kurulumun ayarlarında yok. Satıcınızla görüşün.
           </p>
           <button
             onClick={() => nav('/settings')}
@@ -112,6 +114,15 @@ export default function QrCodesScreen() {
         </div>
       ) : (
         <>
+          {!status.isLoading && !menuOn && (
+            <p
+              className="mx-6 mt-4 rounded-lg bg-amber-50 p-2 text-sm text-amber-900 print:hidden"
+              data-testid="qr-menu-off"
+            >
+              QR menü henüz açık değil. Kartları basabilirsiniz; müşteriler menüyü Ayarlar › QR Menü
+              kartından QR menüyü açınca görür.
+            </p>
+          )}
           <p className="px-6 pt-4 text-sm text-slate-500 print:hidden">
             Kartları yazdırıp masalara yapıştırın. Bir masanın kodunu yenilerseniz eski QR çalışmaz;
             o masanın kartını yeniden basın.

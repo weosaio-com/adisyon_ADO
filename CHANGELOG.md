@@ -6,6 +6,21 @@ Sürümleme: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **QR menü lisansla açılır (2026-10-10):** programda **Ayarlar › QR Menü › QR menüyü aç** tek tık;
+  bulut adresi programa gömülü (derleme profili), adres ve eşleştirme kodu girilmez.
+  - **Lisans:** lisans kimliği (`id`), satıcı imza aracı `scripts/license.mjs`
+    (gen-key/sign/verify), derleme profilleri (`apps/desktop/profiles`), veritabanı dışında kurulum
+    kimliği. Bkz. `LICENSING.md`.
+  - **Bulut:** `POST /api/pos/activate` (Ed25519 imza; işletme lisans kimliğiyle açılır, lisans tek
+    kurulumda açık, onayla devralma), `PUT /api/pos/license` (yenileme), nedenli `401`, askı ve
+    bitişte `403`; D1 `0002_license_activation.sql` (yalnız ekleme).
+  - **Program:** kart her durumda ne yapılacağını söyler (lisans yok, QR menü yok, süre doldu,
+    internet bekleniyor, başka bilgisayarda, bağlantı kalktı, askıda); işletme bilgisi ve salon
+    değişikliği de yayınlanır; uzlaştırma kaçan yayını, internetsiz açma/kapatmayı ve lisans
+    yenilemesini tamamlar (`CLOUD_RECONCILE_SECONDS`). `POST /cloud/activate`, `/cloud/pair` kalktı.
+  - **Testler:** bulut `activate.test.ts`, backend smoke 126 kontrol (sahte bulut + imzalı test
+    lisansı), Playwright `qr-menu.spec.ts` lisansla açma ve kapatma; CI her koşumda test anahtarı
+    üretir.
 - **Uygulama olarak yükleme ve internetsiz çalışma (2026-10-05):** işletme paneli ve adisyon,
   telefona ve bilgisayara mağazasız yüklenen uygulama (PWA) oldu; web'den açılmaya devam eder. QR
   menü yalnız web'de kalır.

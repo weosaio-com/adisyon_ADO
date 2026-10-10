@@ -35,6 +35,8 @@ export const envSchema = z.object({
   // Burada bilerek serbest metin: hatali bir deger acilisi durdurmaz, yalniz bulut
   // ozellikleri kapanir (adres kullanilirken dogrulanir).
   CLOUD_API_URL: z.string().default(''),
+  // Bulut uzlastirma araligi (sn): kacan yayin, bekleyen kapatma/lisans/etkinlestirme, durum.
+  CLOUD_RECONCILE_SECONDS: z.coerce.number().int().min(1).max(86_400).default(300),
   // Bu kurulumun kalici kimligi. Bos = veri dizinindeki ado-install.json (common/util/install-id).
   ADO_INSTALL_ID: z.string().default(''),
   // Masaustu kabugunun verdigi bilgiler (gelistirmede bos).

@@ -47,9 +47,7 @@ Sonra http://127.0.0.1:8787/panel adresinden bu e-posta ve parolayla girin.
 
 - **POS'suz işletme:** Menü, İşletme ve Masalar sekmelerini doldurup **Kaydet ve yayınla**; Masalar'daki
   **Önizle** müşteri sayfasını açar.
-- **POS'lu işletme:** panelde **Adisyon programı › Eşleştirme kodu al**; POS'ta **Ayarlar › QR Menü
-  (Bulut)** kartına `http://127.0.0.1:8787` ve kodu girin. `http://` yalnız `localhost`/`127.0.0.1`
-  için kabul edilir; gerçek adres `https://` olmalıdır.
+- **POS'lu işletme:** POS lisansıyla bağlanır; aşağıdaki **Lisansla bağlanma**.
 
 ### Lisansla bağlanma
 
@@ -65,8 +63,13 @@ node scripts/license.mjs sign --key ~/ado-lisans-yerel/ado-license-private.pem \
   --customer "Deneme Lokantası" --exp 2027-01-01 --feature qr.menu=true
 ```
 
-`LICENSE_PUBLIC_KEY` boşsa etkinleştirme `503 ACTIVATION_DISABLED` döner; eşleştirme kodu yolu
-(panel) şimdilik çalışmaya devam eder.
+POS'u bu buluta bağlamak için backend'i aynı açık anahtar ve yerel adresle başlatın
+(`ADO_LICENSE_PUBLIC_KEY=<açık anahtar>`, `CLOUD_API_URL=http://127.0.0.1:8787`; `http://` yalnız
+`localhost`/`127.0.0.1` için kabul edilir, gerçek adres `https://` olmalıdır). İmzalı lisansı POS'ta
+**Ayarlar › Lisans**'a girip **Ayarlar › QR Menü** kartında **QR menüyü aç** deyin.
+
+`LICENSE_PUBLIC_KEY` boşsa etkinleştirme `503 ACTIVATION_DISABLED` döner. Program artık yalnız bu
+yolu kullanır; eşleştirme kodu uçları panelle birlikte kaldırılacak.
 
 ### Testler
 
@@ -126,8 +129,9 @@ ve programın `apps/desktop/profiles/test.json` dosyasına aynı değerle yazıl
 4. Masa ekleme, POS eşleştirme ve parola değiştirme internetsizken pasiftir ve nedenini yazar.
 5. **Çıkış** yapınca bu cihazdaki panel verisi silinir (yayınlanmamış değişiklik varsa önce sorar).
 
-POS ile denemek için POS'ta **Ayarlar › QR Menü (Bulut)** kartına test ortamının adresini ve panelden
-alınan eşleştirme kodunu girin.
+POS ile denemek için test profiliyle derlenmiş programda (`pnpm --filter @ado/desktop dist:test`;
+bulut adresi test ortamı) deneme lisansını **Ayarlar › Lisans**'a girip **QR menüyü aç** deyin. Test
+ortamına önce `0002` migration'ı ve `LICENSE_PUBLIC_KEY` yüklenmiş olmalıdır.
 
 ---
 
@@ -161,7 +165,7 @@ Sonraki sürümler yalnız 7. adımdır; yeni bir migration varsa önce 5. adım
 
 ### Yayından sonra telefonla kontrol
 
-1. POS'u eşleştirip (kılavuz 5.5) bir masanın QR kartını basın. iPhone (Kamera) ve Android (Kamera ya
+1. POS'ta QR menüyü açıp (kılavuz 5.5) bir masanın QR kartını basın. iPhone (Kamera) ve Android (Kamera ya
    da Google Lens) ile masadan ~50 cm uzaklıktan okutun: menü mobil veride birkaç saniyede açılır,
    işletme adı ve masa doğrudur.
 2. Fotoğraflar yüklenir, yazılar okunur, sayfa yana kaymaz; sayfa yakınlaştırılabilir.

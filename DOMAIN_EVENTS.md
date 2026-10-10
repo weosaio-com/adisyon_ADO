@@ -31,14 +31,16 @@
 - **Amaci:** Yeni urun katalogda olusturuldu.
 - **Yayinlandigi yer:** `CatalogService.createProduct` (post-commit).
 - **Payload:** `{ productId, name, categoryId, salePrice }`.
-- **Dinleyen moduller:** `EventLoggerSubscriber` (tumu). İleride: Cache invalidation, Dashboard, Sync.
+- **Dinleyen moduller:** `EventLoggerSubscriber` (tumu), `CloudService` (QR menu yayini). İleride:
+  Cache invalidation, Dashboard, Sync.
 
 ### `product.updated`
 - **Amaci:** Urun bilgisi/fiyati guncellendi; "tukendi" anahtari ya da gorsel degisti.
 - **Yayinlandigi yer:** `CatalogService.updateProduct`, `setAvailability`, `setImage`,
   `clearImage` (post-commit).
 - **Payload:** `{ productId, name, categoryId, salePrice }`.
-- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Cache invalidation, Dashboard, Sync.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menu yayini). İleride: Cache
+  invalidation, Dashboard, Sync.
 - **Not:** Ayri bir `price.changed` event'i, fiyat degisimini ozel izlemek gerekince eklenecek
   (su an fiyat guncellemesi bu event'e dahil).
 
@@ -46,7 +48,8 @@
 - **Amaci:** Urun soft-delete edildi.
 - **Yayinlandigi yer:** `CatalogService.deleteProduct` (post-commit; payload silinmeden onceki durum).
 - **Payload:** `{ productId, name, categoryId, salePrice }`.
-- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Cache invalidation, Dashboard, Sync.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menu yayini). İleride: Cache
+  invalidation, Dashboard, Sync.
 
 ---
 
@@ -54,19 +57,30 @@
 - **Amaci:** Yeni masa tanimlandi (salon + kat plani).
 - **Yayinlandigi yer:** `TablesService.createTable` (post-commit).
 - **Payload:** `{ tableId, hallId, name }`.
-- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Dashboard, canli masa katmani (WS), Sync.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menu masa listesi). İleride:
+  Dashboard, canli masa katmani (WS), Sync.
 
 ### `table.updated`
 - **Amaci:** Masa tanimi/konumu (posX/posY) guncellendi ya da QR menu kodu yenilendi.
 - **Yayinlandigi yer:** `TablesService.updateTable`, `rotatePublicCode` (post-commit).
 - **Payload:** `{ tableId, hallId, name }`.
-- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Dashboard, canli masa katmani (WS), Sync.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menu masa listesi). İleride:
+  Dashboard, canli masa katmani (WS), Sync.
 
 ### `table.deleted`
 - **Amaci:** Masa soft-delete edildi.
 - **Yayinlandigi yer:** `TablesService.deleteTable` (post-commit; payload silinmeden onceki durum).
 - **Payload:** `{ tableId, hallId, name }`.
-- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: Dashboard, Sync.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menu masa listesi). İleride:
+  Dashboard, Sync.
+
+### `hall.created` / `hall.updated` / `hall.deleted`
+- **Amaci:** Salon olusturuldu, guncellendi (ad, sira, aktiflik) ya da soft-delete edildi.
+- **Yayinlandigi yer:** `TablesService.createHall` / `updateHall` / `deleteHall` (post-commit;
+  silmede payload silinmeden onceki durum).
+- **Payload:** `{ hallId, name }`.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menudeki masa listesinde salon
+  adi/sirasi). İleride: Dashboard.
 
 > Not: Masa **durum** event'leri (`table.reserved`, `table.merged`, `table.moved`, occupied gecisi)
 > siparise bagli oldugu icin Siparis modulunde eklenecek.
@@ -115,11 +129,19 @@
 
 > Not: `order.closed` / `receipt.printed` henuz yok; mutfak `order.item.sent` PR2'de.
 
+### `branch.updated`
+- **Amaci:** Isletme bilgisi (ad, adres, telefon) guncellendi.
+- **Yayinlandigi yer:** `SettingsService.setBusiness` (post-commit).
+- **Payload:** `{ name }`.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menude isletme adi/adres/telefon).
+
 ### `license.activated`
 - **Amaci:** Ayarlar › Lisans'tan yeni bir lisans anahtari etkinlestirildi (imza ve sure dogrulandi).
 - **Yayinlandigi yer:** `LicenseService.activate` (post-commit; bayraklar tazelendikten sonra).
 - **Payload:** `{ licenseId, customerName, features }`. Anahtarin kendisi ASLA event'e konmaz.
-- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: QR menu bulutunda lisansin yenilenmesi.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService`: QR menu aciksa yeni lisans buluta
+  bildirilir (`PUT /api/pos/license`, belirtec degismez); lisans kimligi degistiyse baglanti kapanir
+  ve "QR menuyu ac" yeniden gerekir.
 
 ## Planlanan Event'ler (modul gelince eklenecek)
 
@@ -144,7 +166,5 @@ eklenecektir. Dinleyiciler sutunu hedeftir.
 | `printer.failed` / `printer.recovered` | Yazdırma | Monitoring, Notification |
 | `sync.completed` / `sync.failed` | Sync (Faz 2) | Monitoring, Notification |
 | `update.installed` | Güncelleme | Audit, Monitoring |
-| `hall.created` / `hall.updated` / `hall.deleted` | Masa (salon) | QR menü yayını (masa listesinde salon adı/sırası), Dashboard |
-| `branch.updated` | Ayarlar (işletme bilgisi) | QR menü yayını (işletme adı/adres/telefon) |
 
 > Bu tablo **hedef**tir; her satir ilgili modul kodlanirken uygulanan bolume tasinir + payload'i tanimlanir.

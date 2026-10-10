@@ -1,12 +1,18 @@
+import { readFileSync } from 'node:fs';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { buildPayload, signLicense } from '../../../scripts/license.mjs';
 
 // QR menu uctan uca: POS (:3001) + bulut (apps/cloud, `wrangler dev`). Bulut adresi
 // E2E_CLOUD_URL ile verilir; verilmezse bu dosya calismaz (playwright.config testIgnore).
 // CI'da e2e-cloud isi kosar. Satici API anahtari bulutun ADMIN_TOKEN'i ile ayni olmali.
+// POS'lu akis lisansla acilir: test lisansi ADO_LICENSE_PRIVATE_KEY_FILE ile imzalanir; acik
+// anahtari POS (ADO_LICENSE_PUBLIC_KEY) ve bulut (LICENSE_PUBLIC_KEY) bilir. POS'un gomulu bulut
+// adresi (CLOUD_API_URL) E2E_CLOUD_URL ile ayni olmali.
 const ORIGIN = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3001';
 const API = `${ORIGIN}/api/v1`;
 const CLOUD = process.env.E2E_CLOUD_URL ?? 'http://127.0.0.1:8787';
 const ADMIN_TOKEN = process.env.E2E_CLOUD_ADMIN_TOKEN ?? '';
+const LICENSE_KEY_FILE = process.env.ADO_LICENSE_PRIVATE_KEY_FILE ?? '';
 const OWNER = {
   username: process.env.SEED_OWNER_USERNAME ?? 'owner',
   password: process.env.SEED_OWNER_PASSWORD ?? 'owner1234',
@@ -48,6 +54,19 @@ async function newTenant(name: string) {
   });
   if (res.status !== 201) throw new Error(`tenant -> ${res.status} ${await res.text()}`);
   return { email, password };
+}
+
+// Saticinin imzaladigi test lisansi (QR menu dahil); her kosumda yeni lisans kimligi.
+function e2eLicense(customer: string): string {
+  return signLicense(
+    buildPayload({
+      id: `lic_e2e_${Date.now()}`,
+      customer,
+      exp: '2099-01-01',
+      features: { 'qr.menu': true },
+    }),
+    readFileSync(LICENSE_KEY_FILE, 'utf8'),
+  );
 }
 
 // Musteri telefonu (390 px) ve isletme sahibi paneli ayni bulut adresinde; her testin
@@ -264,6 +283,9 @@ test.describe('POS’lu işletme', () => {
   const fx = {} as { token: string; product: Named; table: Named };
 
   test.beforeAll(async () => {
+    if (!LICENSE_KEY_FILE) {
+      throw new Error('ADO_LICENSE_PRIVATE_KEY_FILE gerekli (scripts/license.mjs gen-key).');
+    }
     fx.token = (await pos<{ accessToken: string }>('POST', '/auth/login', OWNER)).accessToken;
     const t = fx.token;
     const tag = Date.now();
@@ -294,46 +316,28 @@ test.describe('POS’lu işletme', () => {
     await pos('DELETE', '/cloud/connection', undefined, fx.token).catch(() => undefined);
   });
 
-  test('eşleştir, otomatik yayın, tükendi müşteri sayfasına yansır', async ({ page, browser }) => {
+  test('lisansla aç, otomatik yayın, tükendi yansır, kapatınca QR menü açmaz', async ({
+    page,
+    browser,
+  }) => {
     // Gorsel POS'a yuklenir; yayinda buluta gider.
     const image = await photo(page, 800, 'image/webp');
     await pos('POST', `/products/${fx.product.id}/image`, image, fx.token);
 
-    // Isletme sahibi panelden eslestirme kodu alir.
-    const owner = await newTenant('E2E Kebapçı');
-    const panel = await phone(browser);
-    await panelLogin(panel, owner);
-    await panel.getByRole('link', { name: 'Adisyon programı' }).click();
-    await panel.getByTestId('pairing-create').click();
-    const code = (await panel.getByTestId('pairing-code').textContent()) ?? '';
-    expect(code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
-    await expect(panel.getByTestId('pairing-url')).toHaveText(CLOUD);
-
-    // POS: Ayarlar > QR Menu (Bulut) karti.
+    // Isletme sahibi saticidan aldigi lisansi Ayarlar > Lisans'a yapistirir.
     await page.goto('/settings');
+    await page.getByPlaceholder('ADO1....').fill(e2eLicense('E2E Kebapçı'));
+    await page.getByRole('button', { name: 'Lisansı Etkinleştir' }).click();
+    await expect(page.getByTestId('license-qr-menu')).toHaveText('QR menü: dahil');
+
+    // QR menu tek tikla acilir: bulut adresi programa gomulu, kod girilmez.
     const cloudCard = page.getByTestId('cloud-card');
-    await cloudCard.getByPlaceholder('Bulut adresi (ör. menu.ornek.com)').fill(CLOUD);
-    await cloudCard.getByPlaceholder('Eşleştirme kodu (ABCD-EFGH)').fill(code);
-    await cloudCard.getByRole('button', { name: 'Bağlan' }).click();
+    await cloudCard.getByTestId('cloud-activate').click();
     await expect(cloudCard.getByTestId('cloud-last-published')).toContainText('sürüm', {
       timeout: 30_000,
     });
-    // Karttan isletme paneline gecilir (yeni sekme; masaustu programda sistem tarayicisi).
-    await expect(cloudCard.getByTestId('cloud-panel-link')).toHaveAttribute(
-      'href',
-      `${CLOUD}/panel`,
-    );
-    await expect(cloudCard.getByTestId('cloud-panel-link')).toHaveAttribute('target', '_blank');
-
-    // Panel kendiliginden guncellenir; menu artik POS'tan gelir (salt okunur).
-    await expect(panel.getByText('Adisyon programı bağlandı.', { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-    await panel.getByRole('link', { name: 'Menü' }).click();
-    await expect(
-      panel.getByText('adisyon programından yayınlanıyor', { exact: false }),
-    ).toBeVisible();
-    await expect(panel.getByRole('button', { name: '+ Kategori' })).toHaveCount(0);
+    await expect(cloudCard).toContainText('E2E Kebapçı');
+    await expect(cloudCard).toContainText(CLOUD);
 
     // Musteri masadaki QR'i okutur.
     const table = await pos<{ publicCode: string }>('GET', `/tables/${fx.table.id}`, undefined, fx.token); // prettier-ignore
@@ -357,5 +361,15 @@ test.describe('POS’lu işletme', () => {
         { timeout: 30_000, intervals: [2000] },
       )
       .toBe(1);
+
+    // QR menu kapatilir: masadaki kod artik menu acmaz (yeniden acinca ayni kodlar calisir).
+    page.once('dialog', (dialog) => void dialog.accept());
+    await cloudCard.getByTestId('cloud-disconnect').click();
+    await expect(cloudCard.getByTestId('cloud-activate')).toBeVisible();
+    await customer.reload();
+    await expect(customer.getByTestId('menu-error')).toHaveAttribute(
+      'data-code',
+      'TABLE_NOT_FOUND',
+    );
   });
 });

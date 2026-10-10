@@ -54,6 +54,10 @@ export class AppConfigService {
   get cloudApiUrl(): string {
     return this.env.CLOUD_API_URL.trim();
   }
+  /** Bulut uzlastirma araligi (saniye). */
+  get cloudReconcileSeconds(): number {
+    return this.env.CLOUD_RECONCILE_SECONDS;
+  }
   /** Masaustu surumu (paketli surumde app.getVersion(); gelistirmede bos). */
   get appVersion(): string {
     return this.env.ADO_APP_VERSION.trim();
