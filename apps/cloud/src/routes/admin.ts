@@ -9,9 +9,9 @@ import { FEATURES, PLAN_IDS, PLANS, tenantFeatures } from '../lib/plans';
 import { createPairingCode, emailSchema, passwordSchema } from './panel';
 
 /**
- * Satici (vendor) API'si: isletme acma, paket degistirme, askiya alma, parola sifirlama.
+ * Satici (vendor) API'si: isletme acma, paket degistirme, askiya alma, POS baglantisini kaldirma,
+ * parola sifirlama. Lisansla baglanan isletmeler POS'un ilk etkinlestirmesinde kendiliginden acilir.
  * `ADMIN_TOKEN` gizli degeriyle korunur; tanimli degilse tamamen kapalidir.
- * Kendi kendine kayit ve ucretlendirme sonraki asamada.
  */
 export const adminRoutes = new Hono<AppEnv>();
 
@@ -33,6 +33,8 @@ function tenantView(tenant: TenantRow) {
     plan: tenant.plan,
     status: tenant.status,
     features: tenantFeatures(tenant),
+    licenseId: tenant.license_id,
+    licenseExpiresAt: tenant.license_expires_at,
     createdAt: tenant.created_at,
   };
 }
@@ -129,6 +131,37 @@ adminRoutes.patch('/tenants/:id', async (c) => {
     )
     .first<TenantRow>();
   return ok(c, row ? tenantView(row) : null);
+});
+
+// POS baglantilarini kaldirir (calinan lisans, bilgisayar degisimi): belirtecler iptal edilir,
+// POS "satici tarafindan kaldirildi" gorur. Menu yayinda kalir; gizlemek icin askiya alin.
+adminRoutes.post('/tenants/:id/revoke', async (c) => {
+  const tenant = await tenantById(c.env.DB, c.req.param('id'));
+  if (!tenant) throw new ApiError(404, 'TENANT_NOT_FOUND', 'İşletme bulunamadı.');
+  const now = nowIso();
+  const [revocations] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO pos_token_revocations (token_hash, branch_id, reason, created_at)
+       SELECT pos_token_hash, id, 'revoked', ?1 FROM branches
+       WHERE tenant_id = ?2 AND pos_token_hash IS NOT NULL
+       ON CONFLICT (token_hash) DO NOTHING`,
+    ).bind(now, tenant.id),
+    c.env.DB.prepare(
+      `UPDATE branches SET pos_token_hash = NULL, pos_paired_at = NULL, install_id = NULL,
+         updated_at = ?1 WHERE tenant_id = ?2 AND pos_token_hash IS NOT NULL`,
+    ).bind(now, tenant.id),
+  ]);
+  return ok(c, { revoked: revocations?.meta.changes ?? 0 });
+});
+
+// Isletmeyi tamamen siler (subeler, menu, masalar, iptal kayitlari birlikte). Gorseller icerik
+// adreslidir ve baska isletmelerce de kullanilabilir; R2'de kalir.
+adminRoutes.delete('/tenants/:id', async (c) => {
+  const result = await c.env.DB.prepare('DELETE FROM tenants WHERE id = ?')
+    .bind(c.req.param('id'))
+    .run();
+  if (!result.meta.changes) throw new ApiError(404, 'TENANT_NOT_FOUND', 'İşletme bulunamadı.');
+  return ok(c, { deleted: true });
 });
 
 adminRoutes.post('/branches/:id/pairing-code', async (c) => {

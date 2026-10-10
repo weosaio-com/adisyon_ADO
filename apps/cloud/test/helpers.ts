@@ -1,4 +1,4 @@
-import { exports } from 'cloudflare:workers';
+import { env, exports } from 'cloudflare:workers';
 import type { MenuSnapshotInput } from '@ado/shared/menu';
 
 // Worker'in fetch'i (ayni isolate'te, gercek D1/R2 baglamalariyla).
@@ -95,6 +95,74 @@ export async function pairPos(cookie: string, branchId: string): Promise<string>
   });
   if (res.status !== 201) throw new Error(`pair: ${res.status} ${JSON.stringify(res.body)}`);
   return res.body.data.token;
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Test anahtariyla (vitest.config.ts) ya da verilen PKCS8 anahtarla lisans imzalar. */
+export async function signLicense(
+  payload: Record<string, unknown>,
+  privateKeyB64: string = env.TEST_LICENSE_PRIVATE_KEY,
+): Promise<string> {
+  const raw = new TextEncoder().encode(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    Uint8Array.from(atob(privateKeyB64), (char) => char.charCodeAt(0)),
+    { name: 'Ed25519' },
+    false,
+    ['sign'],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, key, raw));
+  return `ADO1.${toBase64Url(raw)}.${toBase64Url(signature)}`;
+}
+
+/** QR menulu, uzak gelecekte biten gecerli lisans payload'i. */
+export function licensePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    id: unique('lic'),
+    c: 'Kebapçı Halil',
+    exp: '2099-01-01',
+    g: 14,
+    f: { 'qr.menu': true },
+    ...overrides,
+  };
+}
+
+export interface ActivateResult {
+  token: string;
+  branch: { id: string; name: string };
+  tenant: {
+    name: string;
+    status: string;
+    plan: string;
+    planLabel: string;
+    features: Record<string, boolean>;
+  };
+  license: { id: string; expiresAt: string } | null;
+}
+
+export async function activate(
+  opts: {
+    licenseKey?: string;
+    installId?: string;
+    takeover?: boolean;
+    ip?: string;
+    headers?: Record<string, string>;
+  } = {},
+) {
+  return call<ActivateResult>('POST', '/api/pos/activate', {
+    json: {
+      licenseKey: opts.licenseKey ?? (await signLicense(licensePayload())),
+      installId: opts.installId ?? unique('inst'),
+      ...(opts.takeover ? { takeover: true } : {}),
+    },
+    ip: opts.ip ?? unique('ip'),
+    ...(opts.headers ? { headers: opts.headers } : {}),
+  });
 }
 
 export function sampleMenu(imageKey: string | null = null): MenuSnapshotInput {

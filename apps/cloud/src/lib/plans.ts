@@ -1,7 +1,8 @@
 /**
- * Paketler: isletme hangi QR ozelliklerini kullanir. Asil kapi buradadir (POS lisansindaki
- * `qr.menu` yalniz arayuzu gizler). QR-1'de yalniz `qr.menu` kullanilir; digerleri sonraki
- * asamalar icin (siparis, uzaktan odeme, hesap bolme, oyunlar).
+ * Paketler: isletme hangi QR ozelliklerini kullanir. Asil kapi buradadir. Lisansla baglanan
+ * isletmede ozellikler imzali lisanstan gelir (planFromLicense + licenseFeatureOverrides) ve her
+ * yenilemede yeniden yazilir. QR-1'de yalniz `qr.menu` kullanilir; digerleri sonraki asamalar icin
+ * (siparis, uzaktan odeme, hesap bolme, oyunlar).
  */
 export const FEATURES = ['qr.menu', 'qr.order', 'qr.pay', 'qr.split', 'qr.games'] as const;
 export type Feature = (typeof FEATURES)[number];
@@ -35,17 +36,49 @@ function parseOverrides(text: string): Partial<Record<Feature, boolean>> {
   }
 }
 
-/** Paket + tek tek acilan/kapatilan ozellikler. Askiya alinan isletmede hepsi kapali. */
+/** Lisansin suresi doldu mu (lisanssiz eski kiracida hic dolmaz). */
+export function licenseExpired(
+  tenant: { license_expires_at?: string | null },
+  now = new Date(),
+): boolean {
+  const expiresAt = tenant.license_expires_at;
+  return typeof expiresAt === 'string' && expiresAt !== '' && expiresAt <= now.toISOString();
+}
+
+/**
+ * Paket + tek tek acilan/kapatilan ozellikler. Askiya alinan ya da lisansi dolan isletmede hepsi
+ * kapali.
+ */
 export function tenantFeatures(tenant: {
   plan: string;
   features: string;
   status: string;
+  license_expires_at?: string | null;
 }): FeatureMap {
   const plan = PLANS[tenant.plan as PlanId];
   const base = new Set<Feature>(plan ? plan.features : []);
   const overrides = parseOverrides(tenant.features);
-  const active = tenant.status === 'active';
+  const active = tenant.status === 'active' && !licenseExpired(tenant);
   return Object.fromEntries(
     FEATURES.map((feature) => [feature, active && (overrides[feature] ?? base.has(feature))]),
   ) as FeatureMap;
+}
+
+/** Lisanstaki ozelliklere en yakin paket (yalniz etiket icin). QR menu yoksa 'none'. */
+export function planFromLicense(features: Record<string, boolean> | undefined): PlanId | 'none' {
+  const has = (feature: Feature) => features?.[feature] === true;
+  if (!has('qr.menu')) return 'none';
+  if (FEATURES.every(has)) return 'full';
+  if (has('qr.pay')) return 'pay';
+  if (has('qr.order')) return 'order';
+  return 'menu';
+}
+
+/** Lisanstaki ozellikler birebir: her bilinen ozellik icin acik/kapali (paket ne derse desin). */
+export function licenseFeatureOverrides(
+  features: Record<string, boolean> | undefined,
+): Record<Feature, boolean> {
+  return Object.fromEntries(
+    FEATURES.map((feature) => [feature, features?.[feature] === true]),
+  ) as Record<Feature, boolean>;
 }

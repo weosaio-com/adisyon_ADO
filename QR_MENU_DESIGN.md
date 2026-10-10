@@ -141,8 +141,9 @@
 
 | Tablo | İçerik |
 |---|---|
-| `tenants` | İşletme: ad, paket, özellik istisnaları, durum (active/suspended). |
-| `branches` | Şube: ad, kaynak (`panel`/`pos`), POS belirteç özeti, eşleşme ve son görülme zamanı. |
+| `tenants` | İşletme: ad, paket, özellik istisnaları, durum (active/suspended), lisans kimliği ve bitişi (`0002`). |
+| `branches` | Şube: ad, kaynak (`panel`/`pos`), POS belirteç özeti, eşleşme ve son görülme zamanı; bağlı kurulum, POS şube kimliği ve sürümü (`0002`). |
+| `pos_token_revocations` | Geçersiz kılınan POS belirteçleri (özet) ve nedeni: `rotated`, `superseded`, `revoked`, `unpaired` (`0002`). |
 | `users` | Panel kullanıcısı (e-posta, PBKDF2 parola özeti). |
 | `sessions` | Panel oturumları (belirteç özeti, bitiş). |
 | `pairing_codes` | Eşleştirme kodu özeti, şube, bitiş (şubenin yalnız son kodu geçerli). |
@@ -162,12 +163,24 @@ Yanıt zarfı POS ile aynıdır: `{ success: true, data }` / `{ success: false, 
 - `GET /img/:key` — görsel
 - `GET /api/health`
 
-**POS** (`Authorization: Bearer adoqr_pos_…`; eşleştirme hariç)
-- `POST /api/pos/pair` `{ code }` → belirteç, işletme ve şube bilgisi
-- `GET /api/pos/status` — işletme, paket, menü sürümü
+**POS** (`Authorization: Bearer adoqr_pos_…`; etkinleştirme ve eşleştirme hariç)
+- `POST /api/pos/activate` `{ licenseKey, installId, posBranchId?, branchName?, takeover? }` →
+  belirteç, işletme, şube ve lisans bilgisi (`LICENSING.md`). İmza, lisans kimliği, süre ve
+  `qr.menu` şartı; işletme lisans kimliğiyle ilk etkinleştirmede açılır. Aynı kurulum yeniden
+  bağlanınca belirteç yenilenir; başka kurulumda açıksa `409 ACTIVE_ON_OTHER_INSTALL`, onayla
+  (`takeover`) devralınır. `LICENSE_PUBLIC_KEY` boşsa `503 ACTIVATION_DISABLED`.
+- `PUT /api/pos/license` `{ licenseKey }` — yenileme: aynı lisans kimliği, belirteç değişmez
+  (`409 LICENSE_ID_MISMATCH`); QR menüsüz lisans özelliği kapatır.
+- `POST /api/pos/pair` `{ code }` → belirteç, işletme ve şube bilgisi (eski yol; panelle kalkacak)
+- `GET /api/pos/status` — işletme (durum, paket, özellikler), lisans, menü sürümü
 - `POST /api/pos/images/check` `{ keys }` → `{ missing }` · `PUT /api/pos/images/:key` (gövde: görsel)
-- `PUT /api/pos/menu` (menü anlık görüntüsü) · `PUT /api/pos/tables` `{ tables }`
-- `POST /api/pos/unpair`
+- `PUT /api/pos/menu` (menü anlık görüntüsü) · `PUT /api/pos/tables` `{ tables }` — askıda işletme,
+  dolan lisans ya da QR menü hakkı yoksa `403` (`TENANT_SUSPENDED` / `LICENSE_EXPIRED` /
+  `QR_MENU_NOT_LICENSED`); belirteç geçerli kalır.
+- `POST /api/pos/unpair` — "QR menüyü kapat": menü ve masalar yayından kalkar, belirteç iptal.
+- Geçersiz belirteçte `401` nedeniyle döner: `POS_TOKEN_ROTATED` / `POS_TOKEN_SUPERSEDED` /
+  `POS_TOKEN_REVOKED` / `POS_TOKEN_UNPAIRED` / `POS_TOKEN_INVALID`.
+- POS `X-Ado-Version` başlığı gönderirse sürümü şube kaydına yazılır.
 
 **Panel** (çerez oturumu; `branches/:branchId/*` kiracıya göre sınırlı)
 - `POST /api/panel/login` · `POST /api/panel/logout` · `GET /api/panel/me` · `POST /api/panel/password`
@@ -177,7 +190,8 @@ Yanıt zarfı POS ile aynıdır: `{ success: true, data }` / `{ success: false, 
 
 **Satıcı** (`Authorization: Bearer <ADMIN_TOKEN>`)
 - `GET /api/admin/plans` · `GET/POST /api/admin/tenants` · `GET/PATCH /api/admin/tenants/:id`
-  (ad, paket, özellikler, askıya alma)
+  (ad, paket, özellikler, askıya alma) · `DELETE /api/admin/tenants/:id`
+- `POST /api/admin/tenants/:id/revoke` — POS bağlantılarını kaldırır (`POS_TOKEN_REVOKED`)
 - `POST /api/admin/branches/:id/pairing-code` · `POST /api/admin/users/:id/password`
 
 POS tarafındaki uçlar (`/cloud/*`, ürün görseli, "tükendi", masa kodu): `API_DESIGN.md` §5.1, §5.2, §5.12.

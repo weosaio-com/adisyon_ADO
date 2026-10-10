@@ -21,7 +21,7 @@ publicRoutes.get('/api/m/:code', async (c) => {
   }
   const row = await c.env.DB.prepare(
     `SELECT t.name AS table_name, t.hall AS table_hall,
-            ten.plan, ten.features, ten.status,
+            ten.plan, ten.features, ten.status, ten.license_expires_at,
             m.version, m.snapshot, m.updated_at
      FROM tables t
      JOIN branches b ON b.id = t.branch_id
@@ -36,6 +36,7 @@ publicRoutes.get('/api/m/:code', async (c) => {
       plan: string;
       features: string;
       status: string;
+      license_expires_at: string | null;
       version: number | null;
       snapshot: string | null;
       updated_at: string | null;

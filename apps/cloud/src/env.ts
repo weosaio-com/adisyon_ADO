@@ -6,6 +6,11 @@ export interface Env {
   ASSETS: Fetcher;
   /** Satici (vendor) API anahtari. Tanimli degilse /api/admin kapalidir. */
   ADMIN_TOKEN?: string;
+  /**
+   * Lisans imzasini dogrulayan Ed25519 acik anahtar(lar)i (base64 SPKI; virgulle liste).
+   * Programdaki derleme profiliyle ayni anahtar (LICENSING.md). Bossa lisansla etkinlestirme kapali.
+   */
+  LICENSE_PUBLIC_KEY?: string;
 }
 
 export interface SessionUser {
