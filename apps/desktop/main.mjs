@@ -7,6 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from '
 import { DatabaseSync } from 'node:sqlite';
 import { rotatingLog } from './rotating-log.mjs';
 import { applyPendingRestore, ensureSecrets } from './restore.mjs';
+import { appConfigEnv, loadAppConfig } from './app-config.mjs';
 
 // Paketli uygulama dev sunucusuna (3001) yanlislikla baglanmasin.
 const PORT = process.env.API_PORT || (app.isPackaged ? '43127' : '3001');
@@ -21,7 +22,9 @@ const isUp = () =>
 // Paketli surumde: DB userData'da yasar (kurulum dizini yazilabilir degil),
 // gizli anahtarlar ilk aciliste uretilip userData/secrets.json'da saklanir.
 // Bekleyen yedek geri yuklemesi (ve tasinan yedek anahtari) backend acilmadan uygulanir.
-function packagedEnv() {
+// Derleme profili (resources/app-config.json) bulut adresini ve lisans acik anahtarini verir;
+// okunamazsa acilis durmaz, yalniz bulut/lisans ozellikleri kapali kalir (hata loga yazilir).
+function packagedEnv(log) {
   const dataDir = app.getPath('userData');
   mkdirSync(dataDir, { recursive: true }); // ilk aciliste henuz yok
   const dbPath = join(dataDir, 'ado.db');
@@ -31,6 +34,8 @@ function packagedEnv() {
     copyFileSync(join(process.resourcesPath, 'template.db'), dbPath);
   }
   applyMigrations(dbPath);
+  const { config, errors } = loadAppConfig(join(process.resourcesPath, 'app-config.json'));
+  for (const error of errors) log(Buffer.from(`[app-config] ${error}\n`));
   return {
     NODE_ENV: 'production',
     DATABASE_URL: 'file:' + dbPath.replaceAll('\\', '/'),
@@ -38,6 +43,8 @@ function packagedEnv() {
     API_PORT: PORT,
     // Garson tabletleri icin yerel HTTPS (cevrimdisi acilis icin sart). Pencere HTTP'de kalir.
     API_TLS_PORT: String(Number(PORT) + 1),
+    ADO_APP_VERSION: app.getVersion(),
+    ...appConfigEnv(config),
     ...ensureSecrets(secretsPath),
   };
 }
@@ -99,7 +106,7 @@ function startBackend() {
   backend = spawn(process.execPath, [join(base, 'dist', 'main.js')], {
     env: {
       ...process.env,
-      ...(app.isPackaged ? packagedEnv() : {}),
+      ...(app.isPackaged ? packagedEnv(writeLog) : {}),
       ELECTRON_RUN_AS_NODE: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

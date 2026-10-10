@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parseLicenseKey } from '../../license/license.keys';
 
 @Injectable()
 export class FeatureFlagService implements OnModuleInit {
@@ -13,17 +14,15 @@ export class FeatureFlagService implements OnModuleInit {
     await this.reloadFlags();
   }
 
+  // Bayraklar yalniz imzasi BU kurulumda dogrulanan anahtardan okunur; veritabanindaki
+  // `features` kopyasina guvenilmez (acik anahtar degistiyse eski bayraklar gecerli kalmasin).
   async reloadFlags() {
     try {
       const license = await this.prisma.licenseInfo.findFirst({
         where: { deletedAt: null },
       });
-
-      if (!license || !license.features) {
-        this.cachedFlags = {};
-      } else {
-        this.cachedFlags = JSON.parse(license.features);
-      }
+      const payload = license?.licenseKey ? parseLicenseKey(license.licenseKey) : null;
+      this.cachedFlags = payload?.f ?? {};
       this.isLoaded = true;
       this.logger.log(`Loaded feature flags: ${JSON.stringify(this.cachedFlags)}`);
     } catch (err) {

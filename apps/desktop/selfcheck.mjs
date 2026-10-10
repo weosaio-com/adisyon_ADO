@@ -1,5 +1,6 @@
 // Masaustu kabugunun Electron'suz yardimcilari icin self-check: `node selfcheck.mjs`
 import assert from 'node:assert';
+import { generateKeyPairSync } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +14,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rotatingLog } from './rotating-log.mjs';
 import { applyPendingRestore, ensureSecrets } from './restore.mjs';
+import {
+  appConfigEnv,
+  cloudOrigin,
+  isEd25519PublicKey,
+  loadAppConfig,
+  validateAppConfig,
+} from './app-config.mjs';
 
 const tempDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 
@@ -108,6 +116,67 @@ const restoreFixture = (marker) => {
   assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB', 'DB degismedi');
   assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
   rmSync(f.dir, { recursive: true, force: true });
+}
+
+// --- Derleme profili (app-config) ---
+{
+  const { publicKey } = generateKeyPairSync('ed25519');
+  const pub = publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const rsa = generateKeyPairSync('rsa', { modulusLength: 1024 })
+    .publicKey.export({ format: 'der', type: 'spki' })
+    .toString('base64');
+  assert.ok(isEd25519PublicKey(pub));
+  assert.ok(!isEd25519PublicKey(rsa), 'RSA anahtari Ed25519 sayilmaz');
+  assert.ok(!isEd25519PublicKey('bozuk anahtar'));
+
+  assert.strictEqual(cloudOrigin('https://ornek.workers.dev'), 'https://ornek.workers.dev');
+  assert.strictEqual(cloudOrigin('https://ornek.workers.dev/'), 'https://ornek.workers.dev');
+  assert.strictEqual(cloudOrigin('http://127.0.0.1:8787'), 'http://127.0.0.1:8787');
+  assert.strictEqual(cloudOrigin('http://ornek.workers.dev'), null, 'http yalniz yerelde');
+  assert.strictEqual(cloudOrigin('https://ornek.workers.dev/panel'), null, 'yol olmamali');
+  assert.strictEqual(cloudOrigin('adres'), null);
+
+  const ok = validateAppConfig(
+    { profile: 'prod', cloudUrl: 'https://menu.ornek.com/', licensePublicKey: pub },
+    { strict: true },
+  );
+  assert.deepStrictEqual(ok.errors, []);
+  assert.deepStrictEqual(ok.config, {
+    profile: 'prod',
+    cloudUrl: 'https://menu.ornek.com',
+    licensePublicKey: pub,
+  });
+  assert.deepStrictEqual(appConfigEnv(ok.config), {
+    CLOUD_API_URL: 'https://menu.ornek.com',
+    ADO_LICENSE_PUBLIC_KEY: pub,
+    ADO_BUILD_PROFILE: 'prod',
+  });
+
+  // Derlemede (strict) uretim profili lisans anahtari ve adres olmadan gecmez.
+  assert.ok(validateAppConfig({ profile: 'prod' }, { strict: true }).errors.length >= 2);
+  // Calisirken (lenient) hatali alan bos kalir, digerleri kullanilir.
+  const lenient = validateAppConfig({
+    profile: 'test',
+    cloudUrl: 'http://x.com',
+    licensePublicKey: pub,
+  });
+  assert.strictEqual(lenient.errors.length, 1);
+  assert.deepStrictEqual(lenient.config, { profile: 'test', cloudUrl: '', licensePublicKey: pub });
+
+  // Eksik dosya acilisi durdurmaz: her sey kapali.
+  const missing = loadAppConfig(join(tempDir('ado-cfg-'), 'yok.json'));
+  assert.strictEqual(missing.errors.length, 1);
+  assert.deepStrictEqual(appConfigEnv(missing.config), {
+    CLOUD_API_URL: '',
+    ADO_LICENSE_PUBLIC_KEY: '',
+    ADO_BUILD_PROFILE: '',
+  });
+
+  // Repodaki profiller: test derlenebilir olmali; uretim en azindan bicimce dogru.
+  const profile = (name) =>
+    JSON.parse(readFileSync(join(import.meta.dirname, 'profiles', `${name}.json`), 'utf8'));
+  assert.deepStrictEqual(validateAppConfig(profile('test'), { strict: true }).errors, []);
+  assert.deepStrictEqual(validateAppConfig(profile('prod')).errors, []);
 }
 
 console.log('desktop selfcheck OK');

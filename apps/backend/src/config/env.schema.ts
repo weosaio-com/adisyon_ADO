@@ -31,6 +31,16 @@ export const envSchema = z.object({
 
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
+  // QR menu bulutunun adresi; paketli surumde derleme profilinden gelir (apps/desktop/profiles).
+  // Burada bilerek serbest metin: hatali bir deger acilisi durdurmaz, yalniz bulut
+  // ozellikleri kapanir (adres kullanilirken dogrulanir).
+  CLOUD_API_URL: z.string().default(''),
+  // Bu kurulumun kalici kimligi. Bos = veri dizinindeki ado-install.json (common/util/install-id).
+  ADO_INSTALL_ID: z.string().default(''),
+  // Masaustu kabugunun verdigi bilgiler (gelistirmede bos).
+  ADO_APP_VERSION: z.string().default(''),
+  ADO_BUILD_PROFILE: z.string().default(''),
+
   SEED_OWNER_USERNAME: z.string().default('owner'),
   // Bos string = yok sayilir (paketleme kullanicisiz sablon DB icin '' gecer).
   SEED_OWNER_PASSWORD: z.preprocess(

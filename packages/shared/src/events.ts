@@ -70,6 +70,11 @@ export const DomainEventName = {
   TableCreated: 'table.created',
   TableUpdated: 'table.updated',
   TableDeleted: 'table.deleted',
+  HallCreated: 'hall.created',
+  HallUpdated: 'hall.updated',
+  HallDeleted: 'hall.deleted',
+  BranchUpdated: 'branch.updated',
+  LicenseActivated: 'license.activated',
   OrderCreated: 'order.created',
   OrderUpdated: 'order.updated',
   OrderItemAdded: 'order.item.added',
@@ -99,6 +104,23 @@ export interface TableEventPayload {
   tableId: string;
   hallId: string;
   name: string;
+}
+
+export interface HallEventPayload {
+  hallId: string;
+  name: string;
+}
+
+// --- Isletme (sube) bilgisi: ad/adres/telefon degisti ---
+export interface BranchEventPayload {
+  name: string;
+}
+
+// --- Lisans: yeni anahtar etkinlestirildi. Anahtarin kendisi ASLA event'e konmaz. ---
+export interface LicenseActivatedEventPayload {
+  licenseId: string | null;
+  customerName: string;
+  features: Record<string, boolean>;
 }
 
 // --- Siparis event payload'lari ---

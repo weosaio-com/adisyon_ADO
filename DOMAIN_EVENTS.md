@@ -115,6 +115,12 @@
 
 > Not: `order.closed` / `receipt.printed` henuz yok; mutfak `order.item.sent` PR2'de.
 
+### `license.activated`
+- **Amaci:** Ayarlar › Lisans'tan yeni bir lisans anahtari etkinlestirildi (imza ve sure dogrulandi).
+- **Yayinlandigi yer:** `LicenseService.activate` (post-commit; bayraklar tazelendikten sonra).
+- **Payload:** `{ licenseId, customerName, features }`. Anahtarin kendisi ASLA event'e konmaz.
+- **Dinleyen moduller:** `EventLoggerSubscriber`. İleride: QR menu bulutunda lisansin yenilenmesi.
+
 ## Planlanan Event'ler (modul gelince eklenecek)
 
 Asagidakiler kod sozlesmesine (`DomainEventName`) ve bu katalogsa ilgili modul inşa edilirken
@@ -138,5 +144,7 @@ eklenecektir. Dinleyiciler sutunu hedeftir.
 | `printer.failed` / `printer.recovered` | Yazdırma | Monitoring, Notification |
 | `sync.completed` / `sync.failed` | Sync (Faz 2) | Monitoring, Notification |
 | `update.installed` | Güncelleme | Audit, Monitoring |
+| `hall.created` / `hall.updated` / `hall.deleted` | Masa (salon) | QR menü yayını (masa listesinde salon adı/sırası), Dashboard |
+| `branch.updated` | Ayarlar (işletme bilgisi) | QR menü yayını (işletme adı/adres/telefon) |
 
 > Bu tablo **hedef**tir; her satir ilgili modul kodlanirken uygulanan bolume tasinir + payload'i tanimlanir.

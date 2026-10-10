@@ -241,6 +241,9 @@ interface LicenseStatus {
   validUntil: string | null;
   daysLeft: number | null;
   verifiable: boolean;
+  licenseId: string | null;
+  features: Record<string, boolean>;
+  needsReentry: boolean;
 }
 
 const LICENSE_STATE: Record<LicenseStatus['state'], { label: string; cls: string }> = {
@@ -261,6 +264,8 @@ function LicenseCard({ onError }: { onError: (e: unknown) => void }) {
     onSuccess: () => {
       setKey('');
       qc.invalidateQueries({ queryKey: ['license'] });
+      // QR menu karti lisanstaki ozellige bakar; yeni lisans hemen yansisin.
+      qc.invalidateQueries({ queryKey: ['cloud', 'status'] });
     },
     onError,
   });
@@ -268,6 +273,7 @@ function LicenseCard({ onError }: { onError: (e: unknown) => void }) {
   const s = q.data;
   if (!s) return null;
   const badge = LICENSE_STATE[s.state];
+  const qrMenu = s.features['qr.menu'] === true;
 
   return (
     <div className="rounded-2xl bg-white p-4 shadow">
@@ -284,6 +290,16 @@ function LicenseCard({ onError }: { onError: (e: unknown) => void }) {
       </div>
 
       {s.customerName && <p className="text-sm text-slate-600">{s.customerName}</p>}
+      {s.licenseId && (
+        <p className="text-xs text-slate-400" data-testid="license-id">
+          Lisans no: {s.licenseId}
+        </p>
+      )}
+      {s.state !== 'none' && (
+        <p className="text-sm text-slate-600" data-testid="license-qr-menu">
+          QR menü: {qrMenu ? 'dahil' : 'dahil değil'}
+        </p>
+      )}
       {s.validUntil && (
         <p className="text-sm text-slate-600">
           Bitiş: {fmtDateTime(s.validUntil)}
@@ -306,6 +322,11 @@ function LicenseCard({ onError }: { onError: (e: unknown) => void }) {
       {!s.verifiable && (
         <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-700">
           Bu kurulumda doğrulama anahtarı tanımlı değil; anahtar girilemez.
+        </p>
+      )}
+      {s.verifiable && s.needsReentry && (
+        <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-700">
+          Kayıtlı lisans bu kurulumda doğrulanamadı. Lisans anahtarınızı yeniden girin.
         </p>
       )}
 

@@ -1,15 +1,33 @@
 // Masaustu paketi icin kendi-yeten bundle hazirlar (electron-builder oncesi).
-// Kullanim: node build-bundle.mjs  (cwd: apps/desktop)
+// Kullanim: node build-bundle.mjs --profile test|prod  (cwd: apps/desktop)
 import { execSync } from 'node:child_process';
-import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { parseArgs } from 'node:util';
+import { PROFILES, validateAppConfig } from './app-config.mjs';
 
 const root = resolve(import.meta.dirname, '..', '..');
 const bundle = resolve(import.meta.dirname, 'bundle');
 const run = (cmd, env = {}) =>
   execSync(cmd, { cwd: root, stdio: 'inherit', env: { ...process.env, ...env } });
+
+// 0) Derleme profili: uzun derlemeden ONCE dogrula (eksik/hatali deger derlemeyi durdurur).
+const { values: args } = parseArgs({ options: { profile: { type: 'string' } } });
+if (!PROFILES.includes(args.profile)) {
+  throw new Error(`--profile ${PROFILES.join('|')} gerekli (apps/desktop/profiles).`);
+}
+const profilePath = resolve(import.meta.dirname, 'profiles', `${args.profile}.json`);
+const { config: appConfig, errors } = validateAppConfig(
+  JSON.parse(readFileSync(profilePath, 'utf8')),
+  { strict: true },
+);
+if (errors.length)
+  throw new Error(`Profil gecersiz (${profilePath}):\n  - ${errors.join('\n  - ')}`);
+if (!appConfig.licensePublicKey) {
+  console.warn('UYARI: profilde lisans acik anahtari yok; bu kurulumda lisans girilemez.');
+}
 
 rmSync(bundle, { recursive: true, force: true });
 
@@ -76,4 +94,7 @@ run('npm --prefix apps/backend run seed', {
   SEED_WAITER_PIN: '',
 });
 
-console.log('\nbundle hazir:', bundle);
+// 6) Profil -> resources/app-config.json (main.mjs okur, backend'e ortam degiskeni olarak verir).
+writeFileSync(join(bundle, 'app-config.json'), `${JSON.stringify(appConfig, null, 2)}\n`);
+
+console.log(`\nbundle hazir (${appConfig.profile} profili):`, bundle);
