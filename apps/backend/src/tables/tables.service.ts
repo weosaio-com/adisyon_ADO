@@ -80,6 +80,25 @@ export class TablesService implements OnModuleInit {
     );
   }
 
+  // Salon adi/sirasi/aktifligi QR menudeki masa listesini etkiler (bulut yayini dinler).
+  private async publishHallEvent(
+    user: AuthUser,
+    name: (typeof DomainEventName)[keyof typeof DomainEventName],
+    hall: { id: string; name: string },
+  ): Promise<void> {
+    await this.events.publish(
+      createDomainEvent(
+        name,
+        { hallId: hall.id, name: hall.name },
+        {
+          branchId: user.branchId,
+          actorId: user.userId,
+          ...(user.deviceId ? { deviceId: user.deviceId } : {}),
+        },
+      ),
+    );
+  }
+
   // ===========================================================================
   // Salon (Hall)
   // ===========================================================================
@@ -115,6 +134,7 @@ export class TablesService implements OnModuleInit {
       newValue: created,
       ...this.provenance(user),
     });
+    await this.publishHallEvent(user, DomainEventName.HallCreated, created);
     return created;
   }
 
@@ -140,6 +160,7 @@ export class TablesService implements OnModuleInit {
       newValue: after,
       ...this.provenance(user),
     });
+    await this.publishHallEvent(user, DomainEventName.HallUpdated, after);
     return after;
   }
 
@@ -167,6 +188,7 @@ export class TablesService implements OnModuleInit {
       oldValue: before,
       ...this.provenance(user),
     });
+    await this.publishHallEvent(user, DomainEventName.HallDeleted, before);
     return after;
   }
 

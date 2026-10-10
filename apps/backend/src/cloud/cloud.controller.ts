@@ -4,9 +4,9 @@ import { CurrentUser, type AuthUser } from '../common/decorators/current-user.de
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { ZodValidationPipe } from '../common/http/zod-validation.pipe';
 import { CloudService } from './cloud.service';
-import { cloudPairSchema, type CloudPairDto } from './dto/cloud.schemas';
+import { cloudActivateSchema, type CloudActivateDto } from './dto/cloud.schemas';
 
-/** QR menu bulut baglantisi (Ayarlar > QR Menu). Yalniz yonetici. */
+/** QR menu bulut baglantisi (Ayarlar > QR Menu): ac, kapat, simdi yayinla. Yalniz yonetici. */
 @Controller('cloud')
 export class CloudController {
   constructor(private readonly cloud: CloudService) {}
@@ -17,14 +17,14 @@ export class CloudController {
     return this.cloud.status(user);
   }
 
-  // Panelden alinan eslestirme koduyla baglan; ilk yayin hemen baslar.
-  @Post('pair')
+  // Lisansla ac; ilk yayin hemen baslar. Internet yoksa istek saklanir ve yeniden denenir.
+  @Post('activate')
   @RequirePermissions(Permission.SettingsManage)
-  pair(
+  activate(
     @CurrentUser() user: AuthUser,
-    @Body(new ZodValidationPipe(cloudPairSchema)) dto: CloudPairDto,
+    @Body(new ZodValidationPipe(cloudActivateSchema)) dto: CloudActivateDto,
   ) {
-    return this.cloud.pair(user, dto);
+    return this.cloud.activate(user, dto);
   }
 
   @Post('publish')

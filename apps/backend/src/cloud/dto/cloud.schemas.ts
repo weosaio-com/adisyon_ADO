@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
-export const cloudPairSchema = z.object({
-  url: z.string().trim().min(1).max(200),
-  code: z.string().trim().min(4).max(32),
+// "QR menuyu ac": adres ve kod girilmez (bulut programa gomulu, baglanti lisansla).
+// takeover: lisans baska bilgisayarda aciksa sahibin onayiyla bu bilgisayara tasinir.
+export const cloudActivateSchema = z.object({
+  takeover: z.boolean().optional(),
 });
-export type CloudPairDto = z.infer<typeof cloudPairSchema>;
+export type CloudActivateDto = z.infer<typeof cloudActivateSchema>;

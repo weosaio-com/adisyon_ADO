@@ -83,8 +83,12 @@ Her kurulumun kalıcı kimliği veri dizinindeki `ado-install.json` dosyasındad
 (`apps/backend/src/common/util/install-id.ts`). Bilerek veritabanının dışındadır: yedek başka bir
 bilgisayara geri yüklendiğinde kimlik onunla gitmez, iki bilgisayar aynı kurulum gibi görünmez.
 
-## 7. Sıradaki adım
+## 7. QR menü bulutuna lisansla bağlanma
 
-QR menü bulutu lisansla bağlanacak: program "QR menüyü aç" dediğinde lisansı buluta gönderir, bulut
-imzayı aynı açık anahtarla doğrulayıp işletmeyi lisans kimliğiyle tanır. Eşleştirme kodu ve web paneli
-kalkar.
+Program **Ayarlar › QR Menü › QR menüyü aç** dediğinde lisansı, kurulum kimliğini ve şube bilgisini
+buluta gönderir (`POST /api/pos/activate`). Bulut imzayı aynı açık anahtarla (`LICENSE_PUBLIC_KEY`)
+doğrular; lisans kimliği, süre ve `qr.menu` şarttır. İşletme lisans kimliğiyle ilk açılışta oluşur,
+satıcının bulutta ayrıca işletme açması gerekmez. Bir lisans aynı anda tek kurulumda açıktır;
+başka bilgisayara taşımak sahibin onayını ister. Lisans yenilenince program yeni lisansı buluta
+bildirir (`PUT /api/pos/license`), yeniden açmak gerekmez. Ayrıntı: `QR_MENU_DESIGN.md` §3.1,
+`API_DESIGN.md` §5.12. Eşleştirme kodu ve web paneli sonraki adımda kalkar.

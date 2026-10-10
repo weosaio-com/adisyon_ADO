@@ -230,16 +230,36 @@ export interface PrintJobRow {
   text: string; // yaziciya giden metin (onizleme)
 }
 
-// QR menu bulut baglantisi (GET /cloud/status).
+// QR menu bulut baglantisi (GET /cloud/status). Durumlar: backend cloud.state.ts CloudMode.
+export type CloudMode =
+  | 'unconfigured' // bu kurulumda bulut adresi yok
+  | 'no_license' // lisans girilmemis
+  | 'not_licensed' // lisans QR menuyu icermiyor
+  | 'expired' // lisans suresi dolmus
+  | 'off' // acilabilir
+  | 'waiting_network' // acma istendi, internet bekleniyor
+  | 'conflict' // lisans baska bilgisayarda acik
+  | 'lost' // baglanti bulutta gecersiz kilindi
+  | 'on' // acik
+  | 'suspended'; // bulut isletmeyi askiya almis
+
+export type CloudLostReason = 'superseded' | 'rotated' | 'revoked' | 'unpaired' | 'invalid';
+
 export interface CloudStatus {
-  enabled: boolean; // lisans QR menuyu kapatmadiysa true
+  mode: CloudMode;
+  enabled: boolean; // bu kurulumda QR menu bulutu tanimli mi
   connected: boolean;
-  url: string | null;
+  url: string | null; // QR kartlarindaki adres
+  licenseId: string | null;
   branchName: string | null;
   tenantName: string | null;
+  tenantStatus: 'active' | 'suspended' | null;
   planLabel: string | null;
   menuEnabled: boolean | null; // paket QR menuyu iceriyor mu
+  licenseExpiresAt: string | null;
   pairedAt: string | null;
+  lostReason: CloudLostReason | null;
+  conflictLastSeenAt: string | null;
   lastPublishedAt: string | null;
   lastMenuVersion: number | null;
   lastError: string | null;

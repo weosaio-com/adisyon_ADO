@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
-import { newId } from '@ado/shared';
+import { createDomainEvent, DomainEventName, newId, type BranchEventPayload } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
+import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 
 // Fis basligi. Bos adres/telefon basilmaz.
@@ -19,6 +20,7 @@ export class SettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly events: EventBusService,
   ) {}
 
   async getBusiness(user: AuthUser) {
@@ -53,6 +55,18 @@ export class SettingsService {
       newValue: after,
       ...(user.deviceId ? { deviceId: user.deviceId } : {}),
     });
+    // Ad/adres/telefon QR menude gorunur: bulut yayini bu olayi dinler.
+    await this.events.publish(
+      createDomainEvent<string, BranchEventPayload>(
+        DomainEventName.BranchUpdated,
+        { name: after.name },
+        {
+          branchId: user.branchId,
+          actorId: user.userId,
+          ...(user.deviceId ? { deviceId: user.deviceId } : {}),
+        },
+      ),
+    );
     return after;
   }
 

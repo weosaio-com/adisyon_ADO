@@ -107,28 +107,37 @@ Yönetici olarak giriş yaptıktan sonra üst menüden şu ayarları yapın:
   fiş kırmızı işaretlenir; yazıcıyı/kağıdı kontrol edip **Tekrar dene** deyin. Böyle bir fiş varsa
   Masalar ekranının üstünde de uyarı çıkar.
 
-### 5.5 QR Menü (isteğe bağlı) — **Ayarlar › QR Menü (Bulut)**
+### 5.5 QR Menü (isteğe bağlı) — **Ayarlar › QR Menü**
 Müşteri masadaki QR kodu telefonunun kamerasıyla okutur ve menünüzü görür: fotoğraf, açıklama,
-alerjenler, İngilizce ve "tükendi" bilgisi. Uygulama kurmaya gerek yoktur. Bu özellik paketinize
-bağlıdır; hesabınız açılınca size **bulut adresi** (örn. `menu.ornek.com`) ile **işletme paneli
-e-postası ve parolası** verilir.
+alerjenler, İngilizce ve "tükendi" bilgisi. Uygulama kurmaya gerek yoktur. Menü **bu programdan**
+yönetilir; ayrı bir hesap, adres ya da kod gerekmez. QR menü lisansınıza bağlıdır.
 
-1. **Ürün bilgileri:** **Ürünler**'de ürünü açıp **QR menü bilgileri**'ne dokunun: fotoğraf (telefon
+1. **Lisans:** **Ayarlar › Lisans** bölümüne satıcınızın verdiği lisans anahtarını yapıştırıp
+   **Lisansı Etkinleştir** deyin. Bölümde "QR menü: dahil" yazmalıdır.
+2. **Ürün bilgileri:** **Ürünler**'de ürünü açıp **QR menü bilgileri**'ne dokunun: fotoğraf (telefon
    fotoğrafı olabilir, program küçültür), açıklama, alerjenler, diyet (vegan, glutensiz…) ve
    isterseniz İngilizce ad. İngilizce ad girilen ürün olduğunda menüde TR/EN seçeneği çıkar.
-2. **Eşleştirme kodu:** Bilgisayar ya da telefondan `https://<bulut adresi>/panel` adresini açıp
-   giriş yapın; **Adisyon programı › Eşleştirme kodu al**. Kod 15 dakika geçerlidir.
-3. **Bağlanma:** Programda **Ayarlar › QR Menü (Bulut)** kartına bulut adresini ve kodu yazıp
-   **Bağlan** deyin. Menü birkaç saniyede yayınlanır; kartta **Son yayın** zamanı görünür.
+3. **Açma:** **Ayarlar › QR Menü** kartında **QR menüyü aç** deyin. Menü birkaç saniyede yayınlanır;
+   kartta **Son yayın** zamanı görünür. İnternet yoksa kart "İnternet bekleniyor" der; bağlantı
+   gelince QR menü kendiliğinden açılır.
 4. **QR kartları:** Karttaki **Masa QR kodları** (ya da **Düzen › QR kodları**) › **Yazdır**. Kartları
-   kesip masalara yapıştırın. Bir masanın kodunu **Kodu yenile** ile değiştirirseniz o masanın eski
-   kartı çalışmaz; yenisini basın.
+   kesip masalara yapıştırın. Kartları QR menüyü açmadan önce de basabilirsiniz (sayfa uyarır). Bir
+   masanın kodunu **Kodu yenile** ile değiştirirseniz o masanın eski kartı çalışmaz; yenisini basın.
 
-- Ürün, fiyat, kategori ya da masa değiştiğinde menü **kendiliğinden** güncellenir (birkaç saniye).
-  Beklemek istemezseniz kartta **Şimdi yayınla** deyin.
-- Adisyon programı kullanmayan işletme menüsünü paneldeki **Menü**, **İşletme** ve **Masalar**
-  sekmelerinden hazırlayıp **Kaydet ve yayınla** der; QR kartlarını da Masalar sekmesinden basar.
+- Ürün, fiyat, kategori, masa, salon ya da işletme bilgisi değiştiğinde menü **kendiliğinden**
+  güncellenir (birkaç saniye). İnternet kesikse değişiklikler bağlantı gelince yayınlanır. Beklemek
+  istemezseniz kartta **Şimdi yayınla** deyin.
+- **Lisans yenileme:** Yeni lisansı **Ayarlar › Lisans**'a girmeniz yeter; QR menü açık kalır.
+- **Tek bilgisayar:** Bir lisansla QR menü tek bilgisayardan yönetilir. Başka bilgisayarda açmak
+  isterseniz kart "başka bir bilgisayarda açık" der; **Bu bilgisayara taşı** derseniz diğer
+  bilgisayar menüyü artık güncelleyemez.
+- **Kapatma:** **QR menüyü kapat** deyince masalardaki QR kodlar menü açmaz. Yeniden açınca aynı
+  kartlar yine çalışır.
 - Menüde alerjen bilgisi için "personele danışın" notu her zaman yer alır.
+
+**Adisyon programı kullanmayan işletme (işletme paneli; kaldırılacak):** Menüsünü
+`https://<bulut adresi>/panel` adresindeki **Menü**, **İşletme** ve **Masalar** sekmelerinden
+hazırlayıp **Kaydet ve yayınla** der; QR kartlarını da Masalar sekmesinden basar.
 
 **İşletme paneli uygulama olarak (telefon ve bilgisayar):** Paneli bir kez açıp **Uygulamayı yükle**
 (girişte) ya da **Yükle** (üst çubukta) deyin; iPhone/iPad'de Safari › **Paylaş › Ana Ekrana Ekle**.
@@ -138,8 +147,8 @@ Panel ana ekrandan tam ekran açılır; tarayıcıdan açmaya da devam edebilirs
   fotoğraf ekleyebilirsiniz; **Kaydet ve yayınla** dediğinizde değişiklik cihazda saklanır ve
   **internet gelince kendiliğinden yayınlanır**. Üstte "İnternet yok — değişiklikler bu cihazda
   saklanıyor." yazar.
-- Masa ekleme ve kod yenileme, programla eşleştirme ve parola değiştirme internet ister; bu düğmeler
-  internetsizken pasiftir.
+- Masa ekleme, kod yenileme ve parola değiştirme internet ister; bu düğmeler internetsizken
+  pasiftir.
 - Menü bu arada başka bir yerden değiştirildiyse panel üzerine yazmaz; güncel menüyü yükleyip
   değişikliğinizi yeniden yapmanızı ister.
 - **Çıkış** yapınca bu cihazdaki panel verisi silinir (yayınlanmamış değişiklik varsa önce sorar).
@@ -334,7 +343,10 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 **QR menü güncellenmiyor / kartta "Son yayın başarısız" yazıyor.**
 - Ana makinenin internet bağlantısını kontrol edin. Program birkaç dakika içinde kendisi yeniden
   dener; bağlantı gelince kartta **Şimdi yayınla** diyebilirsiniz. Satış bundan etkilenmez.
-- Kartta "Paketiniz QR menüyü içermiyor" yazıyorsa hesabınızın paketi için bize ulaşın.
+- Kartta "Lisansınız QR menüyü içermiyor", "süresi doldu" ya da "askıya alındı" yazıyorsa satıcınızla
+  görüşün. Yeni lisansı girdiğinizde ya da askı kalkınca yayın kendiliğinden sürer.
+- Kartta "başka bir bilgisayarda açıldı" yazıyorsa QR menü o bilgisayardan yönetiliyor; bu
+  bilgisayara almak için **Bu bilgisayarda aç** deyin.
 
 **Müşteri QR'ı okutunca "Bu QR kod geçersiz" görüyor.**
 - O masanın kodu yenilenmiş ya da masa silinmiş. **Masa QR kodları** sayfasından o masanın kartını
@@ -373,7 +385,7 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
    bölüm › İşletmede WiFi yoksa.
 4. Garsonlar **PIN** ile girsin, sipariş almaya başlasın.
 5. Ödeme/gün sonu **kasadan**; **bulut yedeğini** aç ve **kurtarma anahtarını** sakla.
-6. (İsteğe bağlı) **QR menü:** ürünlere fotoğraf ve alerjen ekle, panelden eşleştirme koduyla bağlan,
+6. (İsteğe bağlı) **QR menü:** lisansı gir, ürünlere fotoğraf ve alerjen ekle, **QR menüyü aç**,
    masa QR kartlarını bas (5.5).
 
 > Kurulumdan sonra yazıcı, tablet ve ödeme akışının gerçek cihazlarla çalıştığını adım adım

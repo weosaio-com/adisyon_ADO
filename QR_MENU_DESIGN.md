@@ -15,7 +15,7 @@
  Adisyon programı (POS, işletmede)          Bulut (Cloudflare, tek Worker)            Telefon
  ┌───────────────────────────────┐   HTTPS  ┌──────────────────────────────────┐    ┌───────────────┐
  │ apps/backend  cloud modülü    │ ───────▶ │ apps/cloud  (Hono)               │◀── │ /m/<masa kodu>│
- │  - eşleştirme (Ayarlar kartı) │  Bearer  │  /api/pos/*   POS yayını         │    │  müşteri menü │
+ │  - lisansla aç (Ayarlar kartı)│  Bearer  │  /api/pos/*   POS yayını         │    │  müşteri menü │
  │  - otomatik yayın (5 sn)      │  token   │  /api/panel/* işletme paneli     │    ├───────────────┤
  │  - masa QR yazdırma           │          │  /api/admin/* satıcı (ADMIN_TOKEN)│◀── │ /panel        │
  └───────────────────────────────┘          │  /api/m/:code, /img/:key  genel  │    │  işletme      │
@@ -28,8 +28,8 @@
 |---|---|
 | `packages/shared` → `@ado/shared/menu` | Menü anlık görüntüsünün zod şeması (POS, bulut ve panel aynı doğrulamayı kullanır), masa listesi, görsel anahtarı. |
 | `@ado/shared/menu-core` | Bağımlılıksız sabitler ve yardımcılar (14 alerjen, diyet etiketleri, sınırlar, `menuText`, görsel imzası). Tarayıcı paketine yalnız bu girer; zod ve ulid girmez. |
-| `apps/backend` (POS) | Ürüne açıklama, alerjen, diyet, İngilizce ad, görsel, "tükendi"; masaya QR kodu; `cloud` modülü (eşleştirme + yayın). |
-| `apps/frontend` (POS arayüzü) | Ürün ekranında "QR menü bilgileri", Ayarlar › QR Menü (Bulut) kartı, yazdırılabilir masa QR sayfası (`/qr-codes`). |
+| `apps/backend` (POS) | Ürüne açıklama, alerjen, diyet, İngilizce ad, görsel, "tükendi"; masaya QR kodu; `cloud` modülü (lisansla açma, yayın, uzlaştırma). |
+| `apps/frontend` (POS arayüzü) | Ürün ekranında "QR menü bilgileri", Ayarlar › QR Menü kartı, yazdırılabilir masa QR sayfası (`/qr-codes`). |
 | `apps/cloud` | Cloudflare Worker: API, D1, R2; qr-web çıktısını statik varlık olarak sunar. Kurulum: `apps/cloud/README.md`. |
 | `apps/qr-web` | Müşteri menüsü (`/m/:code`) ve işletme paneli (`/panel`, ayrı parça). Vite + React 19 + Tailwind 4 + TanStack Query. |
 
@@ -107,15 +107,32 @@
 ## 3. Akışlar
 
 ### 3.1 POS'lu işletme
-1. Satıcı işletmeyi açar (`POST /api/admin/tenants`: ad, paket, sahibin e-posta/parolası).
-2. İşletme sahibi `/panel` › **Adisyon programı** sekmesinden eşleştirme kodu alır.
-3. POS'ta **Ayarlar › QR Menü (Bulut)**: bulut adresi + kod → **Bağlan** (`POST /cloud/pair`).
-4. POS menüyü ve masaları yayınlar. Ürün, kategori, masa değişince (`product.*`, `category.*`,
-   `table.*` olayları) yayın 5 saniye birleştirilerek kendiliğinden tekrarlanır; bulut erişilemezse
-   artan aralıklarla yeniden dener, kartta son hata görünür.
-5. Masa QR kartları POS'taki **Masa QR kodları** sayfasından (ya da panelden) basılır.
-6. Ürün ekranında **Tükendi** düğmesi: ürün menüde soluk "Tükendi" rozetiyle kalır, siparişe
+1. Satıcı lisansı imzalar (`scripts/license.mjs sign`, `qr.menu=true`; `LICENSING.md`). İşletmeyi
+   bulutta ayrıca açması gerekmez.
+2. Sahip lisansı POS'ta **Ayarlar › Lisans**'a girer, **Ayarlar › QR Menü** kartında **QR menüyü
+   aç** der (`POST /cloud/activate` → bulutta `POST /api/pos/activate`). Bulut adresi programa
+   gömülüdür (derleme profili → `CLOUD_API_URL`); adres ya da kod girilmez. Bulut işletmeyi lisans
+   kimliğiyle ilk açılışta oluşturur.
+   - İnternet yoksa istek saklanır ("İnternet bekleniyor"); bağlantı gelince kendiliğinden açılır.
+   - Lisans başka bilgisayarda açıksa kart sorar; **Bu bilgisayara taşı** (`takeover`) diğer
+     kurulumun belirtecini geçersiz kılar (`superseded`).
+3. POS menüyü ve masaları yayınlar. Ürün, kategori, masa, salon ve işletme bilgisi değişince
+   (`product.*`, `category.*`, `table.*`, `hall.*`, `branch.updated`) yayın 5 saniye birleştirilerek
+   kendiliğinden tekrarlanır. Arka plan işi 3 kez dener; vazgeçerse ya da olay kaçarsa uzlaştırma
+   (`CLOUD_RECONCILE_SECONDS`, varsayılan 5 dk) son yayından beri değişen menüyü yayınlar. Kartta son
+   hata görünür.
+4. Bulut yayını reddederse (`403`: askı, lisans bitti, QR menü yok) belirteç korunur; POS saatte bir
+   (engelliyken her uzlaştırmada) `GET /api/pos/status` okur, engel kalkınca yayın sürer. Belirteç
+   geçersizse (`401` + neden) bağlantı yerelde kalkar, kart nedenini söyler.
+5. Lisans yenileme: yeni lisans POS'a girilince `license.activated` → `PUT /api/pos/license` (aynı
+   kimlik, belirteç değişmez). Farklı kimlikli lisans girilirse bağlantı kapanır, yeniden açılır.
+6. **QR menüyü kapat** (`DELETE /cloud/connection` → `POST /api/pos/unpair`): menü ve masalar
+   yayından kalkar. İnternet yoksa yerelde hemen kapanır, bulut tarafı bağlantı gelince tamamlanır.
+7. Masa QR kartları POS'taki **Masa QR kodları** sayfasından basılır (QR menü açılmadan da).
+8. Ürün ekranında **Tükendi** düğmesi: ürün menüde soluk "Tükendi" rozetiyle kalır, siparişe
    eklenemez (`PRODUCT_UNAVAILABLE`).
+9. Açılışta kayıtlı bağlantı denetlenir: başka kurulumun yedeğinden geldiyse (kurulum kimliği
+   `ado-install.json` veritabanı dışında), gömülü adres ya da lisans kimliği değiştiyse düşer.
 
 ### 3.2 POS'suz işletme
 1. Satıcı işletmeyi açar.
@@ -209,12 +226,15 @@ gider.
 
 ## 7. Testler
 
-- `apps/cloud/test` (vitest, gerçek workerd, yerel D1/R2): genel menü, POS eşleştirme ve yayın,
-  panel oturumu/CSRF/sürüm çakışması, satıcı API'si, paketler.
-- Backend smoke (`apps/backend/test/smoke.e2e.mjs`) QR ve BULUT bölümleri: sahte buluta eşleştirme,
-  otomatik yayın, birleştirme, hata ve yeniden deneme.
+- `apps/cloud/test` (vitest, gerçek workerd, yerel D1/R2): genel menü, lisansla etkinleştirme
+  (`activate.test.ts`), POS yayını, panel oturumu/CSRF/sürüm çakışması, satıcı API'si, paketler.
+- Backend smoke (`apps/backend/test/smoke.e2e.mjs`) QR ve BULUT bölümleri: sahte bulut, test
+  anahtarıyla imzalanmış lisansla açma, otomatik yayın (işletme bilgisi ve salon dahil), hata ve
+  yeniden deneme, uzlaştırma, askı ve dönüş, lisans yenileme, devralma, internetsiz açma/kapatma.
+  CI `e2e` işi anahtar çiftini her koşumda üretir (`scripts/license.mjs gen-key --github-env`).
 - Playwright `apps/frontend/e2e/menu-screen.spec.ts` (POS ürün ekranı) ve `qr-menu.spec.ts`
-  (POS + `wrangler dev`: POS'lu ve POS'suz akış, 390 px müşteri sayfası; panelin uygulama olarak
+  (POS + `wrangler dev`: lisansla açma, otomatik yayın, tükendi, kapatınca QR'ın çalışmaması; POS'suz
+  akış, 390 px müşteri sayfası; panelin uygulama olarak
   yüklenmesi, internetsiz düzenleme ve fotoğraf, internet gelince yayın, müşteri sayfasında SW
   olmaması, çıkışta cihaz verisinin silinmesi). CI: `e2e-cloud` işi.
 - Self-check'ler: `@ado/shared/menu`, `cloud.snapshot`, qr-web `menu-view`, `money`, `tables`,
