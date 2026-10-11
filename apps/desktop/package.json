@@ -21,7 +21,9 @@
       "restore.mjs",
       "app-config.mjs",
       "migrations.mjs",
-      "backend-process.mjs"
+      "backend-process.mjs",
+      "update-manifest.mjs",
+      "updater.mjs"
     ],
     "extraResources": [
       {
@@ -50,11 +52,21 @@
     },
     "nsis": {
       "oneClick": true,
-      "runAfterFinish": true
-    }
+      "runAfterFinish": true,
+      "artifactName": "Adisyon-POS-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.invalid/derleme-profilinden"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   }
 }

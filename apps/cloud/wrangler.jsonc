@@ -10,7 +10,7 @@
     "directory": "../qr-web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/img/*"],
+    "run_worker_first": ["/api/*", "/img/*", "/updates/*"],
   },
   "d1_databases": [
     {
@@ -21,7 +21,11 @@
       "migrations_dir": "migrations",
     },
   ],
-  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ado-qr-images" }],
+  // UPDATES: program guncellemeleri (release.yml yukler; UPDATE_SYSTEM.md).
+  "r2_buckets": [
+    { "binding": "IMAGES", "bucket_name": "ado-qr-images" },
+    { "binding": "UPDATES", "bucket_name": "ado-updates" },
+  ],
   // Lisans imzasini dogrulayan acik anahtar (gizli degil): programin uretim profiliyle ayni
   // (apps/desktop/profiles/prod.json, LICENSING.md). Bos = lisansla baglanma kapali.
   "vars": { "LICENSE_PUBLIC_KEY": "" },
@@ -41,7 +45,10 @@
           "migrations_dir": "migrations",
         },
       ],
-      "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ado-qr-images-test" }],
+      "r2_buckets": [
+        { "binding": "IMAGES", "bucket_name": "ado-qr-images-test" },
+        { "binding": "UPDATES", "bucket_name": "ado-updates-test" },
+      ],
       // Deneme lisans anahtari (apps/desktop/profiles/test.json ile ayni). vars miras alinmaz.
       "vars": { "LICENSE_PUBLIC_KEY": "" },
       // Gizli: `wrangler secret put ADMIN_TOKEN --env test` (canli ortamdan farkli bir deger).

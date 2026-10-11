@@ -13,7 +13,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "test": "pnpm -r --if-present run test && node scripts/license.selfcheck.mjs",
+    "test": "pnpm -r --if-present run test && node scripts/license.selfcheck.mjs && node scripts/update-manifest.selfcheck.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

@@ -307,6 +307,21 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 
 ---
 
+### Program güncellemesi — **Ayarlar › Güncelleme**
+
+Program yeni sürümü kendisi denetler ve arka planda indirir; **siz onaylamadan kurmaz**. Yeni sürüm
+hazır olunca kartta "Yeni sürüm … kurulmaya hazır" yazar.
+
+1. Gün sonunu yapın: açık adisyon kalmasın, kasayı kapatın. Kart engelleri listeler.
+2. Kasa bilgisayarında **Güncellemeyi kur** deyin (tabletten kurulamaz).
+3. Program önce şifreli yedek alır, kapanır, güncellenir ve birkaç dakika içinde kendiliğinden yeniden
+   açılır. Bu sırada bilgisayarı kapatmayın.
+
+Güncelleme dosyaları imzalıdır; imzası tutmayan dosya kurulmaz. Beklemek istemezseniz kartta
+**Şimdi kontrol et** diyebilirsiniz.
+
+---
+
 ## 11. Sık Karşılaşılanlar / Sorun Giderme
 
 **Tablet ana makineye bağlanamıyor.**

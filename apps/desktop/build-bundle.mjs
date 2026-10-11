@@ -28,6 +28,9 @@ if (errors.length)
 if (!appConfig.licensePublicKey) {
   console.warn('UYARI: profilde lisans acik anahtari yok; bu kurulumda lisans girilemez.');
 }
+if (appConfig.updatePublicKeys.length === 0) {
+  console.warn('UYARI: profilde guncelleme acik anahtari yok; bu kurulum kendini guncellemez.');
+}
 
 rmSync(bundle, { recursive: true, force: true });
 

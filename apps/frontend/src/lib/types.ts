@@ -266,3 +266,29 @@ export interface CloudStatus {
   lastErrorAt: string | null;
   publishing: boolean;
 }
+
+// --- Otomatik guncelleme (backend /updates/status; masaustu kabugunun durumu) ---
+export type UpdateState =
+  'disabled' | 'idle' | 'checking' | 'downloading' | 'ready' | 'installing' | 'error';
+
+export interface UpdateStatusView {
+  available: boolean; // masaustu programinda ve guncelleme anahtari tanimliysa
+  currentVersion: string | null;
+  channel: 'stable' | 'beta' | null;
+  state: UpdateState;
+  version: string | null; // hazir/indirilen surum
+  notes: string | null;
+  progress: number | null;
+  error: string | null;
+  checkedAt: string | null;
+  blockers: { code: 'NOT_LOCAL' | 'OPEN_ORDERS' | 'CASH_OPEN'; message: string }[];
+  canInstall: boolean;
+  lastUpdate: {
+    fromVersion: string;
+    toVersion: string;
+    status: string;
+    appliedAt: string | null;
+    error: string | null;
+    createdAt: string;
+  } | null;
+}

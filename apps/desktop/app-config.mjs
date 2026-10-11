@@ -1,7 +1,9 @@
 // Derleme profili: apps/desktop/profiles/<profil>.json -> paketteki resources/app-config.json.
-// Profil, kurulumun hangi buluta baglanacagini ve hangi lisans anahtarina guvenecegini
-// belirler; kullanici bunlari girmez. Electron'suz (selfcheck.mjs ile test edilir).
+// Profil, kurulumun hangi buluta baglanacagini, hangi lisans ve guncelleme anahtarlarina
+// guvenecegini ve guncelleme kanalini belirler; kullanici bunlari girmez. Electron'suz
+// (selfcheck.mjs ile test edilir).
 import { readFileSync } from 'node:fs';
+import { UPDATE_CHANNELS } from './update-manifest.mjs';
 
 export const PROFILES = ['test', 'prod'];
 
@@ -32,9 +34,17 @@ export function cloudOrigin(url) {
  * Profili dogrular; hatali alanlar bos birakilir (o ozellik kapali kalir).
  * strict (derleme): eksik zorunlu deger de hatadir; uretim profilinde lisans anahtari sarttir.
  */
+const emptyConfig = () => ({
+  profile: null,
+  cloudUrl: '',
+  licensePublicKey: '',
+  channel: 'stable',
+  updatePublicKeys: [],
+});
+
 export function validateAppConfig(raw, { strict = false } = {}) {
   const errors = [];
-  const config = { profile: null, cloudUrl: '', licensePublicKey: '' };
+  const config = emptyConfig();
   if (!raw || typeof raw !== 'object')
     return { config, errors: ['profil bir JSON nesnesi olmali'] };
 
@@ -55,6 +65,23 @@ export function validateAppConfig(raw, { strict = false } = {}) {
   } else if (strict && raw.profile === 'prod') {
     errors.push('licensePublicKey: uretim profilinde bos olamaz');
   }
+
+  // Guncelleme: kanal (beta gizli/gelistirici; CONVENTIONS F2) ve imza anahtarlari (virgulle
+  // birden cok: anahtar degisiminde eski ve yeni birlikte). Anahtar yoksa guncelleme denetlenmez.
+  if (raw.channel !== undefined) {
+    if (UPDATE_CHANNELS.includes(raw.channel)) config.channel = raw.channel;
+    else errors.push(`channel: ${UPDATE_CHANNELS.join(' | ')} olmali`);
+  }
+  if (raw.updatePublicKey) {
+    const keys = String(raw.updatePublicKey)
+      .split(',')
+      .map((key) => key.trim())
+      .filter(Boolean);
+    if (keys.length > 0 && keys.every(isEd25519PublicKey)) config.updatePublicKeys = keys;
+    else errors.push('updatePublicKey: base64 Ed25519 SPKI olmali (virgulle birden cok)');
+  } else if (strict && raw.profile === 'prod') {
+    errors.push('updatePublicKey: uretim profilinde bos olamaz');
+  }
   return { config, errors };
 }
 
@@ -64,7 +91,7 @@ export function loadAppConfig(path) {
     return validateAppConfig(JSON.parse(readFileSync(path, 'utf8')));
   } catch (error) {
     return {
-      config: { profile: null, cloudUrl: '', licensePublicKey: '' },
+      config: emptyConfig(),
       errors: [`app-config okunamadi: ${error instanceof Error ? error.message : error}`],
     };
   }

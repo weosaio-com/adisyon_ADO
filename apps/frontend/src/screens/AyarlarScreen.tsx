@@ -8,6 +8,7 @@ import { InstallButton } from '../lib/install';
 import type { AppSetting, Backup } from '../lib/types';
 import BusinessInfoCard from './BusinessInfoCard';
 import CloudMenuCard from './CloudMenuCard';
+import UpdateCard from './UpdateCard';
 import PrinterSettingsCard from './PrinterSettingsCard';
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString('tr-TR');
@@ -75,6 +76,15 @@ export default function AyarlarScreen() {
           />
         )}
         <LicenseCard onError={fail} />
+        {hasPerm('update.manage') && (
+          <UpdateCard
+            onError={fail}
+            onInfo={(m) => {
+              setError('');
+              setInfo(m);
+            }}
+          />
+        )}
         {hasPerm('user.manage') && <RecoveryCard onError={fail} />}
         {hasPerm('backup.manage') && (
           <BackupCard

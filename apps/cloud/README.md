@@ -8,6 +8,7 @@ yönetir; program buluta imzalı lisansıyla bağlanır, işletme paneli yoktur.
 
 ```
 /api/*  /img/*   → Worker (src/index.ts): public, pos, admin rotaları
+/updates/*       → Worker: program güncellemeleri (R2 UPDATES deposu; UPDATE_SYSTEM.md)
 geri kalan       → apps/qr-web/dist (SPA; /m/:code, eski /panel adresi için bilgi sayfası)
 ```
 
@@ -83,7 +84,8 @@ Bir kez yapılır (hesap ve oturum için aşağıdaki **Yayına alma**'nın 1–
 
 1. `pnpm --filter @ado/cloud exec wrangler d1 create ado-qr-test` — çıktıdaki `database_id`'yi
    `wrangler.jsonc` › `env.test` içindeki `00000000-…` yerine yazıp commit'leyin.
-2. `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images-test`
+2. `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images-test` ve
+   `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-updates-test` (program güncellemeleri)
 3. Deneme lisans anahtarının açık anahtarını `wrangler.jsonc` › `env.test` › `vars.LICENSE_PUBLIC_KEY`
    ve programın `apps/desktop/profiles/test.json` dosyasına aynı değerle yazın (`LICENSING.md` §5).
 4. `pnpm --filter @ado/cloud db:migrate:test`
@@ -134,7 +136,9 @@ Bir kez yapılır. Komutlar depo kökünden çalıştırılır.
 3. **Veritabanı.** `pnpm --filter @ado/cloud exec wrangler d1 create ado-qr`; çıktıdaki
    `database_id` değerini `apps/cloud/wrangler.jsonc` içindeki `00000000-…` yerine yazıp commit'leyin
    (gizli değildir).
-4. **Görsel deposu.** `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images`
+4. **Depolar.** `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images` ve
+   `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-updates` (program güncellemeleri;
+   yüklemeyi release iş akışı yapar, `UPDATE_SYSTEM.md` §4)
 5. **Lisans açık anahtarı.** Gerçek lisans anahtarının açık anahtarını `wrangler.jsonc` ›
    `vars.LICENSE_PUBLIC_KEY` ve `apps/desktop/profiles/prod.json` dosyasına yazıp commit'leyin (gizli
    değildir; özel anahtar asla depoya girmez).
