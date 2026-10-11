@@ -13,12 +13,6 @@ export interface Env {
   LICENSE_PUBLIC_KEY?: string;
 }
 
-export interface SessionUser {
-  id: string;
-  email: string;
-  tenantId: string;
-}
-
 /** POS istegini yapan sube ve isletmesi (Bearer belirtecten cozulur). */
 export interface PosContext {
   branch: BranchRow;
@@ -28,8 +22,6 @@ export interface PosContext {
 export interface AppEnv {
   Bindings: Env;
   Variables: {
-    user: SessionUser;
-    branch: BranchRow;
     pos: PosContext;
   };
 }

@@ -53,13 +53,12 @@ describe('POS lisansla etkinlestirme', () => {
     });
 
     const branch = await env.DB.prepare(
-      `SELECT b.source, b.install_id, b.pos_app_version, b.pos_token_hash, t.license_id
+      `SELECT b.install_id, b.pos_app_version, b.pos_token_hash, t.license_id
        FROM branches b JOIN tenants t ON t.id = b.tenant_id WHERE b.id = ?`,
     )
       .bind(res.body.data.branch.id)
       .first<Record<string, string>>();
     expect(branch).toMatchObject({
-      source: 'pos',
       install_id: installId,
       pos_app_version: '0.3.0',
       license_id: payload.id,

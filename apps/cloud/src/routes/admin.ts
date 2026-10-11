@@ -2,15 +2,15 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { z } from 'zod';
 import { MENU_LIMITS } from '@ado/shared/menu';
 import type { AppEnv } from '../env';
-import { hashPassword, safeEqual } from '../lib/crypto';
+import { safeEqual } from '../lib/crypto';
 import { branchSummaries, tenantById, type TenantRow } from '../lib/db';
 import { ApiError, nowIso, ok, readJson } from '../lib/http';
 import { FEATURES, PLAN_IDS, PLANS, tenantFeatures } from '../lib/plans';
-import { createPairingCode, emailSchema, passwordSchema } from './panel';
 
 /**
- * Satici (vendor) API'si: isletme acma, paket degistirme, askiya alma, POS baglantisini kaldirma,
- * parola sifirlama. Lisansla baglanan isletmeler POS'un ilk etkinlestirmesinde kendiliginden acilir.
+ * Satici (vendor) API'si: isletmeleri listeleme, askiya alma, ozellik istisnasi, POS baglantisini
+ * kaldirma, silme. Isletmeler POS'un lisansla ilk etkinlestirmesinde kendiliginden acilir; ad, paket
+ * ve ozellikler her etkinlestirme ve yenilemede imzali lisanstan yeniden yazilir.
  * `ADMIN_TOKEN` gizli degeriyle korunur; tanimli degilse tamamen kapalidir.
  */
 export const adminRoutes = new Hono<AppEnv>();
@@ -41,39 +41,6 @@ function tenantView(tenant: TenantRow) {
 
 adminRoutes.get('/plans', (c) => ok(c, { plans: PLANS, features: FEATURES }));
 
-adminRoutes.post('/tenants', async (c) => {
-  const body = await readJson(
-    c,
-    z.object({
-      name: z.string().trim().min(1).max(MENU_LIMITS.branchName),
-      plan: z.enum(PLAN_IDS),
-      branchName: z.string().trim().min(1).max(MENU_LIMITS.branchName).optional(),
-      owner: z.object({ email: emailSchema, password: passwordSchema }),
-    }),
-  );
-  const taken = await c.env.DB.prepare('SELECT 1 FROM users WHERE email = ?')
-    .bind(body.owner.email)
-    .first();
-  if (taken) throw new ApiError(409, 'EMAIL_TAKEN', 'Bu e-posta başka bir hesapta kayıtlı.');
-
-  const now = nowIso();
-  const tenantId = crypto.randomUUID();
-  const branchId = crypto.randomUUID();
-  const userId = crypto.randomUUID();
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      'INSERT INTO tenants (id, name, plan, features, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).bind(tenantId, body.name, body.plan, '{}', 'active', now, now),
-    c.env.DB.prepare(
-      'INSERT INTO branches (id, tenant_id, name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).bind(branchId, tenantId, body.branchName ?? body.name, 'panel', now, now),
-    c.env.DB.prepare(
-      'INSERT INTO users (id, tenant_id, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).bind(userId, tenantId, body.owner.email, await hashPassword(body.owner.password), now, now),
-  ]);
-  return ok(c, { tenantId, branchId, userId }, 201);
-});
-
 adminRoutes.get('/tenants', async (c) => {
   const { results } = await c.env.DB.prepare(
     'SELECT * FROM tenants ORDER BY created_at DESC',
@@ -84,16 +51,7 @@ adminRoutes.get('/tenants', async (c) => {
 adminRoutes.get('/tenants/:id', async (c) => {
   const tenant = await tenantById(c.env.DB, c.req.param('id'));
   if (!tenant) throw new ApiError(404, 'TENANT_NOT_FOUND', 'İşletme bulunamadı.');
-  const { results: users } = await c.env.DB.prepare(
-    'SELECT id, email, created_at FROM users WHERE tenant_id = ? ORDER BY created_at',
-  )
-    .bind(tenant.id)
-    .all<{ id: string; email: string; created_at: string }>();
-  return ok(c, {
-    ...tenantView(tenant),
-    users: users.map((user) => ({ id: user.id, email: user.email, createdAt: user.created_at })),
-    branches: await branchSummaries(c.env.DB, tenant.id),
-  });
+  return ok(c, { ...tenantView(tenant), branches: await branchSummaries(c.env.DB, tenant.id) });
 });
 
 adminRoutes.patch('/tenants/:id', async (c) => {
@@ -162,28 +120,4 @@ adminRoutes.delete('/tenants/:id', async (c) => {
     .run();
   if (!result.meta.changes) throw new ApiError(404, 'TENANT_NOT_FOUND', 'İşletme bulunamadı.');
   return ok(c, { deleted: true });
-});
-
-adminRoutes.post('/branches/:id/pairing-code', async (c) => {
-  const branch = await c.env.DB.prepare('SELECT id FROM branches WHERE id = ?')
-    .bind(c.req.param('id'))
-    .first<{ id: string }>();
-  if (!branch) throw new ApiError(404, 'BRANCH_NOT_FOUND', 'Şube bulunamadı.');
-  return ok(c, await createPairingCode(c.env.DB, branch.id), 201);
-});
-
-// Parola sifirlama: tum oturumlar kapanir.
-adminRoutes.post('/users/:id/password', async (c) => {
-  const { password } = await readJson(c, z.object({ password: passwordSchema }));
-  const userId = c.req.param('id');
-  const results = await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').bind(
-      await hashPassword(password),
-      nowIso(),
-      userId,
-    ),
-    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
-  ]);
-  if (!results[0]?.meta.changes) throw new ApiError(404, 'USER_NOT_FOUND', 'Kullanıcı bulunamadı.');
-  return ok(c, { reset: true });
 });

@@ -187,12 +187,14 @@ kısaca tekrarlayın.
 görmesine izin vermiyordur; internetsiz basit bir modem/router kullanın (kılavuz 6. bölüm › İşletmede
 WiFi yoksa).
 
-## 15. (Test ortamı kurulunca) İşletme paneli uygulaması
+## 15. (Test ortamı kurulunca) QR menü lisansla
 
-**Yap:** `apps/cloud/README.md` › **Test ortamı** kurulduktan sonra aynı dosyadaki **Telefonla
-deneme** adımlarını yapın: paneli telefona yükleyin, uçak modunda fotoğraflı ürün ekleyip **Kaydet ve
-yayınla**, uçak modunu kapatın, **Çıkış** yapın.
+**Yap:** Test profiliyle derlenmiş programda deneme lisansını **Ayarlar › Lisans**'a girin,
+**Ayarlar › QR Menü › QR menüyü aç** deyin. **Masa QR kodları**'ndan bir kart basıp telefonla
+okutun. Bir ürünün fiyatını değiştirin ve **Tükendi** yapın. Bilgisayarın internetini kesip bir ürün
+adı değiştirin, sonra interneti açın. En sonda **QR menüyü kapat** deyin.
 
-**Beklenen:** Panel uçak modunda açılır ve değişiklik cihazda saklanır; internet gelince birkaç
-saniyede yayınlanır ve müşteri sayfasında ürün ile fotoğraf görünür. Çıkıştan sonra uçak modunda
-panel menüyü göstermez, giriş için internet ister (cihaz verisi silinmiştir).
+**Beklenen:** Menü telefonda açılır; fiyat ve "Tükendi" birkaç saniyede görünür. İnternetsiz yapılan
+değişiklik internet gelince kendiliğinden yayınlanır. Kapatınca kart "Bu QR kod geçersiz" gösterir;
+yeniden açınca aynı kart yine çalışır. Telefonda eski panel uygulaması varsa internetteyken açılınca
+"İşletme paneli kaldırıldı" yazar.

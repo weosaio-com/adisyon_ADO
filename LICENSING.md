@@ -91,4 +91,4 @@ doğrular; lisans kimliği, süre ve `qr.menu` şarttır. İşletme lisans kimli
 satıcının bulutta ayrıca işletme açması gerekmez. Bir lisans aynı anda tek kurulumda açıktır;
 başka bilgisayara taşımak sahibin onayını ister. Lisans yenilenince program yeni lisansı buluta
 bildirir (`PUT /api/pos/license`), yeniden açmak gerekmez. Ayrıntı: `QR_MENU_DESIGN.md` §3.1,
-`API_DESIGN.md` §5.12. Eşleştirme kodu ve web paneli sonraki adımda kalkar.
+`API_DESIGN.md` §5.12. Eşleştirme kodu ve web işletme paneli kaldırıldı; bağlanmanın tek yolu lisanstır.

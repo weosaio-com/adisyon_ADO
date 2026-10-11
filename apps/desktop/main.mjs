@@ -141,8 +141,8 @@ app.whenReady().then(async () => {
     }
     const win = new BrowserWindow({ width: 1280, height: 800 });
     win.removeMenu();
-    // Disari giden baglantilar (isletme paneli vb.) sistem tarayicisinda acilir; programin
-    // icinde menusuz, adres cubugusuz bir pencere olarak kalmaz.
+    // Disari giden baglantilar sistem tarayicisinda acilir; programin icinde menusuz, adres
+    // cubugusuz bir pencere olarak kalmaz.
     win.webContents.setWindowOpenHandler(({ url }) => {
       if (url === BASE || url.startsWith(`${BASE}/`)) return { action: 'allow' };
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);

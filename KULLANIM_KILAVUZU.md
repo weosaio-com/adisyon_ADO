@@ -134,25 +134,9 @@ yönetilir; ayrı bir hesap, adres ya da kod gerekmez. QR menü lisansınıza ba
 - **Kapatma:** **QR menüyü kapat** deyince masalardaki QR kodlar menü açmaz. Yeniden açınca aynı
   kartlar yine çalışır.
 - Menüde alerjen bilgisi için "personele danışın" notu her zaman yer alır.
-
-**Adisyon programı kullanmayan işletme (işletme paneli; kaldırılacak):** Menüsünü
-`https://<bulut adresi>/panel` adresindeki **Menü**, **İşletme** ve **Masalar** sekmelerinden
-hazırlayıp **Kaydet ve yayınla** der; QR kartlarını da Masalar sekmesinden basar.
-
-**İşletme paneli uygulama olarak (telefon ve bilgisayar):** Paneli bir kez açıp **Uygulamayı yükle**
-(girişte) ya da **Yükle** (üst çubukta) deyin; iPhone/iPad'de Safari › **Paylaş › Ana Ekrana Ekle**.
-Panel ana ekrandan tam ekran açılır; tarayıcıdan açmaya da devam edebilirsiniz.
-- **İnternet yokken:** ilk giriş için internet gerekir. Sonra panel internetsiz de açılır: son menü,
-  masalar ve QR kartları görünür, kartlar basılabilir. Menüyü ve işletme bilgilerini düzenleyip
-  fotoğraf ekleyebilirsiniz; **Kaydet ve yayınla** dediğinizde değişiklik cihazda saklanır ve
-  **internet gelince kendiliğinden yayınlanır**. Üstte "İnternet yok — değişiklikler bu cihazda
-  saklanıyor." yazar.
-- Masa ekleme, kod yenileme ve parola değiştirme internet ister; bu düğmeler internetsizken
-  pasiftir.
-- Menü bu arada başka bir yerden değiştirildiyse panel üzerine yazmaz; güncel menüyü yükleyip
-  değişikliğinizi yeniden yapmanızı ister.
-- **Çıkış** yapınca bu cihazdaki panel verisi silinir (yayınlanmamış değişiklik varsa önce sorar).
 - Müşterinin gördüğü QR menü uygulama değildir; her zaman web'den, en güncel haliyle açılır.
+- Eskiden kullanılan web işletme paneli kaldırıldı. Telefona yüklediyseniz internetteyken açtığınızda
+  "İşletme paneli kaldırıldı" yazar ve kendini temizler; simgeyi ana ekrandan silebilirsiniz.
 
 Bu ayarlar bittiğinde sistem satışa hazırdır.
 

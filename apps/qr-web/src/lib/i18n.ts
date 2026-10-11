@@ -28,7 +28,9 @@ const tr = {
   networkBody: 'İnternet bağlantınızı kontrol edip tekrar deneyin.',
   homeTitle: 'QR Menü',
   homeBody: 'Menüyü görmek için masanızdaki QR kodu telefonunuzun kamerasıyla okutun.',
-  homePanel: 'İşletme paneli',
+  panelGoneTitle: 'İşletme paneli kaldırıldı',
+  panelGoneBody:
+    'QR menü artık Adisyon programından yönetiliyor: Ayarlar › QR Menü. Ürün ve fiyat değişince menü kendiliğinden güncellenir.',
 };
 
 const en: typeof tr = {
@@ -58,7 +60,9 @@ const en: typeof tr = {
   networkBody: 'Check your internet connection and try again.',
   homeTitle: 'QR Menu',
   homeBody: 'Scan the QR code on your table with your phone camera to see the menu.',
-  homePanel: 'Business panel',
+  panelGoneTitle: 'The business panel has been retired',
+  panelGoneBody:
+    'The QR menu is now managed in the Adisyon program: Settings › QR Menu. The menu updates itself when products or prices change.',
 };
 
 export type UiText = typeof tr;

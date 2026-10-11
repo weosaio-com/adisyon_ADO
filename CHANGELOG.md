@@ -110,6 +110,20 @@ Sürümleme: [SemVer](https://semver.org/).
   alanları, finansal append-only tablolar, hash-zincirli `audit_logs`, outbox/sync/conflict tabloları.
   `prisma validate` ✅, client üretildi ✅, shared typecheck ✅.
 
+### Removed
+- **Web işletme paneli (2026-10-10):** QR menü yalnız Adisyon programından yönetilir.
+  - `apps/qr-web`: `/panel` uygulaması, manifest ve simgeler, `idb`/`qrcode`/`vite-plugin-pwa`
+    bağımlılıkları kalktı. Eski adres "İşletme paneli kaldırıldı" der. Telefonlara yüklenmiş panel
+    uygulamasının service worker'ı (`/sw.js`) kendini silen sürümle değişti: önbelleği temizler,
+    kaydını kaldırır.
+  - `apps/cloud`: `/api/panel/*`, eşleştirme kodu (`POST /api/pos/pair`), satıcının işletme açma,
+    eşleştirme kodu ve parola sıfırlama uçları, parola özetleme (PBKDF2) kalktı. İşletmeler POS'un
+    lisansla ilk bağlanmasında açılır. D1 `0003_remove_panel.sql`: `users`, `sessions`,
+    `pairing_codes` ve `branches.source` silinir, lisanssız işletmeler kalkar (uygulamadan önce Time
+    Travel yer imi).
+  - Testler: `panel.test.ts` ve Playwright panel testleri silindi; bulut testleri lisansla açılan
+    şubeyle yeniden yazıldı; eski panel adresi ve kendini silen service worker için e2e eklendi.
+
 ### Fixed
 - **Para üstü (2026-09-27):** ödeme ekranında "alınan nakit" alanı yoktu; müşterinin verdiği 200 TL
   yazılınca 145 TL'lik adisyona 200 TL satış kaydediliyordu (gün sonu kasa açığı, şişik ciro).

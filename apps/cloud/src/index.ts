@@ -4,13 +4,13 @@ import { HTTPException } from 'hono/http-exception';
 import type { AppEnv } from './env';
 import { ApiError, errorBody } from './lib/http';
 import { adminRoutes } from './routes/admin';
-import { panelRoutes } from './routes/panel';
 import { posRoutes } from './routes/pos';
 import { publicRoutes } from './routes/public';
 
 /**
- * QR menu bulutu. Musteri sayfasi ve panel statik varliklardir (qr-web); bu Worker yalniz
- * /api/* ve /img/* isteklerini karsilar (wrangler.jsonc: run_worker_first).
+ * QR menu bulutu. Musteri sayfasi statik varliktir (qr-web); bu Worker yalniz /api/* ve /img/*
+ * isteklerini karsilar (wrangler.jsonc: run_worker_first). Menuyu Adisyon programi (POS) lisansla
+ * baglanip yayinlar; isletme paneli yoktur.
  */
 const app = new Hono<AppEnv>();
 
@@ -32,7 +32,6 @@ app.use(
 app.get('/api/health', (c) => c.json({ success: true, data: { ok: true } }));
 app.route('/', publicRoutes);
 app.route('/api/pos', posRoutes);
-app.route('/api/panel', panelRoutes);
 app.route('/api/admin', adminRoutes);
 
 app.notFound((c) => {
@@ -47,7 +46,6 @@ app.onError((err, c) => {
     return c.json(errorBody(err.code, err.message, err.details), err.status);
   }
   if (err instanceof HTTPException) {
-    // csrf(): baska kokenden form gonderimi.
     const code = err.status === 403 ? 'FORBIDDEN' : 'HTTP_ERROR';
     return c.json(errorBody(code, err.message || 'İstek reddedildi.'), err.status);
   }

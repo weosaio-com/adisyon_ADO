@@ -1,6 +1,6 @@
 {
   // QR menu bulutu: tek Worker. /api/* ve /img/* Worker'a, gerisi qr-web statik varliklarina
-  // (musteri menusu /m/<kod> + /panel; SPA). Yayina alma: apps/cloud/README.md
+  // (musteri menusu /m/<kod>; SPA). Menuyu Adisyon programi yayinlar. Yayina alma: apps/cloud/README.md
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ado-qr",
   "main": "src/index.ts",

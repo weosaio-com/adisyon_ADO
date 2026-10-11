@@ -4,14 +4,12 @@ import { buildPayload, signLicense } from '../../../scripts/license.mjs';
 
 // QR menu uctan uca: POS (:3001) + bulut (apps/cloud, `wrangler dev`). Bulut adresi
 // E2E_CLOUD_URL ile verilir; verilmezse bu dosya calismaz (playwright.config testIgnore).
-// CI'da e2e-cloud isi kosar. Satici API anahtari bulutun ADMIN_TOKEN'i ile ayni olmali.
-// POS'lu akis lisansla acilir: test lisansi ADO_LICENSE_PRIVATE_KEY_FILE ile imzalanir; acik
-// anahtari POS (ADO_LICENSE_PUBLIC_KEY) ve bulut (LICENSE_PUBLIC_KEY) bilir. POS'un gomulu bulut
-// adresi (CLOUD_API_URL) E2E_CLOUD_URL ile ayni olmali.
+// CI'da e2e-cloud isi kosar. QR menu lisansla acilir: test lisansi ADO_LICENSE_PRIVATE_KEY_FILE ile
+// imzalanir; acik anahtari POS (ADO_LICENSE_PUBLIC_KEY) ve bulut (LICENSE_PUBLIC_KEY) bilir. POS'un
+// gomulu bulut adresi (CLOUD_API_URL) E2E_CLOUD_URL ile ayni olmali.
 const ORIGIN = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3001';
 const API = `${ORIGIN}/api/v1`;
 const CLOUD = process.env.E2E_CLOUD_URL ?? 'http://127.0.0.1:8787';
-const ADMIN_TOKEN = process.env.E2E_CLOUD_ADMIN_TOKEN ?? '';
 const LICENSE_KEY_FILE = process.env.ADO_LICENSE_PRIVATE_KEY_FILE ?? '';
 const OWNER = {
   username: process.env.SEED_OWNER_USERNAME ?? 'owner',
@@ -43,19 +41,6 @@ async function pos<T>(method: string, path: string, body?: unknown, token?: stri
   return (json.data ?? json) as T;
 }
 
-// Satici API'si ile isletme ac (kendi kendine kayit sonraki asamada).
-async function newTenant(name: string) {
-  const email = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
-  const password = 'e2e-parola-12345';
-  const res = await fetch(`${CLOUD}/api/admin/tenants`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ADMIN_TOKEN}` },
-    body: JSON.stringify({ name, plan: 'menu', owner: { email, password } }),
-  });
-  if (res.status !== 201) throw new Error(`tenant -> ${res.status} ${await res.text()}`);
-  return { email, password };
-}
-
 // Saticinin imzaladigi test lisansi (QR menu dahil); her kosumda yeni lisans kimligi.
 function e2eLicense(customer: string): string {
   return signLicense(
@@ -69,8 +54,7 @@ function e2eLicense(customer: string): string {
   );
 }
 
-// Musteri telefonu (390 px) ve isletme sahibi paneli ayni bulut adresinde; her testin
-// sonunda kapatilir.
+// Musteri telefonu (390 px); her testin sonunda kapatilir.
 const contexts: BrowserContext[] = [];
 async function phone(browser: Browser): Promise<Page> {
   const context = await browser.newContext({
@@ -83,16 +67,8 @@ async function phone(browser: Browser): Promise<Page> {
   return context.newPage();
 }
 
-async function panelLogin(page: Page, user: { email: string; password: string }) {
-  await page.goto(`${CLOUD}/panel`);
-  await page.getByLabel('E-posta').fill(user.email);
-  await page.getByLabel('Parola').fill(user.password);
-  await page.getByRole('button', { name: 'Giriş yap' }).click();
-  await expect(page.getByTestId('panel-tenant')).toBeVisible();
-}
-
-// Fotograf yerine tarayicida gorsel uretilir: arayuze buyuk PNG (tarayici kucultur), API'ye
-// dogrudan yukleme icin kucultulmus hali (800 px WebP; POS arayuzunun gonderdigi bicim).
+// Fotograf yerine tarayicida gorsel uretilir: POS'a dogrudan yukleme icin kucultulmus hali
+// (800 px WebP; POS arayuzunun gonderdigi bicim).
 async function photo(page: Page, width: number, type: 'image/png' | 'image/webp') {
   const dataUrl = await page.evaluate(
     ([w, t]) => {
@@ -123,160 +99,19 @@ async function expectImageLoaded(page: Page, selector: string) {
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(120_000);
 
-test.beforeAll(() => {
-  if (!ADMIN_TOKEN) throw new Error('E2E_CLOUD_ADMIN_TOKEN gerekli (bulutun ADMIN_TOKEN degeri).');
-});
 test.afterEach(async () => {
   await Promise.all(contexts.splice(0).map((context) => context.close()));
 });
 
-test('POS’suz işletme: panelde menü ve masa, müşteri telefonda görür', async ({ browser }) => {
-  const owner = await newTenant('E2E Çorbacı');
-  const panel = await phone(browser);
-  await panelLogin(panel, owner);
-  await expect(panel.getByText('Menü henüz yayınlanmadı.')).toBeVisible();
-
-  await panel.getByRole('button', { name: '+ Kategori' }).click();
-  await panel.getByLabel('Ad', { exact: true }).fill('Çorbalar');
-  await panel.getByLabel('İngilizce ad (isteğe bağlı)').fill('Soups');
-  await panel.getByRole('button', { name: 'Tamam' }).click();
-  await panel.getByRole('button', { name: '+ Ürün' }).click();
-  await panel.getByTestId('product-name').fill('Mercimek Çorbası');
-  await panel.getByTestId('product-price').fill('120,50');
-  await panel.getByTestId('product-image-input').setInputFiles({
-    name: 'corba.png',
-    mimeType: 'image/png',
-    buffer: await photo(panel, 1600, 'image/png'),
-  });
-  await expect(panel.getByTestId('product-image')).toBeVisible();
-  await panel.getByTestId('allergen-celery').click();
-  await panel.getByTestId('diet-vegan').click();
-  await panel.getByLabel('İngilizce ad (isteğe bağlı)').fill('Lentil soup');
-  await panel.getByTestId('product-ok').click();
-  await panel.getByTestId('save-menu').click();
-  await expect(panel.getByText(/Yayında: sürüm 1/)).toBeVisible();
-
-  // Isletme bilgisi menuyle birlikte yayinlanir.
-  await panel.getByRole('link', { name: 'İşletme' }).click();
-  await panel.getByLabel('Adres').fill('Moda Cad. 12, Kadıköy');
-  await panel.getByTestId('business-english').check();
-  await panel.getByTestId('save-menu').click();
-  await expect(panel.getByTestId('save-status')).toBeHidden();
-
-  await panel.getByRole('link', { name: 'Masalar' }).click();
-  await expect(panel.getByTestId('table-name')).toHaveValue('Masa 1');
-  await panel.getByLabel('Bölüm (isteğe bağlı)').fill('Bahçe');
-  await panel.getByTestId('table-add').click();
-  const card = panel.getByTestId('qr-card-Masa 1');
-  await expect(card.getByTestId('qr-image')).toBeVisible();
-  const href = await card.getByRole('link', { name: 'Önizle' }).getAttribute('href');
-  expect(href).toMatch(/^\/m\/[A-Z2-7]{16}$/);
-
-  const customer = await phone(browser);
-  await customer.goto(`${CLOUD}${href}`);
-  await expect(customer.getByTestId('business-name')).toHaveText('E2E Çorbacı');
-  await expect(customer.getByTestId('table-label')).toHaveText('Masa 1 · Bahçe');
-  await expect(customer.getByText('₺120,50')).toBeVisible();
-  await expect(customer.getByText('Moda Cad. 12, Kadıköy')).toBeVisible();
-  await expectImageLoaded(customer, '[data-testid^="menu-item-"] img');
-  await customer.getByTestId('lang-en').click();
-  await expect(customer.getByText('Lentil soup')).toBeVisible();
-  // Sayfa telefonda yatay kaymaz.
-  expect(await customer.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-    390,
-  );
-});
-
-test('panel uygulama olarak yüklenir, internetsiz düzenlenir, internet gelince yayınlar', async ({
-  browser,
-}) => {
-  const owner = await newTenant('E2E Çevrimdışı Kafe');
-  const panel = await phone(browser);
-  const context = panel.context();
-  await panelLogin(panel, owner);
-
-  // Yalniz panel uygulama olarak yuklenir: manifest + /panel kapsamli service worker.
-  await expect(panel.locator('link[rel="manifest"]')).toHaveAttribute('href', '/panel.webmanifest');
-  const scope = await panel.evaluate(() => navigator.serviceWorker.ready.then((r) => r.scope));
-  expect(scope).toBe(`${CLOUD}/panel`);
-  await panel.waitForFunction(() => navigator.serviceWorker.controller !== null);
-
-  // Internet varken yayinlanan menu cihazda saklanir.
-  await panel.getByRole('button', { name: '+ Kategori' }).click();
-  await panel.getByLabel('Ad', { exact: true }).fill('Kahveler');
-  await panel.getByRole('button', { name: 'Tamam' }).click();
-  await panel.getByTestId('save-menu').click();
-  await expect(panel.getByText(/Yayında: sürüm 1/)).toBeVisible();
-
-  // Internet kesilir; uygulama yeniden acilir ve cihazdaki son menuyle calisir.
-  await context.setOffline(true);
-  await panel.reload();
-  await expect(panel.getByTestId('offline-banner')).toBeVisible();
-  await expect(panel.getByTestId('panel-categories')).toContainText('Kahveler');
-  await expect(panel.getByTestId('logout')).toBeDisabled();
-
-  // Internetsiz fotografli urun eklenir ve kaydedilir.
-  await panel.getByRole('button', { name: '+ Ürün' }).click();
-  await panel.getByTestId('product-name').fill('Filtre Kahve');
-  await panel.getByTestId('product-price').fill('85');
-  await panel.getByTestId('product-image-input').setInputFiles({
-    name: 'kahve.png',
-    mimeType: 'image/png',
-    buffer: await photo(panel, 1600, 'image/png'),
-  });
-  await expect(panel.getByTestId('product-image')).toBeVisible();
-  await panel.getByTestId('product-ok').click();
-  const status = panel.getByTestId('save-status');
-  await expect(status).toHaveAttribute('data-state', 'dirty');
-  await expect(status).toContainText('İnternet yok');
-  // "Kaydederseniz…" ve "Kaydedildi…" metinlerinin ikisinde de "internet gelince" gecer; durum
-  // niteligi ayirir. "Kaydedildi" ancak bekleyen yayin cihaza yazildiktan sonra gorunur.
-  await panel.getByTestId('save-menu').click();
-  await expect(status).toHaveAttribute('data-state', 'queued');
-  await expect(status).toContainText('Kaydedildi; internet gelince');
-
-  // Uygulama kapanip acilsa da bekleyen kayit ve fotograf cihazda durur.
-  await panel.reload();
-  await expect(panel.getByTestId('panel-product-Filtre Kahve')).toBeVisible();
-  await expect(status).toHaveAttribute('data-state', 'queued');
-  await expect(status).toContainText('Kaydedildi; internet gelince');
-
-  // Internet gelir: kayit kendiliginden yayinlanir.
-  await context.setOffline(false);
-  await expect(panel.getByTestId('save-status')).toBeHidden({ timeout: 30_000 });
-  await expect(panel.getByText(/Yayında: sürüm 2/)).toBeVisible();
-  await expect(panel.getByTestId('offline-banner')).toBeHidden();
-
-  // Musteri yeni urunu fotografiyla gorur; musteri sayfasi uygulama degildir.
-  await panel.getByRole('link', { name: 'Masalar' }).click();
-  await panel.getByTestId('table-add').click();
-  const href = await panel
-    .getByTestId('qr-card-Masa 1')
-    .getByRole('link', { name: 'Önizle' })
-    .getAttribute('href');
-  const customer = await phone(browser);
-  await customer.goto(`${CLOUD}${href}`);
-  await expect(customer.getByText('Filtre Kahve')).toBeVisible();
-  await expectImageLoaded(customer, '[data-testid^="menu-item-"] img');
-  await expect(customer.locator('link[rel="manifest"]')).toHaveCount(0);
-  expect(await customer.evaluate(() => navigator.serviceWorker.controller)).toBeNull();
-
-  // Cikis: oturum kapanir, cihazdaki panel verisi silinir.
-  await panel.getByTestId('logout').click();
-  await expect(panel.getByRole('button', { name: 'Giriş yap' })).toBeVisible();
-  const stored = await panel.evaluate(
-    () =>
-      new Promise<number>((resolve, reject) => {
-        const request = indexedDB.open('ado-panel');
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const tx = request.result.transaction(['kv', 'drafts', 'images']);
-          const counts = ['kv', 'drafts', 'images'].map((name) => tx.objectStore(name).count());
-          tx.oncomplete = () => resolve(counts.reduce((sum, count) => sum + count.result, 0));
-        };
-      }),
-  );
-  expect(stored).toBe(0);
+test('eski işletme paneli adresi panelin kalktığını söyler', async ({ browser }) => {
+  const visitor = await phone(browser);
+  await visitor.goto(`${CLOUD}/panel`);
+  await expect(visitor.getByTestId('notice-panelGone')).toContainText('İşletme paneli kaldırıldı');
+  // Eski panel uygulamasini silen service worker sunulur; her acilista yeniden denetlenir.
+  const sw = await visitor.request.get(`${CLOUD}/sw.js`);
+  expect(sw.ok()).toBe(true);
+  expect(sw.headers()['cache-control']).toBe('no-cache');
+  expect(await sw.text()).toContain('registration.unregister()');
 });
 
 test.describe('POS’lu işletme', () => {

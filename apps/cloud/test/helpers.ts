@@ -1,5 +1,5 @@
 import { env, exports } from 'cloudflare:workers';
-import type { MenuSnapshotInput } from '@ado/shared/menu';
+import { encodeTableCode, TABLE_CODE_BYTES, type MenuSnapshotInput } from '@ado/shared/menu';
 
 // Worker'in fetch'i (ayni isolate'te, gercek D1/R2 baglamalariyla).
 const worker = (exports as unknown as { default: { fetch(request: Request): Promise<Response> } })
@@ -19,18 +19,15 @@ export interface CallOptions {
   body?: BodyInit;
   headers?: Record<string, string>;
   token?: string;
-  cookie?: string;
   admin?: boolean;
   ip?: string;
 }
 
 export function request(method: string, path: string, opts: CallOptions = {}): Promise<Response> {
-  // Tarayici gibi: ayni kokenden gelen istek Origin tasir (panelin CSRF korumasi buna bakar).
   const headers = new Headers({ Origin: ORIGIN, ...opts.headers });
   if (opts.json !== undefined) headers.set('Content-Type', 'application/json');
   if (opts.token) headers.set('Authorization', `Bearer ${opts.token}`);
   if (opts.admin) headers.set('Authorization', `Bearer ${ADMIN_TOKEN}`);
-  if (opts.cookie) headers.set('Cookie', opts.cookie);
   if (opts.ip) headers.set('CF-Connecting-IP', opts.ip);
   return worker.fetch(
     new Request(ORIGIN + path, {
@@ -54,48 +51,6 @@ export async function call<T = any>(method: string, path: string, opts: CallOpti
 
 let seq = 0;
 export const unique = (prefix: string) => `${prefix}-${Date.now()}-${++seq}`;
-
-export async function createTenant(opts: { plan?: string; password?: string } = {}) {
-  const email = `${unique('owner')}@example.com`;
-  const password = opts.password ?? 'dogru-parola-123';
-  const res = await call<{ tenantId: string; branchId: string; userId: string }>(
-    'POST',
-    '/api/admin/tenants',
-    {
-      admin: true,
-      json: { name: 'Kebapçı Halil', plan: opts.plan ?? 'menu', owner: { email, password } },
-    },
-  );
-  if (res.status !== 201) throw new Error(`tenant: ${res.status} ${JSON.stringify(res.body)}`);
-  return { ...res.body.data, email, password };
-}
-
-/** Giris yapar; sonraki isteklerde kullanilacak Cookie basligini dondurur. */
-export async function login(email: string, password: string): Promise<string> {
-  const res = await request('POST', '/api/panel/login', {
-    json: { email, password },
-    ip: unique('ip'),
-  });
-  if (res.status !== 200) throw new Error(`login: ${res.status} ${await res.text()}`);
-  const cookie = res.headers.get('Set-Cookie') ?? '';
-  return cookie.split(';')[0] ?? '';
-}
-
-export async function pairPos(cookie: string, branchId: string): Promise<string> {
-  const code = await call<{ code: string }>(
-    'POST',
-    `/api/panel/branches/${branchId}/pairing-code`,
-    {
-      cookie,
-    },
-  );
-  const res = await call<{ token: string }>('POST', '/api/pos/pair', {
-    json: { code: code.body.data.code },
-    ip: unique('ip'),
-  });
-  if (res.status !== 201) throw new Error(`pair: ${res.status} ${JSON.stringify(res.body)}`);
-  return res.body.data.token;
-}
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = '';
@@ -163,6 +118,27 @@ export async function activate(
     ip: opts.ip ?? unique('ip'),
     ...(opts.headers ? { headers: opts.headers } : {}),
   });
+}
+
+/** Lisansla acilmis sube: POS belirteci, sube, isletme ve lisans kimlikleri. */
+export async function activatedBranch(payload: Record<string, unknown> = {}) {
+  const res = await activate({ licenseKey: await signLicense(licensePayload(payload)) });
+  if (res.status !== 201) throw new Error(`activate: ${res.status} ${JSON.stringify(res.body)}`);
+  const row = await env.DB.prepare('SELECT tenant_id FROM branches WHERE id = ?')
+    .bind(res.body.data.branch.id)
+    .first<{ tenant_id: string }>();
+  if (!row || !res.body.data.license) throw new Error('activate: sube ya da lisans yok');
+  return {
+    token: res.body.data.token,
+    branchId: res.body.data.branch.id,
+    tenantId: row.tenant_id,
+    licenseId: res.body.data.license.id,
+  };
+}
+
+/** Benzersiz, gecerli masa kodu (QR'daki /m/<kod>; POS uretir). */
+export function tableCode(): string {
+  return encodeTableCode(crypto.getRandomValues(new Uint8Array(TABLE_CODE_BYTES)));
 }
 
 export function sampleMenu(imageKey: string | null = null): MenuSnapshotInput {
