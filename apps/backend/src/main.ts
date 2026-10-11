@@ -1,6 +1,6 @@
 import './bootstrap-env';
 import { existsSync } from 'node:fs';
-import { createServer as createHttpsServer } from 'node:https';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { join } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
@@ -10,6 +10,7 @@ import { loadEnv } from './config/env.schema';
 import { API_PREFIX } from './common/http/api-prefix';
 import { resolveDataDir } from './common/util/data-dir';
 import { currentTlsHosts, ensureTlsMaterial } from './tls/tls.certs';
+import { DesktopBridgeService } from './desktop/desktop-bridge.service';
 
 // Ucuz kontrol (birkac kucuk dosya): acilista ag henuz yoksa LAN IP'si en gec 1 dk'da eklenir.
 const TLS_RECHECK_MS = 60_000;
@@ -17,14 +18,14 @@ const TLS_RECHECK_MS = 60_000;
 /**
  * Tabletler icin yerel HTTPS (ayni Express ornegi, ayri port). Tarayici LAN IP'sini
  * ancak HTTPS ile "guvenli baglam" sayar; Service Worker (cevrimdisi acilis) buna bagli.
- * Hata POS'u dusurmez: loglanir, yalniz HTTP ile devam edilir.
+ * Hata POS'u dusurmez: loglanir, yalniz HTTP ile devam edilir (null doner).
  */
 async function startHttps(
   handler: express.Express,
   port: number,
   host: string,
   logger: Logger,
-): Promise<void> {
+): Promise<HttpsServer | null> {
   const dir = join(resolveDataDir(), 'tls');
   try {
     const tls = await ensureTlsMaterial(dir, currentTlsHosts());
@@ -50,17 +51,23 @@ async function startHttps(
         })
         .catch((err: unknown) => logger.error(`HTTPS sertifikasi yenilenemedi: ${String(err)}`));
     }, TLS_RECHECK_MS).unref();
+    return server;
   } catch (err) {
     logger.error(
       `HTTPS baslatilamadi, yalniz HTTP ile devam: ${err instanceof Error ? err.message : String(err)}`,
     );
+    return null;
   }
 }
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv(); // fail-fast: gecersiz .env ile baslamaz.
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // forceCloseConnections: kapanista acik baglantilar (SSE, keep-alive) beklenmeden kesilir.
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    forceCloseConnections: true,
+  });
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix(API_PREFIX);
   const corsOrigins = env.CORS_ORIGINS.split(',')
@@ -99,9 +106,32 @@ async function bootstrap(): Promise<void> {
   await app.listen(env.API_PORT, env.API_HOST);
   const logger = app.get(Logger);
   logger.log(`Backend hazir: http://${env.API_HOST}:${env.API_PORT}/api/v1`);
-  if (env.API_TLS_PORT) {
-    await startHttps(app.getHttpAdapter().getInstance(), env.API_TLS_PORT, env.API_HOST, logger);
-  }
+  const https = env.API_TLS_PORT
+    ? await startHttps(app.getHttpAdapter().getInstance(), env.API_TLS_PORT, env.API_HOST, logger)
+    : null;
+
+  // Masaustu kabugu kapanirken `shutdown` mesaji yollar; kabuk coker ve IPC kanali koparsa da
+  // ayni sekilde kapanilir: baglantilar kesilir, Nest kapanis kancalari (Prisma) calisir. Boylece
+  // port ve veritabani bir sonraki acilisa kilitli kalmaz.
+  let closing = false;
+  const shutdown = (reason: string) => {
+    if (closing) return;
+    closing = true;
+    logger.log(`Kapaniyor: ${reason}`);
+    https?.close();
+    https?.closeAllConnections();
+    app
+      .close()
+      .then(() => process.exit(0))
+      .catch((err: unknown) => {
+        logger.error(`Kapanis hatasi: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      });
+  };
+  app.get(DesktopBridgeService).onMessage((message) => {
+    if (message.type === 'shutdown') shutdown('masaustu kabugu kapaniyor');
+  });
+  process.once('disconnect', () => shutdown('masaustu kabugu ile baglanti koptu'));
 }
 
 void bootstrap();

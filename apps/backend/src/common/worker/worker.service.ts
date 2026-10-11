@@ -12,9 +12,11 @@ export class BackgroundWorkerService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
-    const staleBefore = new Date(Date.now() - 5 * 60_000);
+    // Veritabanini tek backend kullanir (masaustu tek kopya kilidi): acilista "running" kalan her is
+    // onceki surecte yarim kalmistir. Beklemeden yeniden kuyruklanir; hizli yeniden baslatmada is
+    // (or. QR menu yayini) "suruyor" gorunup takili kalmaz.
     const recovered = await this.prisma.backgroundJob.updateMany({
-      where: { status: 'running', lockedAt: { lt: staleBefore } },
+      where: { status: 'running' },
       data: { status: 'pending', lockedAt: null, runAt: new Date() },
     });
     if (recovered.count)

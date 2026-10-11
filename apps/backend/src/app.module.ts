@@ -34,6 +34,7 @@ import { UsersModule } from './users/users.module';
 import { SyncModule } from './sync/sync.module';
 import { LicenseModule } from './license/license.module';
 import { LicenseGuard } from './license/license.guard';
+import { DesktopModule } from './desktop/desktop.module';
 import { API_PREFIX } from './common/http/api-prefix';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -72,6 +73,7 @@ const isUnloggedRequest = (req: IncomingMessage): boolean => {
       },
     }),
     ConfigModule,
+    DesktopModule,
     PrismaModule,
     EventBusModule,
     AuditModule,

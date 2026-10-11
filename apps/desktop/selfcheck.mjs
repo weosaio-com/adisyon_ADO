@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { rotatingLog } from './rotating-log.mjs';
 import { applyPendingRestore, ensureSecrets } from './restore.mjs';
 import {
@@ -21,6 +22,8 @@ import {
   loadAppConfig,
   validateAppConfig,
 } from './app-config.mjs';
+import { applyMigrations, backupBeforeMigrate, pendingMigrations } from './migrations.mjs';
+import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
 
 const tempDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 
@@ -177,6 +180,112 @@ const restoreFixture = (marker) => {
     JSON.parse(readFileSync(join(import.meta.dirname, 'profiles', `${name}.json`), 'utf8'));
   assert.deepStrictEqual(validateAppConfig(profile('test'), { strict: true }).errors, []);
   assert.deepStrictEqual(validateAppConfig(profile('prod')).errors, []);
+}
+
+// --- Veritabani guncellemesi: once kopya, sirali uygulama, hata geri alinir ---
+{
+  const dir = tempDir('ado-migrate-');
+  const migrations = join(dir, 'migrations');
+  const backups = join(dir, 'pre-migrate');
+  const addMigration = (name, sql) => {
+    mkdirSync(join(migrations, name), { recursive: true });
+    writeFileSync(join(migrations, name, 'migration.sql'), sql);
+  };
+  const dbPath = join(dir, 'ado.db');
+  const query = (sql) => {
+    const db = new DatabaseSync(dbPath);
+    try {
+      return db.prepare(sql).all();
+    } finally {
+      db.close();
+    }
+  };
+  addMigration('20260101000000_init', 'CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);');
+  mkdirSync(join(migrations, 'migration_lock.toml.d')); // migration.sql olmayan klasor atlanir
+
+  const first = applyMigrations(dbPath, migrations, { backupDir: backups });
+  assert.deepStrictEqual(first.applied, ['20260101000000_init']);
+  assert.deepStrictEqual(applyMigrations(dbPath, migrations, { backupDir: backups }), {
+    applied: [],
+    backup: null,
+  });
+
+  addMigration('20260102000000_add', 'ALTER TABLE t ADD COLUMN y TEXT;');
+  const second = applyMigrations(dbPath, migrations, { backupDir: backups });
+  assert.deepStrictEqual(second.applied, ['20260102000000_add']);
+  assert.ok(second.backup && existsSync(second.backup), 'guncellemeden once kopya alinir');
+  const copy = new DatabaseSync(second.backup);
+  assert.deepStrictEqual(
+    copy
+      .prepare('SELECT * FROM t')
+      .all()
+      .map((row) => ({ ...row })),
+    [{ x: 1 }],
+    'kopya guncelleme oncesi hali',
+  );
+  copy.close();
+
+  // Hatali migration geri alinir, kaydedilmez; acilis hata verir.
+  addMigration('20260103000000_bad', 'ALTER TABLE t ADD COLUMN z TEXT; BOZUK SQL;');
+  assert.throws(() => applyMigrations(dbPath, migrations, { backupDir: backups }));
+  assert.ok(!query('PRAGMA table_info(t)').some((col) => col.name === 'z'), 'yarim is geri alindi');
+  const db = new DatabaseSync(dbPath);
+  assert.deepStrictEqual(pendingMigrations(db, migrations), ['20260103000000_bad']);
+
+  // Gelistirme DB'si `prisma migrate` ile kurulduysa yalniz kaydedilir, kopya alinmaz.
+  db.exec('CREATE TABLE "_prisma_migrations" ("migration_name" TEXT)');
+  db.prepare('INSERT INTO "_prisma_migrations" VALUES (?)').run('20260103000000_bad');
+  db.close();
+  const recorded = applyMigrations(dbPath, migrations, { backupDir: backups });
+  assert.deepStrictEqual(recorded, { applied: ['20260103000000_bad'], backup: null });
+
+  // En yeni 3 kopya tutulur.
+  const db2 = new DatabaseSync(dbPath);
+  for (const day of ['05', '06', '07', '08']) {
+    backupBeforeMigrate(db2, backups, { now: new Date(`2026-11-${day}T10:00:00Z`) });
+  }
+  db2.close();
+  assert.deepStrictEqual(readdirSync(backups).sort(), [
+    'ado-20261106T100000.db',
+    'ado-20261107T100000.db',
+    'ado-20261108T100000.db',
+  ]);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// --- Backend sureci: IPC ile duzgun kapanis, yanit vermezse zorla ---
+{
+  const dir = tempDir('ado-proc-');
+  const script = (name, body) => {
+    const path = join(dir, name);
+    writeFileSync(path, body);
+    return path;
+  };
+  const start = (entry) =>
+    startBackendProcess({
+      execPath: process.execPath,
+      entry,
+      env: process.env,
+      onOutput: () => {},
+    });
+  const polite = start(
+    script(
+      'polite.cjs',
+      "process.on('message', (m) => { if (m && m.type === 'shutdown') setTimeout(() => process.exit(0), 20); });\nsetInterval(() => {}, 1000);\n",
+    ),
+  );
+  assert.strictEqual(await stopBackendProcess(polite, 5000), 'graceful', 'mesajla kapanir');
+
+  const stubborn = start(
+    script('stubborn.cjs', "process.on('message', () => {});\nsetInterval(() => {}, 1000);\n"),
+  );
+  assert.strictEqual(await stopBackendProcess(stubborn, 300), 'killed', 'sure dolunca zorla');
+
+  const gone = start(script('gone.cjs', 'process.exit(0);\n'));
+  await new Promise((resolve) => gone.once('exit', resolve));
+  assert.strictEqual(await stopBackendProcess(gone), 'exited');
+  assert.strictEqual(await stopBackendProcess(null), 'exited');
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log('desktop selfcheck OK');
