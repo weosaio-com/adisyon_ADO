@@ -1,0 +1,255 @@
+name: Release
+
+# Windows kurulum dosyasi ve imzali guncelleme bildirimi (UPDATE_SYSTEM.md §6). Elle calisir:
+# Actions › Release › Run workflow. Once Windows'ta derlenir ve paketli program bir kez acilip
+# denenir (onaysiz). "Yayinla" seciliyse imzalama, R2'ye yukleme ve GitHub surumu
+# `release-<profil>` ortaminin onayini bekler; ozel anahtar ve R2 anahtari yalniz o ortamdadir.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Derleme profili (apps/desktop/profiles)
+        type: choice
+        options: [test, prod]
+        default: test
+      publish:
+        description: Yayinla (R2 + GitHub surumu). Secilmezse yalniz derlenir.
+        type: boolean
+        default: false
+      notes:
+        description: Programda gorunecek surum notu (istege bagli)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.profile }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      HUSKY: '0'
+      PROFILE: ${{ inputs.profile }}
+      DATABASE_URL: 'file:./dev.db' # prisma generate icin (gercek DB kullanilmaz)
+      # Sablon veritabaninin seed'i ortami dogrular; bu degerler pakete girmez (her kurulum kendi
+      # anahtarlarini ilk acilista uretir).
+      JWT_ACCESS_SECRET: 'release-build-placeholder-0123456789'
+      JWT_REFRESH_SECRET: 'release-build-placeholder-0123456789'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false' # kod imzalama sertifikasi yok
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm prisma:generate
+
+      - name: Build shared (@ado/shared dist -> backend bagimliligi)
+        run: pnpm --filter @ado/shared build
+
+      - name: Surum
+        id: meta
+        shell: bash
+        run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Tek pnpm cagrisi: build-bundle'daki `pnpm deploy --prod` calisma alaninin pnpm durumunu
+      # uretim moduna cevirir; ardindan calisan bir pnpm komutu gelistirme bagimliliklarini
+      # (electron-builder dahil) silmeye kalkar. Betik electron-builder'i dogrudan cagirir.
+      - name: Paket (bundle + NSIS)
+        working-directory: apps/desktop
+        shell: bash
+        run: pnpm run "dist:$PROFILE" --publish never
+
+      # Bozuk paket kimseye gitmesin: paketli program acilir, backend (Prisma, argon2, migration'lar)
+      # saglik denetimini gecmeli.
+      - name: Acilis denemesi
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'apps/desktop/dist/win-unpacked/Adisyon POS.exe'
+          $app = Start-Process -FilePath $exe -PassThru
+          $up = $false
+          for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              Invoke-RestMethod -Uri 'http://127.0.0.1:43127/api/v1/health' -TimeoutSec 5 | Out-Null
+              $up = $true
+            } catch {}
+          }
+          taskkill /PID $app.Id /T /F | Out-Null
+          if (-not $up) {
+            # userData klasoru paket adindan gelir (@ado/desktop).
+            Get-Content (Join-Path $env:APPDATA '@ado/desktop/backend-error.log') -Tail 200 -ErrorAction SilentlyContinue
+            throw 'Paketli program 3 dakikada acilmadi.'
+          }
+          Write-Host 'Paketli program acildi, saglik denetimi gecti.'
+          exit 0
+
+      - name: Yayin dosyalari
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir release-out
+          cp "apps/desktop/dist/Adisyon-POS-Setup-$VERSION.exe" apps/desktop/dist/latest.yml \
+            apps/desktop/bundle/app-config.json release-out/
+          {
+            echo "### Adisyon POS $VERSION ($PROFILE profili)"
+            echo
+            echo "- Kurulum dosyasi: \`Adisyon-POS-Setup-$VERSION.exe\` ($(stat -c %s "release-out/Adisyon-POS-Setup-$VERSION.exe") bayt)"
+            echo "- Paketli program acildi, saglik denetimi gecti."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ inputs.profile }}-${{ steps.meta.outputs.version }}
+          path: release-out/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true # "Re-run" ayni adla yeniden yukleyebilsin
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release-${{ inputs.profile }}
+    permissions:
+      contents: write # surum etiketi ve GitHub surumu
+    env:
+      PROFILE: ${{ inputs.profile }}
+      VERSION: ${{ needs.build.outputs.version }}
+      NOTES: ${{ inputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # surum etiketleri
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-${{ inputs.profile }}-${{ needs.build.outputs.version }}
+          path: out
+
+      # Anahtar ve bulut adresi pakete gomulen profilden (bundle/app-config.json) okunur.
+      - name: Yayin kosullari
+        env:
+          HAS_KEY: ${{ secrets.ADO_UPDATE_PRIVATE_KEY != '' }}
+          HAS_R2: ${{ secrets.R2_ACCOUNT_ID != '' && secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          # Etiket birlesmis bir commit'e konsun (PR'lar squash ile birlesir).
+          case "$GITHUB_REF" in
+            refs/heads/develop | refs/heads/main) ;;
+            *) fail "Yalniz develop ya da main dalindan yayinlanir ($GITHUB_REF)." ;;
+          esac
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            fail "v$VERSION zaten yayinlanmis; once surumu yukseltin."
+          fi
+          newest=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1)
+          if [ -n "$newest" ] && [ "$(printf '%s\n%s\n' "${newest#v}" "$VERSION" | sort -V | tail -n1)" != "$VERSION" ]; then
+            fail "$VERSION, son yayinlanan ${newest#v} surumunden buyuk olmali."
+          fi
+          [ "$HAS_KEY" = true ] || fail "release-$PROFILE ortaminda ADO_UPDATE_PRIVATE_KEY yok."
+          [ "$HAS_R2" = true ] || fail "release-$PROFILE ortaminda R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY eksik."
+          installer="Adisyon-POS-Setup-$VERSION.exe"
+          [ -f "out/$installer" ] || fail "out/$installer yok."
+          cfg() { node -p "const c = require('./out/app-config.json'); $1"; }
+          keys=$(cfg "c.updatePublicKeys.join(',')")
+          cloud=$(cfg c.cloudUrl)
+          [ -n "$keys" ] || fail "$PROFILE profilinde guncelleme acik anahtari yok; bu surum kendini guncelleyemez."
+          [ -n "$cloud" ] || fail "$PROFILE profilinde bulut adresi yok."
+          {
+            echo "INSTALLER=$installer"
+            echo "CLOUD_URL=$cloud"
+            echo "CHANNEL=$(cfg c.channel)"
+            echo "UPDATE_PUBLIC_KEYS=$keys"
+          } >> "$GITHUB_ENV"
+
+      # Ozel anahtar gecici dosyada kalir ve hemen silinir. Dogrulama profildeki acik anahtarla:
+      # program bu bildirimi kabul edecek mi, latest.yml ayni dosyayi mi gosteriyor?
+      - name: Bildirimi imzala ve dogrula
+        env:
+          ADO_UPDATE_PRIVATE_KEY: ${{ secrets.ADO_UPDATE_PRIVATE_KEY }}
+        run: |
+          key="$RUNNER_TEMP/ado-update-private.pem"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$ADO_UPDATE_PRIVATE_KEY" > "$key")
+          node scripts/update-manifest.mjs sign --key "$key" --installer "out/$INSTALLER" \
+            --version "$VERSION" --channel "$CHANNEL" --notes "$NOTES" --out ado-update.json
+          payload=$(node scripts/update-manifest.mjs verify --pub "$UPDATE_PUBLIC_KEYS" \
+            --manifest ado-update.json --installer "out/$INSTALLER" --latest out/latest.yml)
+          sha512=$(node -p 'JSON.parse(process.argv[1]).sha512' "$payload")
+          echo "SHA512=$sha512" >> "$GITHUB_ENV"
+
+      # Sira onemli: bildirim, dosyasi hazir olmayan bir surumu gostermesin (UPDATE_SYSTEM.md §4).
+      # Depo adlari apps/cloud/wrangler.jsonc ile ayni. R2 anahtari yalniz bu depoya yazabilir.
+      - name: R2'ye yukle
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          bucket=ado-updates
+          if [ "$PROFILE" = test ]; then bucket=ado-updates-test; fi
+          put() {
+            aws s3 cp "$1" "s3://$bucket/$CHANNEL/$(basename "$1")" \
+              --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          }
+          put "out/$INSTALLER"
+          put out/latest.yml
+          put ado-update.json
+
+      - name: Bulut dosyalari sunuyor mu
+        run: |
+          base="$CLOUD_URL/updates/$CHANNEL"
+          curl -fsS "$base/ado-update.json" -o served.json
+          cmp served.json ado-update.json
+          curl -fsS "$base/latest.yml" -o served.yml
+          cmp served.yml out/latest.yml
+          total=$(curl -fsS -r 0-0 -D - -o /dev/null "$base/$INSTALLER" | tr -d '\r' \
+            | awk 'tolower($1) == "content-range:" { split($3, a, "/"); print a[2] }')
+          [ "$total" = "$(stat -c %s "out/$INSTALLER")" ] \
+            || { echo "::error::Kurulum dosyasi buluttan sunulmuyor ($base/$INSTALLER)."; exit 1; }
+
+      - name: GitHub surumu
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Adisyon POS $VERSION — $PROFILE profili, $CHANNEL kanali."
+            if [ -n "$NOTES" ]; then printf '\n%s\n' "$NOTES"; fi
+            printf '\nKurulum dosyasinin SHA-512 ozeti:\n\n    %s\n' "$SHA512"
+          } > release-notes.md
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Adisyon POS $VERSION" --notes-file release-notes.md \
+            "out/$INSTALLER" out/latest.yml ado-update.json
+          {
+            echo "### Yayinlandi: Adisyon POS $VERSION ($PROFILE)"
+            echo
+            echo "- Guncelleme adresi: $CLOUD_URL/updates/$CHANNEL/"
+            echo "- GitHub surumu: v$VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -81,11 +81,54 @@ node scripts/update-manifest.mjs gen-key --out ~/ado-guncelleme-anahtari   # rep
 node scripts/update-manifest.mjs sign --key ~/ado-guncelleme-anahtari/ado-update-private.pem \
   --installer apps/desktop/dist/Adisyon-POS-Setup-0.3.1.exe --version 0.3.1 --channel stable \
   --notes "Düzeltmeler" --out ado-update.json
-node scripts/update-manifest.mjs verify --pub <açık anahtar> --manifest ado-update.json \
-  --installer apps/desktop/dist/Adisyon-POS-Setup-0.3.1.exe
+node scripts/update-manifest.mjs verify --pub <açık anahtar[,eski anahtar]> --manifest ado-update.json \
+  --installer apps/desktop/dist/Adisyon-POS-Setup-0.3.1.exe --latest apps/desktop/dist/latest.yml
 ```
 
-## 6. Sınırlar ve sonraya kalanlar
+Yayında bu adımları release iş akışı yapar (§6); elle imzalama yalnız acil durum içindir.
+
+## 6. Sürüm yayınlama (`.github/workflows/release.yml`)
+
+**Bir kez kurulur** (her profil için; şimdilik yalnız `test`):
+
+1. Güncelleme anahtarı: `node scripts/update-manifest.mjs gen-key --out <repo dışı klasör>`. Açık
+   anahtar `apps/desktop/profiles/<profil>.json` › `updatePublicKey`'e (PR ile), özel anahtar parola
+   yöneticisine ve aşağıdaki secret'a.
+2. Cloudflare: R2 deposu (`ado-updates-test` / `ado-updates`) ve **yalnız o depoya** "Object Read &
+   Write" yetkili bir R2 API anahtarı (R2 › Manage API tokens). Worker'ın `UPDATES` bağlantısı
+   `wrangler.jsonc`'te hazır; yayına alma `apps/cloud/README.md`.
+3. GitHub › Settings › Environments › `release-<profil>`: **Required reviewers** (yayını onaylayacak
+   kişi) ve şu secret'lar:
+
+   | Secret | Değer |
+   |---|---|
+   | `ADO_UPDATE_PRIVATE_KEY` | `ado-update-private.pem` dosyasının içeriği |
+   | `R2_ACCOUNT_ID` | Cloudflare hesap kimliği |
+   | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | 2. adımdaki R2 API anahtarı |
+
+**Her sürümde:**
+
+1. Sürüm numarası yükseltilir (kök, backend, desktop, frontend, shared `package.json`) ve
+   `CHANGELOG.md`'ye yazılır; PR birleşir.
+2. GitHub › Actions › **Release** › Run workflow: dal (`develop` ya da `main`; başka dal yalnız
+   derlenir), profil, **Yayınla** ve programda görünecek not.
+3. **Derleme** (onaysız, Windows): paket, ardından paketli programın açılış denemesi (backend sağlık
+   denetimini geçmeli). Kurulum dosyası çalışmanın "Artifacts" bölümünden indirilip denenebilir.
+   **Yayınla** seçilmezse burada biter.
+4. **Yayın**, ortam onayından sonra yapılır. Sırasıyla:
+   - Koşullar denetlenir: dal; sürüm daha önce yayınlanmamış ve son `v*` etiketinden büyük; secret'lar
+     ve profildeki anahtar var.
+   - Bildirim imzalanır. Profildeki açık anahtarla doğrulanır, `latest.yml` ile karşılaştırılır
+     (`verify --latest`).
+   - R2'ye yüklenir: kurulum dosyası, `latest.yml`, en son bildirim.
+   - Üç dosyanın buluttan aynen sunulduğu denetlenir.
+   - `v<sürüm>` etiketiyle GitHub sürümü oluşturulur.
+
+Bir sürüm numarası bir kez yayınlanır; düzeltme için yeni sürüm çıkarılır. Yayın yarıda kalırsa
+(ör. bulut denetimi) etiket oluşmaz; sorun giderilince "Re-run failed jobs" aynı derlemeyi yeniden
+dener. Program bildirimi bulduğunda Ayarlar › Güncelleme kartı yönetici onayını bekler (§3).
+
+## 7. Sınırlar ve sonraya kalanlar
 
 - **Kod imzalama sertifikası yok:** Windows SmartScreen ilk kurulumda uyarır. Güncelleme güvenliği
   Ed25519 imzası ve SHA-512 özetine dayanır (electron-updater'ın Authenticode denetimi sertifika
@@ -94,5 +137,6 @@ node scripts/update-manifest.mjs verify --pub <açık anahtar> --manifest ado-up
   vardır; önceki sürüm elle yeniden kurulup yedek geri yüklenebilir.
 - **Beta kanalı:** derleme profilinde `channel: "beta"` ile ayrı bir derleme gerekir; kullanıcı arayüzünde
   kanal seçimi yok.
-- Release iş akışı (Windows derleme → imzala → R2'ye yükle → GitHub release): `.github/workflows`
-  (0.3.0 adımı).
+- **Canlı ortam (`prod`):** profilde bulut adresi ve anahtarlar boş; `release-prod` ortamı ve
+  `ado-updates` deposu canlı buluta geçişte kurulur. Aynı sürümü iki profille yayınlamak gerekirse
+  etiket kuralı o zaman gözden geçirilir.

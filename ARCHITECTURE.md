@@ -86,7 +86,8 @@ Backend, Electron kabuğundan **bağımsız bir süreçtir**. Kabuk yalnızca bi
   `apps/desktop/backend-process.mjs`, `apps/desktop/migrations.mjs`.
 - **Otomatik güncelleme:** kabuk imzalı bildirimi (`ado-update.json`, Ed25519) bulut Worker'ından
   denetler, dosyayı indirip SHA-512 özetini doğrular; kurulum yalnız yönetici onayıyla (backend
-  `/updates/approve` → IPC). Detay: `UPDATE_SYSTEM.md`.
+  `/updates/approve` → IPC). Sürümler `.github/workflows/release.yml` ile çıkar: Windows'ta derleme
+  ve açılış denemesi, onaylı ortamda imzalama ve R2'ye yükleme. Detay: `UPDATE_SYSTEM.md`.
 - Kabuğu değiştirmek (ör. Tauri) veya mobil uygulama eklemek backend'i **hiç değiştirmeden** mümkündür.
 
 Detay: `SYSTEM_ANALYSIS.md` §3.

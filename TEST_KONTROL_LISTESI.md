@@ -203,7 +203,17 @@ değişiklik internet gelince kendiliğinden yayınlanır. Kapatınca kart "Bu Q
 yeniden açınca aynı kart yine çalışır. Telefonda eski panel uygulaması varsa internetteyken açılınca
 "İşletme paneli kaldırıldı" yazar.
 
-## 16. (Deneme sürümü yayınlanınca) Otomatik güncelleme
+## 16. (0.3.0) Eski sürümün üzerine kurulum
+
+**Yap:** 0.2.0 kurulu ve içinde gerçek veri (ürünler, masalar, geçmiş adisyonlar) olan bilgisayarda,
+gün sonundan sonra GitHub › Releases'tan indirilen `Adisyon-POS-Setup-0.3.0.exe`'yi çalıştırın.
+Program açılınca yönetici olarak girin; **Ayarlar › Lisans**'a deneme lisansını girin, **Ayarlar ›
+QR Menü › QR menüyü aç** deyin ve masa QR kartlarını yeniden basın (15. adım).
+
+**Beklenen:** Kurulum veriyi sormadan korur: ürünler, masalar, kullanıcılar ve geçmiş raporlar
+yerindedir. **Ayarlar › Güncelleme** kartında "Sürüm 0.3.0" yazar. QR menü telefonda açılır.
+
+## 17. (Deneme sürümü yayınlanınca) Otomatik güncelleme
 
 **Yap:** Bir önceki sürüm kurulu bilgisayarda yeni sürüm yayınlandıktan sonra **Ayarlar › Güncelleme ›
 Şimdi kontrol et** deyin, indirmenin bitmesini bekleyin. Açık bir adisyon varken ve kasa açıkken

@@ -50,7 +50,9 @@
         { "binding": "UPDATES", "bucket_name": "ado-updates-test" },
       ],
       // Deneme lisans anahtari (apps/desktop/profiles/test.json ile ayni). vars miras alinmaz.
-      "vars": { "LICENSE_PUBLIC_KEY": "" },
+      "vars": {
+        "LICENSE_PUBLIC_KEY": "MCowBQYDK2VwAyEA5fXSEb/+WD7PDwKzqFkKm5L6Ecv/tG/Vw9sPRoCui9E=",
+      },
       // Gizli: `wrangler secret put ADMIN_TOKEN --env test` (canli ortamdan farkli bir deger).
     },
   },

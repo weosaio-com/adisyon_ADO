@@ -6,8 +6,12 @@
 //   node scripts/update-manifest.mjs gen-key --out <repo DISINDA klasor> [--github-env]
 //   node scripts/update-manifest.mjs sign --key <ozel.pem> --installer <Setup.exe> \
 //        --version 0.3.1 --channel stable [--notes "..."] [--out ado-update.json]
-//   node scripts/update-manifest.mjs verify --pub <base64 SPKI> --manifest <ado-update.json> \
-//        [--installer <Setup.exe>]
+//   node scripts/update-manifest.mjs verify --pub <base64 SPKI[,...]> --manifest <ado-update.json> \
+//        [--installer <Setup.exe>] [--latest <latest.yml>]
+//
+// verify --pub profildeki gibi virgulle birden cok anahtar alir; --latest electron-builder'in
+// latest.yml'inin surum, dosya ozeti ve boyutunun bildirimle ayni oldugunu denetler (program da
+// ayni capraz kontrolu yapar; yayindan once yakalanir).
 //
 // OZEL ANAHTAR ASLA REPOYA GIRMEZ: gen-key repo icindeki bir klasore yazmayi reddeder. CI'da
 // GitHub Environment secret'tan gecici dosyaya yazilir (release.yml).
@@ -77,6 +81,40 @@ export function signManifest(payload, privateKeyPem) {
   )}\n`;
 }
 
+/**
+ * electron-builder'in latest.yml'i: surum ve dosya listesi (url, sha512, size). Yalniz bu dosyanin
+ * duz bicimi okunur; YAML kutuphanesi gerekmez.
+ */
+export function parseLatestYml(text) {
+  const unquote = (value) => value.trim().replace(/^(['"])(.*)\1$/, '$2');
+  const result = { version: null, files: [] };
+  let entry = null;
+  for (const line of String(text).split(/\r?\n/)) {
+    let match;
+    if ((match = /^version:\s*(.+)$/.exec(line))) {
+      result.version = unquote(match[1]);
+    } else if ((match = /^\s*-\s+url:\s*(.+)$/.exec(line))) {
+      entry = { url: unquote(match[1]) };
+      result.files.push(entry);
+    } else if (entry && (match = /^\s+(sha512|size):\s*(.+)$/.exec(line))) {
+      entry[match[1]] = match[1] === 'size' ? Number(unquote(match[2])) : unquote(match[2]);
+    } else if (/^\S/.test(line)) {
+      entry = null;
+    }
+  }
+  return result;
+}
+
+/** latest.yml bildirimle ayni surumu ve dosyayi (ozet; yazilmissa boyut) gosteriyorsa true. */
+export function latestMatchesManifest(latest, payload) {
+  const file = latest.files.find((entry) => entry.url === payload.file);
+  return (
+    latest.version === payload.version &&
+    file?.sha512 === payload.sha512 &&
+    (file.size === undefined || file.size === payload.size)
+  );
+}
+
 function genKey({ out, force, 'github-env': githubEnv }) {
   if (!out) throw new Error('--out <klasor> gerekli.');
   if (isInsideRepo(out)) throw new Error('Ozel anahtar repo klasorunun icine yazilamaz.');
@@ -112,17 +150,25 @@ async function signCommand(values) {
 }
 
 async function verifyCommand(values) {
-  if (!values.pub || !values.manifest) throw new Error('--pub ve --manifest gerekli.');
-  const payload = verifyUpdateManifest(readFileSync(values.manifest, 'utf8'), [values.pub]);
-  if (!payload) {
-    console.error('Gecersiz bildirim (imza ya da bicim hatali).');
+  const keys = (values.pub ?? '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
+  if (keys.length === 0 || !values.manifest) throw new Error('--pub ve --manifest gerekli.');
+  const fail = (text) => {
+    console.error(text);
     process.exitCode = 1;
-    return;
-  }
+  };
+  const payload = verifyUpdateManifest(readFileSync(values.manifest, 'utf8'), keys);
+  if (!payload) return fail('Gecersiz bildirim (imza ya da bicim hatali).');
   if (values.installer && (await sha512File(values.installer)) !== payload.sha512) {
-    console.error('Kurulum dosyasi bildirimdeki ozetle eslesmiyor.');
-    process.exitCode = 1;
-    return;
+    return fail('Kurulum dosyasi bildirimdeki ozetle eslesmiyor.');
+  }
+  if (
+    values.latest &&
+    !latestMatchesManifest(parseLatestYml(readFileSync(values.latest, 'utf8')), payload)
+  ) {
+    return fail('latest.yml bildirimle eslesmiyor (surum, dosya adi, ozet ya da boyut).');
   }
   console.log(JSON.stringify(payload, null, 2));
 }
@@ -142,6 +188,7 @@ async function main(argv) {
       notes: { type: 'string' },
       pub: { type: 'string' },
       manifest: { type: 'string' },
+      latest: { type: 'string' },
     },
   });
   if (command === 'gen-key') return genKey(values);
