@@ -19,7 +19,9 @@
       "main.mjs",
       "rotating-log.mjs",
       "restore.mjs",
-      "app-config.mjs"
+      "app-config.mjs",
+      "migrations.mjs",
+      "backend-process.mjs"
     ],
     "extraResources": [
       {

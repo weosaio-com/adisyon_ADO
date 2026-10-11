@@ -125,6 +125,16 @@ Sürümleme: [SemVer](https://semver.org/).
     şubeyle yeniden yazıldı; eski panel adresi ve kendini silen service worker için e2e eklendi.
 
 ### Fixed
+- **Masaüstü programı (2026-10-11):**
+  - Program tek kopya çalışır: ikinci açılış aynı veritabanına ikinci bir sunucu başlatmaz, açık
+    pencereyi öne getirir.
+  - Kapanışta arka plan sunucusu artık kabaca öldürülmüyor: IPC ile `shutdown` mesajı alır, açık
+    bağlantıları (canlı akış dahil) keser ve veritabanını kapatır (en fazla 10 sn). Program çökerse
+    sunucu kendini kapatır; port ve veritabanı bir sonraki açılışa kilitli kalmaz.
+  - Veritabanı güncellemesinden önce `userData/pre-migrate`'e tutarlı kopya (`VACUUM INTO`, son 3).
+  - Hızlı yeniden başlatmada yarım kalan arka plan işleri (ör. QR menü yayını) beklemeden yeniden
+    kuyruğa alınır; kart "Yayınlanıyor…" durumunda takılı kalmaz.
+  - Pencere yerel arayüzden başka adrese gidemez; dış bağlantılar sistem tarayıcısında açılır.
 - **Para üstü (2026-09-27):** ödeme ekranında "alınan nakit" alanı yoktu; müşterinin verdiği 200 TL
   yazılınca 145 TL'lik adisyona 200 TL satış kaydediliyordu (gün sonu kasa açığı, şişik ciro).
   Artık adisyon tutarı satış, fazlası para üstü olarak kaydedilir ve ekranda gösterilir.

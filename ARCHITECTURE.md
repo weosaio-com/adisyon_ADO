@@ -78,6 +78,12 @@ Backend, Electron kabuğundan **bağımsız bir süreçtir**. Kabuk yalnızca bi
 - LAN'daki tabletler/telefonlar aynı backend'e tarayıcıdan bağlanan **ek terminallerdir**.
 - **Canlı güncelleme:** masa/sipariş olayları SSE (`GET /events/stream`) ile tüm istemcilere sinyal olarak gider; istemci ilgili sorguyu REST'ten tazeler (garson ekler → kasa görür). 30 sn emniyet polling'i vardır.
 - **Yerel HTTPS (tabletler):** Tarayıcı LAN IP'sini yalnız HTTPS ile "güvenli bağlam" sayar; Service Worker (çevrimdışı açılış) buna bağlıdır. Her kurulum kendi yerel CA'sını bir kez üretir (`<veri dizini>/tls`), tabletlere bir kez kurulur (`GET /devices/ca.crt`); sunucu sertifikası IP değişince CA değişmeden yenilenir. Paketli sürümde HTTP 43127, HTTPS 43128. Detay: `apps/backend/src/tls/tls.certs.ts`.
+- **Kabuk ve backend süreci (`apps/desktop`):** program tek kopya çalışır (ikinci açılış mevcut
+  pencereyi öne getirir). Backend IPC kanalıyla başlatılır: kapanışta `shutdown` mesajıyla düzgün
+  durdurulur (en fazla 10 sn; açık bağlantılar kesilir, veritabanı kapanır), kabuk çökerse kanal
+  kopar ve backend kendini kapatır. Veritabanı güncellemesi (migration) backend'den önce uygulanır;
+  öncesinde `userData/pre-migrate`'e tutarlı kopya alınır (en yeni 3). Detay:
+  `apps/desktop/backend-process.mjs`, `apps/desktop/migrations.mjs`.
 - Kabuğu değiştirmek (ör. Tauri) veya mobil uygulama eklemek backend'i **hiç değiştirmeden** mümkündür.
 
 Detay: `SYSTEM_ANALYSIS.md` §3.

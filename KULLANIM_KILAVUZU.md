@@ -324,6 +324,14 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 - **Son fişler**'de fiş "Yazdırılamadı" görünüyorsa altındaki hata mesajına bakın: yazıcı kapalı,
   kağıt bitmiş ya da Windows'taki adı değişmiş olabilir. Sorunu giderip **Tekrar dene** deyin.
 
+**Program ikinci kez açılmıyor.**
+- Program zaten açıktır; ikinci açılış yeni pencere açmaz, açık pencereyi öne getirir. Görev
+  çubuğundaki **Adisyon POS** simgesine bakın.
+
+**Program güncellemeden sonra açılmıyor.**
+- Program veritabanını güncellemeden önce bir kopyasını programın veri klasöründeki `pre-migrate`
+  klasörüne alır (son 3 kopya). Bu klasöre dokunmadan bize ulaşın; verileriniz oradan geri alınır.
+
 **QR menü güncellenmiyor / kartta "Son yayın başarısız" yazıyor.**
 - Ana makinenin internet bağlantısını kontrol edin. Program birkaç dakika içinde kendisi yeniden
   dener; bağlantı gelince kartta **Şimdi yayınla** diyebilirsiniz. Satış bundan etkilenmez.

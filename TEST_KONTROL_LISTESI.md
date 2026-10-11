@@ -154,8 +154,12 @@ oluşmaz.
 **Yap:** `pnpm --filter @ado/desktop dist` (deneme profili; bkz. `LICENSING.md` §5) → `apps/desktop/dist` altındaki kurulum dosyasını
 çalıştırın → ilk açılışta yönetici hesabını oluşturun → 1, 4, 5 ve 8. adımları kısaca tekrarlayın.
 
+Program açıkken masaüstü simgesine bir kez daha tıklayın. Sonra programı kapatıp hemen yeniden açın.
+
 **Beklenen:** Program açılır. Tabletler Ayarlar › Sunucu Adresi'ndeki adreslerle bağlanır
-(paketli sürümde HTTP `43127`, HTTPS `43128`).
+(paketli sürümde HTTP `43127`, HTTPS `43128`). İkinci tıklama yeni pencere açmaz, açık pencereyi
+öne getirir. Kapatıp hemen açınca "Backend başlatılamadı" hatası çıkmaz; QR menü kartı "Yayınlanıyor…"
+durumunda takılı kalmaz.
 
 ## 12. Telefondan garson siparişi
 
