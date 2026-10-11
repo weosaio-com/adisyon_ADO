@@ -10,6 +10,8 @@ import { REPO_ROOT } from './license.mjs';
 import {
   buildManifestPayload,
   generateUpdateKeyPair,
+  latestMatchesManifest,
+  parseLatestYml,
   signManifest,
   UPDATE_KEY_FILE,
 } from './update-manifest.mjs';
@@ -89,6 +91,48 @@ const pub = /Acik anahtar \(base64 SPKI\): (\S+)/.exec(cli('gen-key', '--out', k
 const out = join(dir, 'ado-update.json');
 cli('sign', '--key', join(keyDir, UPDATE_KEY_FILE), '--installer', installer, '--version', '0.3.1', '--channel', 'stable', '--out', out); // prettier-ignore
 assert.strictEqual(JSON.parse(cli('verify', '--pub', pub, '--manifest', out, '--installer', installer)).version, '0.3.1'); // prettier-ignore
+// Profildeki gibi virgullu anahtar listesi (anahtar degisimi).
+const signed = JSON.parse(cli('verify', '--pub', `${other.publicKeyB64}, ${pub}`, '--manifest', out)); // prettier-ignore
+assert.throws(() => cli('verify', '--pub', other.publicKeyB64, '--manifest', out));
+assert.throws(() => cli('verify', '--pub', ' , ', '--manifest', out), /--pub ve --manifest/);
+
+// --- latest.yml (electron-builder ciktisi) bildirimle ayni olmali ---
+const latestYml = ({ version = '0.3.1', sha512 = signed.sha512, size = signed.size } = {}) =>
+  [
+    `version: ${version}`,
+    'files:',
+    `  - url: ${signed.file}`,
+    `    sha512: ${sha512}`,
+    `    size: ${size}`,
+    `path: ${signed.file}`,
+    `sha512: ${sha512}`,
+    "releaseDate: '2026-10-11T12:00:00.000Z'",
+    '',
+  ].join('\n');
+assert.deepStrictEqual(parseLatestYml(latestYml()), {
+  version: '0.3.1',
+  files: [{ url: signed.file, sha512: signed.sha512, size: signed.size }],
+});
+// Tirnakli degerler ve Windows satir sonu da okunur.
+const quoted = latestYml().replace('version: 0.3.1', "version: '0.3.1'").replaceAll('\n', '\r\n');
+assert.ok(latestMatchesManifest(parseLatestYml(quoted), signed));
+const otherSha = Buffer.alloc(64, 7).toString('base64');
+for (const bad of [{ version: '0.3.2' }, { sha512: otherSha }, { size: signed.size + 1 }]) {
+  assert.ok(!latestMatchesManifest(parseLatestYml(latestYml(bad)), signed), JSON.stringify(bad));
+}
+assert.ok(!latestMatchesManifest(parseLatestYml('version: 0.3.1\nfiles: []\n'), signed));
+// Boyut yazilmamissa yalniz surum ve ozet karsilastirilir.
+const withoutSize = latestYml().replace(/^ {4}size: .*\n/m, '');
+assert.strictEqual(parseLatestYml(withoutSize).files[0].size, undefined);
+assert.ok(latestMatchesManifest(parseLatestYml(withoutSize), signed));
+const latestPath = join(dir, 'latest.yml');
+writeFileSync(latestPath, latestYml());
+cli('verify', '--pub', pub, '--manifest', out, '--installer', installer, '--latest', latestPath);
+writeFileSync(latestPath, latestYml({ sha512: otherSha }));
+assert.throws(
+  () => cli('verify', '--pub', pub, '--manifest', out, '--latest', latestPath),
+  /latest\.yml bildirimle/,
+);
 writeFileSync(installer, randomBytes(4096)); // dosya degisti
 assert.throws(() => cli('verify', '--pub', pub, '--manifest', out, '--installer', installer));
 assert.ok(readFileSync(out, 'utf8').includes('"format": "ADOU1"'));
