@@ -69,10 +69,12 @@ node scripts/license.mjs public-key --key ~/ado-lisans/ado-license-private.pem
 
 | Profil | Bulut adresi | Lisans açık anahtarı | Güncelleme |
 |---|---|---|---|
-| `test` | `https://ado-qr-test.weosaio.workers.dev` | deneme anahtarı (boşsa lisans girilemez) | `channel`, `updatePublicKey` (boşsa kendini güncellemez) |
+| `test` | `https://ado-qr-test.weosaio.workers.dev` | deneme anahtarı (2026-10-11; test bulutunda da `env.test` › `LICENSE_PUBLIC_KEY`) | `channel`, `updatePublicKey`: deneme güncelleme anahtarı (2026-10-11) |
 | `prod` | henüz yok | henüz yok — dolmadan derlenemez | güncelleme anahtarı dolmadan derlenemez |
 
-Güncelleme anahtarı lisans anahtarından ayrıdır; ayrıntı `UPDATE_SYSTEM.md`.
+Güncelleme anahtarı lisans anahtarından ayrıdır; ayrıntı `UPDATE_SYSTEM.md`. Deneme anahtarlarının
+özel yarıları depoda değil, satıcının parola yöneticisindedir; güncelleme özel anahtarı ayrıca
+GitHub `release-test` ortamının secret'ıdır.
 
 `node build-bundle.mjs --profile test|prod` profili doğrular ve `resources/app-config.json`'a yazar;
 `main.mjs` bunu okuyup backend'e `CLOUD_API_URL`, `ADO_LICENSE_PUBLIC_KEY`, `ADO_BUILD_PROFILE`

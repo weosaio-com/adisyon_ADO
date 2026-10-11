@@ -1,7 +1,7 @@
 {
   "profile": "test",
   "cloudUrl": "https://ado-qr-test.weosaio.workers.dev",
-  "licensePublicKey": "",
+  "licensePublicKey": "MCowBQYDK2VwAyEA5fXSEb/+WD7PDwKzqFkKm5L6Ecv/tG/Vw9sPRoCui9E=",
   "channel": "stable",
-  "updatePublicKey": ""
+  "updatePublicKey": "MCowBQYDK2VwAyEAD3OAF11Sc5U6qVNJt5xvL585rtQzzvucsPVbt4gwj4o="
 }
