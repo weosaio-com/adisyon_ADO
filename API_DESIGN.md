@@ -159,7 +159,10 @@
 - `GET/PUT /settings/business` `{ name, address?, phone? }` — fiş başlığı (şube bilgisi) (`settings.manage`, **audit**) _(uygulandı 2026-09)_
 - `GET /audit-logs?action=&entityType=&from=&to=&cursor=` — filtre/arama (Owner) · `?format=csv` export
 - `GET /license` · `POST /license/activate` `{ key }` · `POST /license/deactivate`
-- `GET /updates/check` · `POST /updates/apply` · `POST /updates/rollback`
+- `GET /updates/status` · `POST /updates/check` · `POST /updates/approve` `{ version }` — otomatik
+  güncelleme (`update.manage`; onay yalnız kasa bilgisayarından, açık adisyon/kasa yokken; önce
+  `pre_update` yedeği). Yalnız masaüstü programında çalışır; ayrıntı `UPDATE_SYSTEM.md`.
+  _(uygulandı 2026-10)_
 - `GET/POST /plugins` · `POST /plugins/:id/enable|disable` (yükleme/kaldırma **audit**)
 - `POST /backups` · `GET /backups` · `POST /backups/:id/restore` (Owner)
 - `GET /sync/status` — çevrimiçi/çevrimdışı/bekleyen kayıt sayısı (Faz 2 bulut sync; Faz 1 stub)

@@ -1,5 +1,7 @@
 {
   "profile": "prod",
   "cloudUrl": "",
-  "licensePublicKey": ""
+  "licensePublicKey": "",
+  "channel": "stable",
+  "updatePublicKey": ""
 }

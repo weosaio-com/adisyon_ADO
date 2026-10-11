@@ -111,6 +111,10 @@ jobs:
           done
           pnpm --filter @ado/backend run test:e2e
 
+      # Guncelleme onayi: backend masaustu kabugu gibi IPC ile baslatilir (kendi DB'si ve portu).
+      - name: Guncelleme onayi e2e (IPC)
+        run: pnpm --filter @ado/backend run test:e2e:updates
+
   # Tarayici seviyesi offline E2E: gercek PWA (IndexedDB outbox + SW + reconnect drain).
   e2e-web:
     runs-on: ubuntu-latest

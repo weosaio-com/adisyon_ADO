@@ -8,6 +8,8 @@ import { applyPendingRestore, ensureSecrets } from './restore.mjs';
 import { appConfigEnv, loadAppConfig } from './app-config.mjs';
 import { applyMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
+import updaterPackage from 'electron-updater';
+import { createUpdater } from './updater.mjs';
 
 // Paketli uygulama dev sunucusuna (3001) yanlislikla baglanmasin.
 const PORT = process.env.API_PORT || (app.isPackaged ? '43127' : '3001');
@@ -15,6 +17,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let backend = null;
 let writeLog = () => {};
 let mainWindow = null;
+let appConfig = null;
+let updater = null;
 
 const isUp = () =>
   fetch(`${BASE}/api/v1/health`)
@@ -49,6 +53,7 @@ function packagedEnv() {
   }
   const { config, errors } = loadAppConfig(join(process.resourcesPath, 'app-config.json'));
   for (const error of errors) log(`[app-config] ${error}`);
+  appConfig = config;
   return {
     NODE_ENV: 'production',
     DATABASE_URL: 'file:' + dbPath.replaceAll('\\', '/'),
@@ -75,6 +80,51 @@ function startBackend() {
     onOutput: writeLog,
   });
   backend.once('exit', (code, signal) => log(`backend kapandi (kod ${code}, sinyal ${signal})`));
+  backend.on('message', onBackendMessage);
+}
+
+const sendToBackend = (message) => {
+  if (backend?.connected) backend.send(message);
+};
+
+// Backend'den gelen komutlar (Ayarlar > Guncelleme): denetle, onaylanan surumu kur.
+function onBackendMessage(message) {
+  if (!updater || !message || typeof message !== 'object') return;
+  if (message.type === 'update-check') void updater.check();
+  if (message.type === 'update-install' && typeof message.version === 'string') {
+    void updater.install(message.version, prepareInstall);
+  }
+}
+
+const UPDATING_PAGE = `<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Güncelleniyor</title></head>
+<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a">
+<div style="text-align:center;max-width:420px;padding:24px"><h1 style="font-size:22px">Program güncelleniyor</h1>
+<p>Birkaç dakika içinde kendiliğinden yeniden açılacak. Bilgisayarı kapatmayın.</p></div></body></html>`;
+
+// Kurulumdan once: pencerede bilgi sayfasi, backend duzgun kapanir (veritabani kapali olmali).
+async function prepareInstall() {
+  log('guncelleme kuruluyor');
+  await mainWindow
+    ?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(UPDATING_PAGE)}`)
+    .catch(() => {});
+  if (backend) {
+    log(`backend durduruldu: ${await stopBackendProcess(backend)}`);
+    backend = null;
+  }
+}
+
+// Paketli surumde guncelleyici: durum backend'e iletilir (kart), denetim kendiliginden.
+function startUpdater() {
+  if (!app.isPackaged || !appConfig) return;
+  updater = createUpdater({
+    currentVersion: app.getVersion(),
+    config: appConfig,
+    log,
+    onStatus: (status) => sendToBackend({ type: 'update-status', ...status }),
+    autoUpdater: updaterPackage.autoUpdater,
+  });
+  sendToBackend({ type: 'update-status', ...updater.status() });
+  updater.start();
 }
 
 async function waitUp(timeoutMs) {
@@ -128,6 +178,7 @@ async function start() {
       }
     }
     await openWindow();
+    startUpdater();
   } catch (err) {
     // Sessiz cikis olmasin: hatayi goster, sonra kapan.
     dialog.showErrorBox('Uygulama başlatılamadı', String(err && err.stack ? err.stack : err));
@@ -151,6 +202,7 @@ if (!app.requestSingleInstanceLock()) {
   // kapanir. Sonra cikis tamamlanir.
   let stopping = false;
   app.on('before-quit', (event) => {
+    updater?.stop();
     if (!backend || stopping) return;
     event.preventDefault();
     stopping = true;

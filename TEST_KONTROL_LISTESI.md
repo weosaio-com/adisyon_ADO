@@ -202,3 +202,15 @@ adı değiştirin, sonra interneti açın. En sonda **QR menüyü kapat** deyin.
 değişiklik internet gelince kendiliğinden yayınlanır. Kapatınca kart "Bu QR kod geçersiz" gösterir;
 yeniden açınca aynı kart yine çalışır. Telefonda eski panel uygulaması varsa internetteyken açılınca
 "İşletme paneli kaldırıldı" yazar.
+
+## 16. (Deneme sürümü yayınlanınca) Otomatik güncelleme
+
+**Yap:** Bir önceki sürüm kurulu bilgisayarda yeni sürüm yayınlandıktan sonra **Ayarlar › Güncelleme ›
+Şimdi kontrol et** deyin, indirmenin bitmesini bekleyin. Açık bir adisyon varken ve kasa açıkken
+**Güncellemeyi kur**'a bakın; aynı kartı bir tabletten açın. Sonra adisyonu kapatıp gün sonu yapın
+ve kasa bilgisayarından **Güncellemeyi kur** deyin.
+
+**Beklenen:** Kart "Yeni sürüm … kurulmaya hazır" der. Açık adisyon/kasa ve tablet için engel yazar,
+düğme pasiftir. Onaydan sonra "Program güncelleniyor" sayfası çıkar; program kapanır ve birkaç
+dakika içinde yeni sürümle kendiliğinden açılır. Veriler yerindedir; **Ayarlar › Yedekler**'de
+güncelleme öncesi yedek görünür; kartta "Son kurulum: … kuruldu" yazar.

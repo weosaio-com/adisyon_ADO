@@ -24,6 +24,10 @@ import {
 } from './app-config.mjs';
 import { applyMigrations, backupBeforeMigrate, pendingMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
+import { createUpdater } from './updater.mjs';
+import { generateUpdateKeyPair, signManifest } from '../../scripts/update-manifest.mjs';
+import { createServer } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 
 const tempDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 
@@ -139,15 +143,25 @@ const restoreFixture = (marker) => {
   assert.strictEqual(cloudOrigin('https://ornek.workers.dev/panel'), null, 'yol olmamali');
   assert.strictEqual(cloudOrigin('adres'), null);
 
+  const pub2 = generateKeyPairSync('ed25519')
+    .publicKey.export({ format: 'der', type: 'spki' })
+    .toString('base64');
   const ok = validateAppConfig(
-    { profile: 'prod', cloudUrl: 'https://menu.ornek.com/', licensePublicKey: pub },
+    {
+      profile: 'prod',
+      cloudUrl: 'https://menu.ornek.com/',
+      licensePublicKey: pub,
+      updatePublicKey: `${pub}, ${pub2}`,
+    },
     { strict: true },
   );
-  assert.deepStrictEqual(ok.errors, []);
+  assert.deepStrictEqual(ok.errors, [], 'uretim profili: lisans ve guncelleme anahtari var');
   assert.deepStrictEqual(ok.config, {
     profile: 'prod',
     cloudUrl: 'https://menu.ornek.com',
     licensePublicKey: pub,
+    channel: 'stable',
+    updatePublicKeys: [pub, pub2],
   });
   assert.deepStrictEqual(appConfigEnv(ok.config), {
     CLOUD_API_URL: 'https://menu.ornek.com',
@@ -155,8 +169,24 @@ const restoreFixture = (marker) => {
     ADO_BUILD_PROFILE: 'prod',
   });
 
-  // Derlemede (strict) uretim profili lisans anahtari ve adres olmadan gecmez.
-  assert.ok(validateAppConfig({ profile: 'prod' }, { strict: true }).errors.length >= 2);
+  // Derlemede (strict) uretim profili lisans/guncelleme anahtari ve adres olmadan gecmez.
+  assert.ok(validateAppConfig({ profile: 'prod' }, { strict: true }).errors.length >= 3);
+  const badUpdate = validateAppConfig({
+    profile: 'test',
+    channel: 'nightly',
+    updatePublicKey: rsa,
+  });
+  assert.deepStrictEqual(badUpdate.config.channel, 'stable', 'gecersiz kanal: stable');
+  assert.deepStrictEqual(
+    badUpdate.config.updatePublicKeys,
+    [],
+    'gecersiz anahtar: guncelleme kapali',
+  );
+  assert.strictEqual(badUpdate.errors.length, 2);
+  assert.strictEqual(
+    validateAppConfig({ profile: 'test', channel: 'beta' }).config.channel,
+    'beta',
+  );
   // Calisirken (lenient) hatali alan bos kalir, digerleri kullanilir.
   const lenient = validateAppConfig({
     profile: 'test',
@@ -164,7 +194,13 @@ const restoreFixture = (marker) => {
     licensePublicKey: pub,
   });
   assert.strictEqual(lenient.errors.length, 1);
-  assert.deepStrictEqual(lenient.config, { profile: 'test', cloudUrl: '', licensePublicKey: pub });
+  assert.deepStrictEqual(lenient.config, {
+    profile: 'test',
+    cloudUrl: '',
+    licensePublicKey: pub,
+    channel: 'stable',
+    updatePublicKeys: [],
+  });
 
   // Eksik dosya acilisi durdurmaz: her sey kapali.
   const missing = loadAppConfig(join(tempDir('ado-cfg-'), 'yok.json'));
@@ -285,6 +321,133 @@ const restoreFixture = (marker) => {
   await new Promise((resolve) => gone.once('exit', resolve));
   assert.strictEqual(await stopBackendProcess(gone), 'exited');
   assert.strictEqual(await stopBackendProcess(null), 'exited');
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// --- Guncelleyici: imzali bildirim, latest.yml ve indirilen dosya imzali ozetle eslesmeli ---
+{
+  const dir = tempDir('ado-updater-');
+  const key = generateUpdateKeyPair();
+  const installer = randomBytes(2048);
+  const sha512 = createHash('sha512').update(installer).digest('base64');
+  const file = 'Adisyon-POS-Setup-0.3.1.exe';
+  const payload = {
+    version: '0.3.1',
+    channel: 'stable',
+    file,
+    sha512,
+    size: installer.length,
+    releaseDate: '2026-10-11T12:00:00.000Z',
+    notes: 'Duzeltmeler',
+  };
+  const served = { manifest: signManifest(payload, key.privateKeyPem) };
+  const server = createServer((req, res) => {
+    if (req.url === '/updates/stable/ado-update.json' && served.manifest) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(served.manifest);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const cloudUrl = `http://127.0.0.1:${server.address().port}`;
+
+  // electron-updater sahtesi: latest.yml bilgisi ve indirme ayarlanabilir.
+  const fakeUpdater = (latest = { version: '0.3.1', sha512 }, bytes = installer) => {
+    const listeners = {};
+    const calls = { feed: null, installed: null, downloaded: null };
+    return {
+      calls,
+      on: (event, fn) => (listeners[event] = fn),
+      setFeedURL: (options) => (calls.feed = options),
+      checkForUpdates: async () => ({
+        updateInfo: { version: latest.version, files: [{ url: file, sha512: latest.sha512 }] },
+      }),
+      downloadUpdate: async () => {
+        listeners['download-progress']?.({ percent: 50 });
+        const path = join(dir, `${Math.random().toString(36).slice(2)}-${file}`);
+        writeFileSync(path, bytes);
+        calls.downloaded = path;
+        return [path];
+      },
+      quitAndInstall: (...args) => (calls.installed = args),
+    };
+  };
+  const config = { cloudUrl, channel: 'stable', updatePublicKeys: [key.publicKeyB64] };
+  const make = (overrides = {}) => {
+    const states = [];
+    const autoUpdater = overrides.autoUpdater ?? fakeUpdater();
+    const updater = createUpdater({
+      currentVersion: overrides.currentVersion ?? '0.3.0',
+      config: { ...config, ...overrides.config },
+      log: () => {},
+      onStatus: (status) => states.push(status.state),
+      autoUpdater,
+    });
+    return { updater, autoUpdater, states };
+  };
+
+  const disabled = make({ config: { updatePublicKeys: [] } });
+  assert.strictEqual((await disabled.updater.check()).state, 'disabled', 'anahtarsiz: kapali');
+
+  const fresh = make();
+  const ready = await fresh.updater.check();
+  assert.strictEqual(ready.state, 'ready', ready.error ?? 'hazir olmali');
+  assert.strictEqual(ready.version, '0.3.1');
+  assert.deepStrictEqual(fresh.states, ['checking', 'downloading', 'downloading', 'ready']);
+  assert.strictEqual(fresh.autoUpdater.calls.feed.url, `${cloudUrl}/updates/stable`);
+  assert.strictEqual(fresh.autoUpdater.autoDownload, false, 'kendiliginden indirme yok');
+  assert.strictEqual(fresh.autoUpdater.autoInstallOnAppQuit, false, 'kapanista kurulum yok');
+  assert.strictEqual(await fresh.updater.install('0.3.2', async () => {}), false, 'baska surum');
+  let prepared = false;
+  assert.strictEqual(
+    await fresh.updater.install('0.3.1', async () => {
+      prepared = true;
+    }),
+    true,
+  );
+  assert.ok(prepared, 'kurulumdan once hazirlik (backend kapanisi) beklenir');
+  assert.deepStrictEqual(fresh.autoUpdater.calls.installed, [true, true], 'sessiz kur, yeniden ac');
+
+  const current = make({ currentVersion: '0.3.1' });
+  assert.strictEqual((await current.updater.check()).state, 'idle', 'ayni surum: guncel');
+
+  const mismatch = make({
+    autoUpdater: fakeUpdater({ version: '0.3.1', sha512: 'A'.repeat(86) + '==' }),
+  });
+  const m = await mismatch.updater.check();
+  assert.strictEqual(m.state, 'error');
+  assert.match(m.error, /eşleşmiyor/, 'latest.yml imzali ozetle eslesmeli');
+
+  const corrupt = make({ autoUpdater: fakeUpdater(undefined, randomBytes(2048)) });
+  const c = await corrupt.updater.check();
+  assert.strictEqual(c.state, 'error');
+  assert.match(c.error, /İndirilen dosya/, 'indirilen dosya imzali ozetle eslesmeli');
+  assert.strictEqual(await corrupt.updater.install('0.3.1', async () => {}), false);
+
+  // Hazir dosya diskte degisirse kurulmaz.
+  const tamper = make();
+  await tamper.updater.check();
+  const downloaded = tamper.autoUpdater.calls.downloaded;
+  writeFileSync(downloaded, randomBytes(2048));
+  assert.strictEqual(await tamper.updater.install('0.3.1', async () => {}), false, 'degisen dosya');
+  assert.strictEqual(tamper.updater.status().state, 'error');
+  assert.strictEqual(tamper.autoUpdater.calls.installed, null);
+
+  // Imzasi bozuk bildirim ve bildirim yok.
+  const envelope = JSON.parse(served.manifest);
+  served.manifest = JSON.stringify({
+    ...envelope,
+    signature: envelope.signature.replace(/^./, (ch) => (ch === 'A' ? 'B' : 'A')),
+  });
+  const forged = await make().updater.check();
+  assert.strictEqual(forged.state, 'error');
+  assert.match(forged.error, /imzası geçersiz/);
+  served.manifest = null;
+  assert.strictEqual((await make().updater.check()).state, 'idle', 'yayin yok: guncel');
+
+  await new Promise((resolve) => server.close(resolve));
   rmSync(dir, { recursive: true, force: true });
 }
 

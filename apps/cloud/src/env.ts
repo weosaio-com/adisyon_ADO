@@ -3,6 +3,8 @@ import type { BranchRow, TenantRow } from './lib/db';
 export interface Env {
   DB: D1Database;
   IMAGES: R2Bucket;
+  /** Program guncellemeleri (kurulum dosyasi, latest.yml, imzali ado-update.json). */
+  UPDATES?: R2Bucket;
   ASSETS: Fetcher;
   /** Satici (vendor) API anahtari. Tanimli degilse /api/admin kapalidir. */
   ADMIN_TOKEN?: string;

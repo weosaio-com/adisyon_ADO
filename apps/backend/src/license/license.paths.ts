@@ -5,8 +5,9 @@ import { API_PREFIX } from '../common/http/api-prefix';
 //   - /auth/*    -> giris yapip lisansi yenileyebilmeli
 //   - /license/* -> yeni anahtari girebilmeli
 //   - /backups/* -> verisini disari alabilmeli (rehin tutma yok)
+//   - /updates/* -> hata duzelten surumu kurabilmeli
 //   - /health    -> saglik kontrolu
-const ALWAYS_ALLOWED = ['/auth', '/license', '/backups', '/health'];
+const ALWAYS_ALLOWED = ['/auth', '/license', '/backups', '/updates', '/health'];
 
 /**
  * Istek yolu (req.path, global onek DAHIL gelir: /api/v1/...) izin listesinde mi.
@@ -25,6 +26,7 @@ if (require.main === module) {
   assert.ok(isAlwaysAllowed('/api/v1/backups'), 'yedek al');
   assert.ok(isAlwaysAllowed('/api/v1/backups/01ABC/restore'), 'yedek geri yukle');
   assert.ok(isAlwaysAllowed('/api/v1/health'), 'saglik');
+  assert.ok(isAlwaysAllowed('/api/v1/updates/approve'), 'guncelleme onayi');
   assert.ok(isAlwaysAllowed('/license/activate'), 'oneksiz yol da desteklenir');
 
   assert.ok(!isAlwaysAllowed('/api/v1/orders'), 'satis engellenir');

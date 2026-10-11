@@ -6,6 +6,20 @@ Sürümleme: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Otomatik güncelleme (2026-10-11):** program yeni sürümü kendisi denetler ve indirir; kurulum
+  yalnız yönetici onayıyla. Bkz. `UPDATE_SYSTEM.md`.
+  - **Masaüstü:** electron-updater 6.8.9 (sabit sürüm); önce Ed25519 imzalı `ado-update.json`
+    doğrulanır, `latest.yml` ve indirilen dosya imzalı SHA-512 ile eşleşmeli; açılıştan 2 dk sonra ve
+    6 saatte bir denetim; derleme profilinde `channel` ve `updatePublicKey`; kurulum dosyası
+    `Adisyon-POS-Setup-<sürüm>.exe`.
+  - **Backend:** `GET /updates/status`, `POST /updates/check`, `POST /updates/approve` (`update.manage`,
+    kasa bilgisayarı, açık adisyon/kasa yok; önce `pre_update` yedeği, `UpdateHistory` ve denetim
+    kaydı); yeni sürüm açılınca kayıt "kuruldu"/"kurulamadı".
+  - **Program:** Ayarlar › Güncelleme kartı (durum, indirme yüzdesi, engeller, **Güncellemeyi kur**).
+  - **Bulut:** `/updates/<kanal>/<dosya>` R2 `UPDATES` deposundan (bildirim önbelleksiz, kurulum
+    dosyası süresiz, tek aralık desteği).
+  - **Araç:** `scripts/update-manifest.mjs` (gen-key/sign/verify) ve self-check'leri; IPC ile gerçek
+    backend'e karşı onay e2e'si (`test:e2e:updates`, CI e2e işi).
 - **QR menü lisansla açılır (2026-10-10):** programda **Ayarlar › QR Menü › QR menüyü aç** tek tık;
   bulut adresi programa gömülü (derleme profili), adres ve eşleştirme kodu girilmez.
   - **Lisans:** lisans kimliği (`id`), satıcı imza aracı `scripts/license.mjs`

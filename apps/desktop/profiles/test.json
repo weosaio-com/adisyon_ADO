@@ -1,5 +1,7 @@
 {
   "profile": "test",
   "cloudUrl": "https://ado-qr-test.weosaio.workers.dev",
-  "licensePublicKey": ""
+  "licensePublicKey": "",
+  "channel": "stable",
+  "updatePublicKey": ""
 }
