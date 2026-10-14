@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { heartbeatRequestSchema, INSTALL_ID_PATTERN } from '@ado/shared/cloud-api';
 import {
   MENU_LIMITS,
   menuImageKeySchema,
@@ -11,26 +12,35 @@ import { randomToken, sha256Hex } from '../lib/crypto';
 import { menuMeta, type BranchRow, type TenantRow } from '../lib/db';
 import { ApiError, nowIso, ok, readJson } from '../lib/http';
 import { requireUsableLicense } from '../lib/license';
-import { appVersion, POS_TOKEN_PREFIX, posAuth, requireActive } from '../lib/pos-auth';
-import { missingImages, readImageBody, saveMenu, storeImage, syncTables } from '../lib/menu-store';
 import {
-  licenseFeatureOverrides,
-  planFromLicense,
-  PLANS,
-  tenantFeatures,
-  type PlanId,
-} from '../lib/plans';
+  appVersion,
+  POS_TOKEN_PREFIX,
+  posAuth,
+  requireActive,
+  validAppVersion,
+} from '../lib/pos-auth';
+import { missingImages, readImageBody, saveMenu, storeImage, syncTables } from '../lib/menu-store';
+import { PLANS, tenantFeatures, type PlanId } from '../lib/plans';
 import { limit } from '../lib/rate-limit';
+import {
+  applyLicenseToTenant,
+  findLicense,
+  isRevoked,
+  licenseRevokedError,
+  pendingUpdate,
+  remoteState,
+  tenantFieldsFromLicense,
+  upsertLicense,
+} from '../lib/registry';
 
 /**
- * POS (yerel adisyon sunucusu) API'si. POS imzali lisansiyla buluta kendisi baglanir (/activate),
- * sonra Bearer belirteciyle menu, masa ve gorsel yayinlar. Subenin menusunu yalniz POS yonetir.
- * Tasarim: QR_MENU_DESIGN.md, LICENSING.md.
+ * POS (yerel adisyon sunucusu) API'si. Lisansli her kurulum buluta imzali lisansiyla kendiliginden
+ * baglanir (/activate; QR menu sart degil), saatte bir heartbeat gonderir (son gorulme, surum,
+ * saglik; yanitta uzak lisans durumu ve varsa yeni lisans). QR menu acikken Bearer belirteciyle menu,
+ * masa ve gorsel yayinlar. Subenin menusunu yalniz POS yonetir. Tasarim: QR_MENU_DESIGN.md,
+ * LICENSING.md.
  */
 export const posRoutes = new Hono<AppEnv>();
-
-// POS'taki ado-install.json kimligi (apps/backend/src/common/util/install-id.ts ile ayni desen).
-const INSTALL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/;
 
 function posInfo(branch: BranchRow, tenant: TenantRow) {
   return {
@@ -65,13 +75,29 @@ posRoutes.post('/activate', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
   await limit(c.env.DB, [`activate:ip:${ip}`], 10, 15 * 60);
   const body = await readJson(c, activateSchema);
-  const { payload, expiresAt } = await requireUsableLicense(c.env, body.licenseKey);
+  // QR menu sart degil; suresi dolmus ama imzali lisans da baglanir ("yalniz baglanti": menu
+  // kapali kalir, yenileme bu kuruluma heartbeat'le ulasir).
+  const license = await requireUsableLicense(c.env, body.licenseKey, {
+    requireQrMenu: false,
+    allowExpired: true,
+  });
+  const { payload } = license;
   await limit(c.env.DB, [`activate:license:${payload.id}`], 20, 60 * 60);
 
   const db = c.env.DB;
+  // Iptal edilen lisans isletme silinmis olsa da baglanamaz (kayit kalir).
+  if (isRevoked(await findLicense(db, payload.id))) throw licenseRevokedError();
   const now = nowIso();
+  // Lisans kaydi: daha yeni anahtar kayitliysa o kalir (geri gitmez).
+  const registered = await upsertLicense(
+    db,
+    { payload, licenseKey: body.licenseKey, expiresAt: license.expiresAt, source: 'activation' },
+    now,
+  );
   // Isletme lisans kimligiyle tektir: ilk etkinlestirmede acilir, sonrakilerde ad, paket,
-  // ozellikler ve bitis imzali lisanstan tazelenir (askiya alma satici kararidir, korunur).
+  // ozellikler ve bitis kayittaki gecerli lisanstan tazelenir (askiya alma satici kararidir,
+  // korunur; askidaki isletme de baglanir, yayini kapali kalir).
+  const fields = tenantFieldsFromLicense(registered);
   const tenant = await db
     .prepare(
       `INSERT INTO tenants (id, name, plan, features, status, license_id, license_expires_at,
@@ -84,21 +110,20 @@ posRoutes.post('/activate', async (c) => {
     )
     .bind(
       crypto.randomUUID(),
-      payload.c,
-      planFromLicense(payload.f),
-      JSON.stringify(licenseFeatureOverrides(payload.f)),
+      fields.name,
+      fields.plan,
+      fields.features,
       payload.id,
-      expiresAt,
+      fields.licenseExpiresAt,
       now,
     )
     .first<TenantRow>();
   if (!tenant) throw new ApiError(500, 'TENANT_UPSERT_FAILED', 'İşletme kaydedilemedi.');
-  if (tenant.status === 'suspended') {
-    throw new ApiError(
-      403,
-      'TENANT_SUSPENDED',
-      'İşletmenin QR menüsü askıya alınmış. Satıcınıza başvurun.',
-    );
+  if (registered.tenant_id !== tenant.id) {
+    await db
+      .prepare('UPDATE licenses SET tenant_id = ? WHERE id = ?')
+      .bind(tenant.id, payload.id)
+      .run();
   }
 
   const existing = await db
@@ -111,7 +136,7 @@ posRoutes.post('/activate', async (c) => {
     throw new ApiError(
       409,
       'ACTIVE_ON_OTHER_INSTALL',
-      'Bu lisansla QR menü başka bir bilgisayarda açık.',
+      'Bu lisans başka bir bilgisayarda buluta bağlı.',
       { lastSeenAt: existing.pos_last_seen_at },
     );
   }
@@ -170,6 +195,8 @@ posRoutes.post('/activate', async (c) => {
 // Belirtecle korunan uclar
 // -----------------------------------------------------------------------------
 
+// DIKKAT (Hono): `use('/yol', ...)` yalniz TAM yolu korur. Alt yollar (/menu/unpublish) ve
+// heartbeat icin posAuth uca dogrudan verilir.
 posRoutes.use('/status', posAuth);
 posRoutes.use('/license', posAuth);
 posRoutes.use('/unpair', posAuth);
@@ -177,6 +204,7 @@ posRoutes.use('/menu', posAuth, requireActive);
 posRoutes.use('/tables', posAuth, requireActive);
 posRoutes.use('/images/*', posAuth, requireActive);
 
+// Eski (0.3.0) POS'lar saatte bir bunu okur; yenileri heartbeat kullanir (404'te buna duser).
 posRoutes.get('/status', async (c) => {
   const { branch, tenant } = c.get('pos');
   const tables = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM tables WHERE branch_id = ?')
@@ -189,37 +217,77 @@ posRoutes.get('/status', async (c) => {
   });
 });
 
-// Lisans yenileme: ayni lisans kimligi, belirtec degismez. QR menusuz lisans da kabul edilir
-// (ozellik kapanir); farkli kimlik icin once kapatip yeni lisansla acmak gerekir.
+// Saatlik heartbeat: son gorulme, surum ve saglik yazilir; yanitta uzak lisans durumu (iptal >
+// askida > suresi dolmus > etkin), bulut saati ve kayitta daha yeni lisans varsa anahtarin kendisi.
+posRoutes.post('/heartbeat', posAuth, async (c) => {
+  const { branch, tenant } = c.get('pos');
+  const beat = await readJson(c, heartbeatRequestSchema);
+  const db = c.env.DB;
+  const now = nowIso();
+  await db
+    .prepare(
+      `UPDATE branches SET pos_last_seen_at = ?1, health_reported_at = ?1, health_db_bytes = ?2,
+         health_backups_bytes = ?3, health_free_disk_bytes = ?4, health_last_backup_at = ?5,
+         health_last_cloud_backup_at = ?6, health_license_exp = ?7,
+         pos_app_version = COALESCE(?8, pos_app_version)
+       WHERE id = ?9`,
+    )
+    .bind(
+      now,
+      beat.dbBytes,
+      beat.backupsBytes,
+      beat.freeDiskBytes,
+      beat.lastBackupAt,
+      beat.lastCloudBackupAt,
+      beat.licenseExp,
+      validAppVersion(beat.appVersion) ?? appVersion(c),
+      branch.id,
+    )
+    .run();
+  const registered = tenant.license_id ? await findLicense(db, tenant.license_id) : null;
+  const update = pendingUpdate(registered, beat.licenseId, beat.licenseExp);
+  return ok(c, {
+    ...posInfo(branch, tenant),
+    remote: { state: remoteState(registered, tenant), ...(update ? { update } : {}) },
+    serverTime: now,
+    menu: await menuMeta(db, branch.id),
+  });
+});
+
+// Lisans yenileme: ayni lisans kimligi, belirtec degismez. QR menusuz ve suresi dolmus lisans da
+// kabul edilir (kayit ogrenir; ozellik kapanir). Kayittaki daha yeni anahtar geri gitmez.
 posRoutes.put('/license', async (c) => {
   const { branch, tenant } = c.get('pos');
   const { licenseKey } = await readJson(
     c,
     z.object({ licenseKey: z.string().trim().min(20).max(4096) }),
   );
-  const { payload, expiresAt } = await requireUsableLicense(c.env, licenseKey, {
+  const license = await requireUsableLicense(c.env, licenseKey, {
     requireQrMenu: false,
+    allowExpired: true,
   });
-  if (payload.id !== tenant.license_id) {
+  if (license.payload.id !== tenant.license_id) {
     throw new ApiError(
       409,
       'LICENSE_ID_MISMATCH',
-      'Bu lisans bağlı işletmenin lisansı değil. QR menüyü kapatıp yeni lisansla açın.',
+      'Bu lisans bağlı işletmenin lisansı değil. Yeni lisansla yeniden bağlanın.',
     );
   }
-  const updated = await c.env.DB.prepare(
-    `UPDATE tenants SET name = ?, plan = ?, features = ?, license_expires_at = ?, updated_at = ?
-     WHERE id = ? RETURNING *`,
-  )
-    .bind(
-      payload.c,
-      planFromLicense(payload.f),
-      JSON.stringify(licenseFeatureOverrides(payload.f)),
-      expiresAt,
-      nowIso(),
-      tenant.id,
-    )
-    .first<TenantRow>();
+  const db = c.env.DB;
+  if (isRevoked(await findLicense(db, license.payload.id))) throw licenseRevokedError();
+  const now = nowIso();
+  const registered = await upsertLicense(
+    db,
+    {
+      payload: license.payload,
+      licenseKey,
+      expiresAt: license.expiresAt,
+      source: 'renewal',
+      tenantId: tenant.id,
+    },
+    now,
+  );
+  const updated = await applyLicenseToTenant(db, tenant.id, registered, now);
   return ok(c, posInfo(branch, updated ?? tenant));
 });
 
@@ -251,8 +319,22 @@ posRoutes.put('/images/:key', async (c) => {
   return ok(c, { key }, 201);
 });
 
-// "QR menuyu kapat": menu ve masalar yayindan kalkar (musteri QR'i gecersiz gorur), belirtec
-// iptal edilir, kurulum baglantisi cozulur. Yeniden acinca POS ayni masa kodlarini yayinlar.
+// "QR menuyu kapat": menu ve masalar yayindan kalkar (musteri QR'i gecersiz gorur); baglanti ve
+// belirtec KALIR (heartbeat, lisans yenilemesi, bulut yedegi surer). Yeniden acinca POS ayni masa
+// kodlarini yayinlar. Askida/iptal edilmis isletmede de calisir (yalniz siler).
+posRoutes.post('/menu/unpublish', posAuth, async (c) => {
+  const { branch } = c.get('pos');
+  const db = c.env.DB;
+  await db.batch([
+    db.prepare('DELETE FROM menus WHERE branch_id = ?').bind(branch.id),
+    db.prepare('DELETE FROM tables WHERE branch_id = ?').bind(branch.id),
+  ]);
+  return ok(c, { unpublished: true });
+});
+
+// Eski (0.3.0) "QR menuyu kapat": menu ve masalar yayindan kalkar, belirtec iptal edilir, kurulum
+// baglantisi cozulur. Yeni POS bunu yalniz eski baglantilari kapatirken (farkli lisans, adres
+// degisti) kullanir.
 posRoutes.post('/unpair', async (c) => {
   const { branch } = c.get('pos');
   const db = c.env.DB;

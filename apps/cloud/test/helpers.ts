@@ -136,6 +136,46 @@ export async function activatedBranch(payload: Record<string, unknown> = {}) {
   };
 }
 
+/** POS heartbeat govdesi (bilinmeyen deger null; alan atlanmaz). */
+export function heartbeatBody(overrides: Record<string, unknown> = {}) {
+  return {
+    appVersion: '0.4.0',
+    dbBytes: 12_345_678,
+    backupsBytes: 45_000_000,
+    freeDiskBytes: 50_000_000_000,
+    lastBackupAt: '2026-10-14T06:00:01.000Z',
+    lastCloudBackupAt: null,
+    licenseId: null,
+    licenseExp: null,
+    ...overrides,
+  };
+}
+
+export async function heartbeat(
+  token: string | undefined,
+  overrides: Record<string, unknown> = {},
+) {
+  return call('POST', '/api/pos/heartbeat', {
+    ...(token ? { token } : {}),
+    json: heartbeatBody(overrides),
+  });
+}
+
+/** Lisans kaydi satiri (0004 licenses); yoksa null. */
+export async function registryRow(id: string) {
+  return env.DB.prepare('SELECT * FROM licenses WHERE id = ?')
+    .bind(id)
+    .first<Record<string, string | number | null>>();
+}
+
+/** Satici API'siyle lisans kaydeder (PUT /api/admin/licenses). */
+export async function registerLicense(licenseKey: string, notes?: string) {
+  return call('PUT', '/api/admin/licenses', {
+    admin: true,
+    json: { licenseKey, ...(notes !== undefined ? { notes } : {}) },
+  });
+}
+
 /** Benzersiz, gecerli masa kodu (QR'daki /m/<kod>; POS uretir). */
 export function tableCode(): string {
   return encodeTableCode(crypto.getRandomValues(new Uint8Array(TABLE_CODE_BYTES)));
