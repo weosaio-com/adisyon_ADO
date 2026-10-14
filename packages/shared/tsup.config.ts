@@ -6,10 +6,11 @@ import { defineConfig } from 'tsup';
  * Backend `require` -> dist/index.cjs, frontend (Vite) `import` -> dist/index.js.
  * Ek giris noktalari ulid'i ice almaz: `@ado/shared/menu` (zod semalari; Cloudflare Worker) ve
  * `@ado/shared/menu-core` (bagimliliksiz sabitler/yardimcilar; tarayici uygulamalari) ve
- * `@ado/shared/license` (lisans anahtari bicimi; Cloudflare Worker).
+ * `@ado/shared/license` (lisans anahtari bicimi; Cloudflare Worker) ve `@ado/shared/cloud-api`
+ * (POS <-> bulut heartbeat ve yedek sozlesmesi; Cloudflare Worker).
  */
 export default defineConfig({
-  entry: ['src/index.ts', 'src/menu.ts', 'src/menu-core.ts', 'src/license.ts'],
+  entry: ['src/index.ts', 'src/menu.ts', 'src/menu-core.ts', 'src/license.ts', 'src/cloud-api.ts'],
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,

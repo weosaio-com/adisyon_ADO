@@ -36,6 +36,9 @@ import { LicenseModule } from './license/license.module';
 import { LicenseGuard } from './license/license.guard';
 import { DesktopModule } from './desktop/desktop.module';
 import { UpdatesModule } from './updates/updates.module';
+import { InstallMetricsModule } from './common/metrics/install-metrics.module';
+import { MaintenanceModule } from './maintenance/maintenance.module';
+import { CloudBackupModule } from './cloud-backup/cloud-backup.module';
 import { API_PREFIX } from './common/http/api-prefix';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -101,6 +104,9 @@ const isUnloggedRequest = (req: IncomingMessage): boolean => {
     SyncModule,
     LicenseModule,
     CloudModule,
+    InstallMetricsModule,
+    MaintenanceModule,
+    CloudBackupModule,
   ],
   providers: [
     // Sira onemli: once kimlik (req.user'i doldurur), sonra izin denetimi.

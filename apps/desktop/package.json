@@ -9,7 +9,7 @@
     "dist": "pnpm run dist:test",
     "dist:test": "node build-bundle.mjs --profile test && electron-builder --win",
     "dist:prod": "node build-bundle.mjs --profile prod && electron-builder --win",
-    "test": "node selfcheck.mjs"
+    "test": "node scripts/selfchecks.mjs"
   },
   "build": {
     "appId": "com.ado.pos",

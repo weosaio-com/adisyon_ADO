@@ -10,7 +10,8 @@ import { join, resolve } from 'node:path';
 
 const backendDir = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(backendDir, '..', '..');
-const PORT = 3021;
+// E2E_PORT_OFFSET: yerelde paralel kosularda portu kaydirir (CI'da bos = 0).
+const PORT = 3021 + Number(process.env.E2E_PORT_OFFSET || 0);
 const dataDir = mkdtempSync(join(tmpdir(), 'ado-updates-e2e-'));
 const env = {
   ...process.env,

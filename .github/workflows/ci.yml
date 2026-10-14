@@ -115,6 +115,11 @@ jobs:
       - name: Guncelleme onayi e2e (IPC)
         run: pnpm --filter @ado/backend run test:e2e:updates
 
+      # Kendi backend'ini (ve gerekirse sahte bulutunu) acan e2e'ler: test/*.spawn.e2e.mjs.
+      # Her dosyanin kendi portu ve veri dizini var (test/spawn-backend.mjs).
+      - name: Spawned e2e (kendi backend'i)
+        run: pnpm --filter @ado/backend run test:e2e:spawned
+
   # Tarayici seviyesi offline E2E: gercek PWA (IndexedDB outbox + SW + reconnect drain).
   e2e-web:
     runs-on: ubuntu-latest

@@ -58,6 +58,35 @@ export class AppConfigService {
   get cloudReconcileSeconds(): number {
     return this.env.CLOUD_RECONCILE_SECONDS;
   }
+  /** Heartbeat araligi (saniye). */
+  get cloudHeartbeatSeconds(): number {
+    return this.env.CLOUD_HEARTBEAT_SECONDS;
+  }
+  /** Bulut yedegi denetim araligi (saniye). */
+  get cloudBackupIntervalSeconds(): number {
+    return this.env.CLOUD_BACKUP_INTERVAL_SECONDS;
+  }
+  /** Bulut yedeginde parca boyu (bayt). */
+  get cloudBackupPartBytes(): number {
+    return this.env.CLOUD_BACKUP_PART_BYTES;
+  }
+  /** Lisans zorunlulugu: true/false = profil ya da ortam karari, null = ayara bakilir. */
+  get licenseEnforce(): boolean | null {
+    const value = this.env.ADO_LICENSE_ENFORCE;
+    return value === '' ? null : value === '1';
+  }
+  /** Lisanssiz kurulumun deneme suresi (gun). */
+  get trialDays(): number {
+    return this.env.ADO_TRIAL_DAYS;
+  }
+  /** Lisans bitiminden sonraki ek sure (gun; lisanstaki `g` onceliklidir). */
+  get graceDays(): number {
+    return this.env.ADO_GRACE_DAYS;
+  }
+  /** Kilit ekranindaki destek iletisimi (bos = gosterilmez). */
+  get supportContact(): string {
+    return this.env.ADO_SUPPORT_CONTACT.trim();
+  }
   /** Masaustu surumu (paketli surumde app.getVersion(); gelistirmede bos). */
   get appVersion(): string {
     return this.env.ADO_APP_VERSION.trim();

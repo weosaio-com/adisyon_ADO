@@ -8,8 +8,11 @@ model Backup {
   id        String  @id
   branchId  String  @map("branch_id")
   path      String
-  sizeBytes Int     @map("size_bytes")
-  type      String // auto | manual | pre_update
+  // BigInt: 2 GB ustu veritabaninin yedegi Int'e sigmaz (yanitta sayiya cevrilir; main.ts).
+  sizeBytes BigInt  @map("size_bytes")
+  type      String // auto | manual | pre_update | imported
+  // 1: IV + etiket + veri (eski); 2: sikistirilmis akis bicimi (baslik + veri + etiket).
+  format    Int     @default(1)
   encrypted Boolean @default(true)
   checksum  String
   createdBy String? @map("created_by")

@@ -18,6 +18,14 @@ export const LICENSE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/;
 /** QR menuyu acan ozellik bayragi. */
 export const QR_MENU_FEATURE = 'qr.menu';
 
+/** Otomatik bulut yedegi. Varsayilan ACIK: yalniz lisansta acikca `false` ise kapalidir. */
+export const CLOUD_BACKUP_FEATURE = 'cloud.backup';
+
+/** Lisans (ya da bulutun dondurdugu ozellik haritasi) bulut yedegine izin veriyor mu. */
+export function isCloudBackupEnabled(features?: Record<string, boolean> | null): boolean {
+  return features?.[CLOUD_BACKUP_FEATURE] !== false;
+}
+
 const ED25519_SIGNATURE_BYTES = 64;
 
 export const licensePayloadSchema = z.object({

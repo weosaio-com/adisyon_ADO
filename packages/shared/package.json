@@ -26,6 +26,11 @@
       "types": "./dist/license.d.ts",
       "import": "./dist/license.js",
       "require": "./dist/license.cjs"
+    },
+    "./cloud-api": {
+      "types": "./dist/cloud-api.d.ts",
+      "import": "./dist/cloud-api.js",
+      "require": "./dist/cloud-api.cjs"
     }
   },
   "files": [
@@ -34,7 +39,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsup --silent && node --experimental-strip-types src/menu.selfcheck.ts && node --experimental-strip-types src/license.selfcheck.ts"
+    "test": "tsup --silent && node --experimental-strip-types src/menu.selfcheck.ts && node --experimental-strip-types src/license.selfcheck.ts && node --experimental-strip-types src/cloud-api.selfcheck.ts"
   },
   "dependencies": {
     "ulid": "^2.3.0",

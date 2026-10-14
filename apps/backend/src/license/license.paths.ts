@@ -7,7 +7,17 @@ import { API_PREFIX } from '../common/http/api-prefix';
 //   - /backups/* -> verisini disari alabilmeli (rehin tutma yok)
 //   - /updates/* -> hata duzelten surumu kurabilmeli
 //   - /health    -> saglik kontrolu
-const ALWAYS_ALLOWED = ['/auth', '/license', '/backups', '/updates', '/health'];
+//   - /storage/* -> disk dolarsa temizlik yapabilmeli
+//   - /cloud-backups/* -> verisini buluta yedekleyip geri alabilmeli
+const ALWAYS_ALLOWED = [
+  '/auth',
+  '/license',
+  '/backups',
+  '/updates',
+  '/health',
+  '/storage',
+  '/cloud-backups',
+];
 
 /**
  * Istek yolu (req.path, global onek DAHIL gelir: /api/v1/...) izin listesinde mi.
@@ -28,6 +38,8 @@ if (require.main === module) {
   assert.ok(isAlwaysAllowed('/api/v1/health'), 'saglik');
   assert.ok(isAlwaysAllowed('/api/v1/updates/approve'), 'guncelleme onayi');
   assert.ok(isAlwaysAllowed('/license/activate'), 'oneksiz yol da desteklenir');
+  assert.ok(isAlwaysAllowed('/api/v1/storage/cleanup'), 'temizlik');
+  assert.ok(isAlwaysAllowed('/api/v1/cloud-backups/upload'), 'bulut yedegi');
 
   assert.ok(!isAlwaysAllowed('/api/v1/orders'), 'satis engellenir');
   assert.ok(!isAlwaysAllowed('/api/v1/licensex'), 'onek benzerligi eslesmez');

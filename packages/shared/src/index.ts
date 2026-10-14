@@ -9,3 +9,4 @@ export * from './id.js';
 export * from './events.js';
 export * from './menu.js';
 export * from './license.js';
+export * from './cloud-api.js';
