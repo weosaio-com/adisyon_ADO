@@ -1,36 +1,32 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, hasPerm } from '../lib/api';
 import { formatDateTime } from '../lib/format';
+import { useLicenseStatus } from '../components/LicenseBanner';
+import {
+  phaseDetails,
+  policySummary,
+  statusBadge,
+  type BadgeTone,
+} from '../components/license-notice';
 import CloudLinkStatus from './CloudLinkStatus';
 
 // --- Lisans -----------------------------------------------------------------
-// Yillik lisans durumu + anahtar girisi. `enforced=false` iken lisans HICBIR
-// SEYI ENGELLEMEZ; kart bunu acikca yazar ki kullanici panige kapilmasin.
-interface LicenseStatus {
-  enforced: boolean;
-  state: 'none' | 'active' | 'grace' | 'expired';
-  customerName: string | null;
-  plan: string | null;
-  validUntil: string | null;
-  daysLeft: number | null;
-  verifiable: boolean;
-  licenseId: string | null;
-  features: Record<string, boolean>;
-  needsReentry: boolean;
-}
-
-const LICENSE_STATE: Record<LicenseStatus['state'], { label: string; cls: string }> = {
-  none: { label: 'Lisans tanımlı değil', cls: 'bg-slate-100 text-slate-600' },
-  active: { label: 'Geçerli', cls: 'bg-green-100 text-green-700' },
-  grace: { label: 'Süresi doldu (ek süre)', cls: 'bg-amber-100 text-amber-700' },
-  expired: { label: 'Süresi doldu', cls: 'bg-red-100 text-red-700' },
+// Yillik lisans durumu + anahtar girisi. Politika (LICENSING.md §8): bitisten 14 gun once uyari,
+// sonra ek sure, ardindan yalniz YENI adisyon durur. `enforced=false` iken lisans HICBIR SEYI
+// ENGELLEMEZ; kart bunu acikca yazar ki kullanici panige kapilmasin.
+const TONE_CLASS: Record<BadgeTone, string> = {
+  neutral: 'bg-slate-100 text-slate-600',
+  info: 'bg-sky-100 text-sky-700',
+  ok: 'bg-green-100 text-green-700',
+  warning: 'bg-amber-100 text-amber-700',
+  danger: 'bg-red-100 text-red-700',
 };
 
 export default function LicenseCard({ onError }: { onError: (e: unknown) => void }) {
   const qc = useQueryClient();
   const [key, setKey] = useState('');
-  const q = useQuery({ queryKey: ['license'], queryFn: () => api<LicenseStatus>('/license') });
+  const q = useLicenseStatus();
 
   const activate = useMutation({
     mutationFn: () =>
@@ -46,14 +42,15 @@ export default function LicenseCard({ onError }: { onError: (e: unknown) => void
 
   const s = q.data;
   if (!s) return null;
-  const badge = LICENSE_STATE[s.state];
+  const badge = statusBadge(s);
   const qrMenu = s.features['qr.menu'] === true;
+  const details = phaseDetails(s);
 
   return (
     <div className="rounded-2xl bg-white p-4 shadow">
       <h2 className="mb-2 font-bold text-slate-800">Lisans</h2>
       <div className="mb-2 flex items-center gap-2">
-        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${badge.cls}`}>
+        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${TONE_CLASS[badge.tone]}`}>
           {badge.label}
         </span>
         {!s.enforced && (
@@ -80,7 +77,7 @@ export default function LicenseCard({ onError }: { onError: (e: unknown) => void
           Bitiş: {formatDateTime(s.validUntil)}
           {s.daysLeft !== null && (
             <span
-              className={s.daysLeft <= 30 ? ' font-semibold text-amber-600' : ' text-slate-400'}
+              className={s.daysLeft <= 14 ? ' font-semibold text-amber-600' : ' text-slate-400'}
             >
               {' '}
               ({s.daysLeft >= 0 ? `${s.daysLeft} gün kaldı` : `${-s.daysLeft} gün geçti`})
@@ -88,11 +85,18 @@ export default function LicenseCard({ onError }: { onError: (e: unknown) => void
           )}
         </p>
       )}
-      <p className="mt-2 text-xs text-slate-400">
-        {s.enforced
-          ? 'Lisans zorunlu: süre dolduğunda yeni satış girişi durur. Raporlar, yedekleme ve giriş her zaman açık kalır.'
-          : 'Lisans zorunluluğu kapalı — süre dolsa bile sistem çalışmaya devam eder.'}
-      </p>
+      {details.map((line) => (
+        <p
+          key={line}
+          className={`text-sm ${s.locked ? 'font-semibold text-red-600' : 'text-slate-600'}`}
+        >
+          {line}
+        </p>
+      ))}
+      <p className="mt-2 text-xs text-slate-400">{policySummary(s)}</p>
+      {s.supportContact && (
+        <p className="mt-1 text-xs text-slate-500">Destek: {s.supportContact}</p>
+      )}
 
       {!s.verifiable && (
         <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-700">

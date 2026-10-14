@@ -61,11 +61,22 @@ export function unwrapEnvelope(json: unknown): unknown {
     : json;
 }
 
+// Lisans kilidi: yeni adisyon 403 LICENSE_LOCKED ile durunca (hangi ekrandan olursa olsun) ya da
+// uyari seridinin dugmesiyle lisans penceresi acilir (components/LicenseLockDialog dinler).
+export const LICENSE_LOCKED_EVENT = 'license-locked';
+export const LICENSE_LOCKED_CODE = 'LICENSE_LOCKED';
+
+export function openLicenseDialog(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(LICENSE_LOCKED_EVENT));
+}
+
 async function parse<T>(res: Response): Promise<T> {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = json?.error ?? json;
-    throw new ApiError(res.status, err?.code ?? 'ERROR', err?.message ?? res.statusText);
+    const code = err?.code ?? 'ERROR';
+    if (res.status === 403 && code === LICENSE_LOCKED_CODE) openLicenseDialog();
+    throw new ApiError(res.status, code, err?.message ?? res.statusText);
   }
   return unwrapEnvelope(json) as T;
 }
