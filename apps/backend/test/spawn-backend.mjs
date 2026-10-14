@@ -15,7 +15,9 @@ const tsNode = createRequire(join(backendDir, 'package.json')).resolve('ts-node/
  * Temiz bir backend ortami hazirlar (migrate + seed) ve onu yoneten yardimcilari dondurur.
  * `env` ortami ezer (or. CLOUD_API_URL, ADO_LICENSE_ENFORCE); `start(extra)` acilista ek ortam alir.
  */
-export function prepareBackend({ name, port, env = {} }) {
+export function prepareBackend({ name, port: basePort, env = {} }) {
+  // Ayni makinede birden cok e2e kosusu (paralel dallar) icin portlar kaydirilabilir.
+  const port = basePort + portOffset();
   const dataDir = mkdtempSync(join(tmpdir(), `ado-${name}-e2e-`));
   const baseEnv = {
     ...process.env,
@@ -106,6 +108,11 @@ export function prepareBackend({ name, port, env = {} }) {
       return { status: res.status, data: json.data ?? json };
     },
   };
+}
+
+/** E2E_PORT_OFFSET: yerelde paralel kosularda tum test portlarina eklenir (CI'da bos = 0). */
+export function portOffset() {
+  return Number(process.env.E2E_PORT_OFFSET || 0);
 }
 
 /** Basit kontrol listesi: basarisizlikta surec 1 ile biter (CI kirmizi). */
