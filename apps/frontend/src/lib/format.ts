@@ -25,3 +25,17 @@ export function formatQty(milis: number): string {
   const q = milis / 1000;
   return Number.isInteger(q) ? String(q) : q.toFixed(3);
 }
+
+// Bayt -> insan-okur boyut (yedek, veritabani, disk). 1024 tabanli; KB yukari yuvarlanir.
+export function formatBytes(bytes: number): string {
+  const GB = 1024 * 1024 * 1024;
+  const MB = 1024 * 1024;
+  if (bytes >= GB) return `${(bytes / GB).toFixed(1)} GB`;
+  if (bytes >= MB) return `${(bytes / MB).toFixed(1)} MB`;
+  return `${Math.ceil(bytes / 1024)} KB`;
+}
+
+// ISO zaman -> Turkce tarih + saat (yerel saat dilimi).
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('tr-TR');
+}

@@ -48,6 +48,8 @@ apps/frontend/blob-report/
 # Yedek geri yukleme isareti ve kurulum kimligi (yerel calistirmalarda veri dizini repo icinde olabilir)
 restore-pending.json
 ado-install.json
+# Urun gorselleri (yerel calistirmada veri dizini apps/backend olabilir; e2e yukledigi gorseller)
+apps/backend/images/
 
 # Yerel HTTPS sertifikalari/anahtarlari (veri dizini repo icindeyse). Klasoru degil
 # dosyalari yok say: apps/backend/src/tls kaynak kodu da "tls" adini tasiyor.

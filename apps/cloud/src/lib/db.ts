@@ -1,4 +1,7 @@
-/** D1 satir turleri (migrations/0001_init.sql, 0002_license_activation.sql, 0003_remove_panel.sql). */
+/**
+ * D1 satir turleri (migrations/0001_init.sql, 0002_license_activation.sql, 0003_remove_panel.sql,
+ * 0004_license_registry.sql, 0005_cloud_backups.sql).
+ */
 export interface TenantRow {
   id: string;
   name: string;
@@ -23,8 +26,67 @@ export interface BranchRow {
   install_id: string | null;
   pos_branch_id: string | null;
   pos_app_version: string | null;
+  // Saatlik heartbeat saglik bilgisi (0004; yalniz son deger).
+  health_reported_at: string | null;
+  health_db_bytes: number | null;
+  health_backups_bytes: number | null;
+  health_free_disk_bytes: number | null;
+  health_last_backup_at: string | null;
+  health_last_cloud_backup_at: string | null;
+  health_license_exp: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Lisans kaydi (0004). */
+export interface LicenseRow {
+  id: string;
+  tenant_id: string | null;
+  license_key: string;
+  customer: string;
+  plan: string | null;
+  exp: string;
+  grace_days: number;
+  expires_at: string;
+  /** JSON: {"qr.menu": true} */
+  features: string;
+  source: 'activation' | 'renewal' | 'admin';
+  issued_at: string | null;
+  revoked_at: string | null;
+  revoke_reason: string | null;
+  notes: string | null;
+  backup_quota_bytes: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Bulut yedegi kaydi (0005); dosyanin kendisi R2 BACKUPS'ta `r2_key` altinda. */
+export interface CloudBackupRow {
+  id: string;
+  license_id: string;
+  tenant_id: string | null;
+  branch_id: string | null;
+  install_id: string | null;
+  pos_backup_id: string;
+  r2_key: string;
+  backup_type: 'auto' | 'manual' | 'pre_update';
+  format: number;
+  size_bytes: number;
+  sha256: string;
+  pos_created_at: string;
+  status: 'uploading' | 'complete';
+  upload_id: string | null;
+  part_size: number | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+/** Kisa omurlu indirme jetonu (0005; yalniz ozeti). */
+export interface CloudBackupDownloadRow {
+  token_hash: string;
+  backup_id: string;
+  expires_at: string;
+  created_at: string;
 }
 
 export interface TableRow {

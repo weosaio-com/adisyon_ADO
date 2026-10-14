@@ -75,6 +75,8 @@ export const DomainEventName = {
   HallDeleted: 'hall.deleted',
   BranchUpdated: 'branch.updated',
   LicenseActivated: 'license.activated',
+  LicenseRemote: 'license.remote',
+  BackupCreated: 'backup.created',
   OrderCreated: 'order.created',
   OrderUpdated: 'order.updated',
   OrderItemAdded: 'order.item.added',
@@ -121,6 +123,37 @@ export interface LicenseActivatedEventPayload {
   licenseId: string | null;
   customerName: string;
   features: Record<string, boolean>;
+}
+
+/** Buluttaki lisans kaydinin durumu (heartbeat yanitindan). */
+export type LicenseRemoteState = 'active' | 'suspended' | 'revoked' | 'expired';
+
+/**
+ * Lisans: bulut, bu kurulumun lisansi hakkinda bilgi verdi (her basarili heartbeat'ten sonra;
+ * kalici degil). Uretici: bulut baglantisi. Dinleyici: lisans politikasi (yenileme + uzaktan durum).
+ */
+export interface LicenseRemoteEventPayload {
+  licenseId: string;
+  state: LicenseRemoteState;
+  /**
+   * Bulutta ayni kimlikli, daha gec bitisli imzali lisans varsa anahtarin kendisi. Tuketici
+   * imzayi gomulu acik anahtarlarla DOGRULAMADAN kurmaz; event loglanirken bu alan yazilmaz.
+   */
+  update?: string;
+  /** Bulutun saati (ISO): yerel saat geri alinmissa lisans suresi bununla hesaplanir. */
+  serverTime: string;
+  /** Yanitin alindigi yerel an (ISO). */
+  receivedAt: string;
+}
+
+// --- Yedek: yeni yedek dosyasi olustu (bulut yedegi hemen yukleyebilsin diye) ---
+export interface BackupCreatedEventPayload {
+  backupId: string;
+  type: 'auto' | 'manual' | 'pre_update' | 'imported';
+  /** 1: eski bicim (IV+etiket+veri), 2: sikistirilmis akis bicimi. */
+  format: 1 | 2;
+  sizeBytes: number;
+  createdAt: string;
 }
 
 // --- Siparis event payload'lari ---

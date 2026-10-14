@@ -24,6 +24,12 @@ export interface CloudConnection {
 /** Belirtecle yapilan istekler icin (bekleyen kapatma eski baglantinin adresini/belirtecini tasir). */
 export type CloudAuth = Pick<CloudConnection, 'url' | 'token'>;
 
+/** Diger modullerin (bulut yedegi vb.) gordugu baglanti: yalniz istek atmaya yetenler. */
+export type CloudLink = Pick<
+  CloudConnection,
+  'url' | 'token' | 'installId' | 'licenseId' | 'features'
+>;
+
 export interface PosInfo {
   branch: { id: string; name: string };
   tenant: {
@@ -59,10 +65,25 @@ export class CloudError extends Error {
 
 const TIMEOUT_MS = 20_000;
 
-async function request<T>(
+export interface CloudRequestInit {
+  method: string;
+  token?: string;
+  json?: unknown;
+  bytes?: Buffer;
+  /** Ek basliklar (or. bulut yedeginin meta verisi). */
+  headers?: Record<string, string>;
+  /** Varsayilan 20 sn; buyuk yuklemeler daha uzun sure ister. */
+  timeoutMs?: number;
+}
+
+/**
+ * Buluta tek istek: `{success, data}` zarfini acar, hatada CloudError atar (`status` 0 = buluta
+ * ulasilamadi). X-Ado-Version her istekte gider. Bulut yedegi gibi baska moduller de kullanir.
+ */
+export async function cloudRequest<T>(
   baseUrl: string,
   path: string,
-  init: { method: string; token?: string; json?: unknown; bytes?: Buffer },
+  init: CloudRequestInit,
 ): Promise<T> {
   const body = init.json !== undefined ? JSON.stringify(init.json) : init.bytes;
   // Satici guncelleme yayilimini izler (buluttaki sube kaydina yazilir).
@@ -76,9 +97,10 @@ async function request<T>(
         ...(init.json !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(init.bytes ? { 'Content-Type': 'application/octet-stream' } : {}),
         ...(version ? { 'X-Ado-Version': version } : {}),
+        ...init.headers,
       },
       ...(body !== undefined ? { body } : {}),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS),
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -108,52 +130,55 @@ async function request<T>(
 
 export const cloudApi = {
   activate: (url: string, body: ActivateRequest) =>
-    request<PosInfo & { token: string }>(url, '/api/pos/activate', { method: 'POST', json: body }),
+    cloudRequest<PosInfo & { token: string }>(url, '/api/pos/activate', {
+      method: 'POST',
+      json: body,
+    }),
 
   refreshLicense: (auth: CloudAuth, licenseKey: string) =>
-    request<PosInfo>(auth.url, '/api/pos/license', {
+    cloudRequest<PosInfo>(auth.url, '/api/pos/license', {
       method: 'PUT',
       token: auth.token,
       json: { licenseKey },
     }),
 
   status: (auth: CloudAuth) =>
-    request<PosInfo & { menu: { version: number } | null; tableCount: number }>(
+    cloudRequest<PosInfo & { menu: { version: number } | null; tableCount: number }>(
       auth.url,
       '/api/pos/status',
       { method: 'GET', token: auth.token },
     ),
 
   checkImages: (auth: CloudAuth, keys: string[]) =>
-    request<{ missing: string[] }>(auth.url, '/api/pos/images/check', {
+    cloudRequest<{ missing: string[] }>(auth.url, '/api/pos/images/check', {
       method: 'POST',
       token: auth.token,
       json: { keys },
     }),
 
   putImage: (auth: CloudAuth, key: string, bytes: Buffer) =>
-    request<{ key: string }>(auth.url, `/api/pos/images/${key}`, {
+    cloudRequest<{ key: string }>(auth.url, `/api/pos/images/${key}`, {
       method: 'PUT',
       token: auth.token,
       bytes,
     }),
 
   putMenu: (auth: CloudAuth, menu: MenuSnapshot) =>
-    request<{ version: number; updatedAt: string }>(auth.url, '/api/pos/menu', {
+    cloudRequest<{ version: number; updatedAt: string }>(auth.url, '/api/pos/menu', {
       method: 'PUT',
       token: auth.token,
       json: menu,
     }),
 
   putTables: (auth: CloudAuth, tables: MenuTable[]) =>
-    request<{ count: number }>(auth.url, '/api/pos/tables', {
+    cloudRequest<{ count: number }>(auth.url, '/api/pos/tables', {
       method: 'PUT',
       token: auth.token,
       json: { tables },
     }),
 
   unpair: (auth: CloudAuth) =>
-    request<{ unpaired: boolean }>(auth.url, '/api/pos/unpair', {
+    cloudRequest<{ unpaired: boolean }>(auth.url, '/api/pos/unpair', {
       method: 'POST',
       token: auth.token,
     }),

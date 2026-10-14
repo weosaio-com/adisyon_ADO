@@ -76,6 +76,13 @@ async function bootstrap(): Promise<void> {
   app.enableCors({ origin: corsOrigins.length ? corsOrigins : false, credentials: true });
   app.enableShutdownHooks();
   app.getHttpAdapter().getInstance().disable('x-powered-by');
+  // Prisma BigInt alanlari (yedek boyutu) yanitlarda sayi olur; aksi halde res.json hata verir.
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .set('json replacer', (_key: string, value: unknown) =>
+      typeof value === 'bigint' ? Number(value) : value,
+    );
   app.use((_req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');

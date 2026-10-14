@@ -28,7 +28,13 @@ import { LicenseService } from '../license/license.service';
 import { categoryView, productView } from '../catalog/catalog.views';
 import { menuImagePath } from '../catalog/catalog.images';
 import { buildMenuSnapshot, buildTableList, normalizeCloudUrl } from './cloud.snapshot';
-import { cloudApi, CloudError, type CloudConnection, type PosInfo } from './cloud.client';
+import {
+  cloudApi,
+  CloudError,
+  type CloudConnection,
+  type CloudLink,
+  type PosInfo,
+} from './cloud.client';
 import {
   blockedFromStatus,
   classifyCloudError,
@@ -138,6 +144,22 @@ export class CloudService implements OnModuleInit, OnApplicationBootstrap, OnMod
 
   private connection(branchId: string) {
     return this.readSetting<CloudConnection>(branchId, CONNECTION_KEY);
+  }
+
+  /**
+   * Diger moduller icin (bulut yedegi): bu subenin gecerli bulut baglantisi, yoksa null.
+   * Acilistaki denetim adres/kurulum uyusmazliginda baglantiyi zaten duser.
+   */
+  async currentLink(branchId: string): Promise<CloudLink | null> {
+    const conn = await this.connection(branchId);
+    if (!conn) return null;
+    return {
+      url: conn.url,
+      token: conn.token,
+      installId: conn.installId,
+      licenseId: conn.licenseId,
+      features: conn.features,
+    };
   }
 
   private async state(branchId: string): Promise<CloudState> {

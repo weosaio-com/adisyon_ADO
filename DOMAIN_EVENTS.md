@@ -143,6 +143,21 @@
   bildirilir (`PUT /api/pos/license`, belirtec degismez); lisans kimligi degistiyse baglanti kapanir
   ve "QR menuyu ac" yeniden gerekir.
 
+### `license.remote` (Faz A sozlesmesi)
+- **Amaci:** Bulut, bu kurulumun lisansi hakkinda bilgi verdi: kayittaki durum (etkin, askida,
+  iptal, suresi dolmus) ve varsa ayni kimlikli daha yeni imzali lisans.
+- **Yayinlandigi yer:** `CloudService`, her basarili heartbeat'ten sonra (kalici degil).
+- **Payload:** `{ licenseId, state, update?, serverTime, receivedAt }`. `update` imzali anahtarin
+  kendisidir; tuketici imzayi gomulu acik anahtarlarla dogrulamadan kurmaz.
+- **Dinleyen moduller:** `LicenseService` (uzaktan yenilemeyi kurar, askiya alma/iptali ve bulut
+  saatini lisans politikasina yansitir).
+
+### `backup.created` (Faz A sozlesmesi)
+- **Amaci:** Yeni bir yedek dosyasi olustu (otomatik, elle, guncelleme oncesi ya da ice aktarilan).
+- **Yayinlandigi yer:** `BackupService` (dosya ve kayit yazildiktan sonra).
+- **Payload:** `{ backupId, type, format, sizeBytes, createdAt }`.
+- **Dinleyen moduller:** Bulut yedegi (yeni yedegi beklemeden yukler).
+
 ## Planlanan Event'ler (modul gelince eklenecek)
 
 Asagidakiler kod sozlesmesine (`DomainEventName`) ve bu katalogsa ilgili modul inşa edilirken

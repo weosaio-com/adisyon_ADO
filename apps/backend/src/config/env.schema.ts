@@ -37,6 +37,25 @@ export const envSchema = z.object({
   CLOUD_API_URL: z.string().default(''),
   // Bulut uzlastirma araligi (sn): kacan yayin, bekleyen kapatma/lisans/etkinlestirme, durum.
   CLOUD_RECONCILE_SECONDS: z.coerce.number().int().min(1).max(86_400).default(300),
+  // Heartbeat araligi (sn): son gorulme, surum, saglik ve uzak lisans durumu.
+  CLOUD_HEARTBEAT_SECONDS: z.coerce.number().int().min(1).max(86_400).default(3600),
+  // Bulut yedegi denetim araligi (sn): yuklenmemis en yeni yedek varsa gonderilir.
+  CLOUD_BACKUP_INTERVAL_SECONDS: z.coerce.number().int().min(1).max(86_400).default(3600),
+  // Buyuk yedeklerde parca boyu (bayt). R2 alt siniri 5 MiB.
+  CLOUD_BACKUP_PART_BYTES: z.coerce
+    .number()
+    .int()
+    .min(5 * 1024 * 1024)
+    .max(95 * 1000 * 1000)
+    .default(8 * 1024 * 1024),
+  // Lisans zorunlulugu: '1' acik, '0' kapali, bos = ayar (license.enforce). Paketli surumde profil.
+  ADO_LICENSE_ENFORCE: z.enum(['', '0', '1']).default(''),
+  // Lisanssiz yeni kurulumun deneme suresi (gun). 0 = lisans girilmeden satis yok.
+  ADO_TRIAL_DAYS: z.coerce.number().int().min(0).max(90).default(0),
+  // Lisans bitince yeni adisyonun durmasindan once taninan ek sure (gun; lisanstaki `g` onceliklidir).
+  ADO_GRACE_DAYS: z.coerce.number().int().min(0).max(90).default(7),
+  // Kilit ekraninda gosterilen destek iletisimi (telefon / e-posta).
+  ADO_SUPPORT_CONTACT: z.string().max(200).default(''),
   // Bu kurulumun kalici kimligi. Bos = veri dizinindeki ado-install.json (common/util/install-id).
   ADO_INSTALL_ID: z.string().default(''),
   // Masaustu kabugunun verdigi bilgiler (gelistirmede bos).

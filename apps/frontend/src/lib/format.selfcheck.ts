@@ -1,7 +1,7 @@
 // parseTlToKurus'un runnable self-check'i (binlik-nokta bug'i: "1.500" -> 1,50 TL olurdu).
 // Calistir: node --experimental-strip-types src/lib/format.selfcheck.ts
 import assert from 'node:assert';
-import { parseTlToKurus } from './format.ts';
+import { formatBytes, parseTlToKurus } from './format.ts';
 
 // Duz girisler.
 assert.equal(parseTlToKurus('100'), 10000);
@@ -19,5 +19,12 @@ assert.ok(Number.isNaN(parseTlToKurus('')));
 assert.ok(Number.isNaN(parseTlToKurus('abc')));
 assert.ok(Number.isNaN(parseTlToKurus('1.5000')));
 assert.ok(Number.isNaN(parseTlToKurus('12,345')));
+
+// Boyut: KB yukari yuvarlanir, MB/GB tek ondalik.
+assert.equal(formatBytes(0), '0 KB');
+assert.equal(formatBytes(1), '1 KB');
+assert.equal(formatBytes(1536), '2 KB');
+assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
+assert.equal(formatBytes(3 * 1024 * 1024 * 1024 + 1), '3.0 GB');
 
 console.log('✓ format.selfcheck OK');
