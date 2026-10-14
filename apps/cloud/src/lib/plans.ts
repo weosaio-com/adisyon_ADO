@@ -2,10 +2,19 @@
  * Paketler: isletme hangi QR ozelliklerini kullanir. Asil kapi buradadir. Lisansla baglanan
  * isletmede ozellikler imzali lisanstan gelir (planFromLicense + licenseFeatureOverrides) ve her
  * yenilemede yeniden yazilir. QR-1'de yalniz `qr.menu` kullanilir; digerleri sonraki asamalar icin
- * (siparis, uzaktan odeme, hesap bolme, oyunlar).
+ * (siparis, uzaktan odeme, hesap bolme, oyunlar). `cloud.backup` (otomatik bulut yedegi) paketten
+ * bagimsizdir ve varsayilan ACIKTIR: yalniz lisans ya da satici acikca kapatirsa kapalidir.
  */
-export const FEATURES = ['qr.menu', 'qr.order', 'qr.pay', 'qr.split', 'qr.games'] as const;
+export const QR_FEATURES = ['qr.menu', 'qr.order', 'qr.pay', 'qr.split', 'qr.games'] as const;
+export const FEATURES = [...QR_FEATURES, 'cloud.backup'] as const;
 export type Feature = (typeof FEATURES)[number];
+type QrFeature = (typeof QR_FEATURES)[number];
+
+/**
+ * Acikca kapatilmadikca acik ozellikler (@ado/shared CLOUD_BACKUP_FEATURE, isCloudBackupEnabled).
+ * Bu anahtar eklenmeden once acilan kiracilarin `features` JSON'unda yoktur: acik sayilir.
+ */
+const DEFAULT_ON: ReadonlySet<Feature> = new Set<Feature>(['cloud.backup']);
 
 export const PLANS = {
   menu: { label: 'QR Menü', features: ['qr.menu'] },
@@ -14,8 +23,8 @@ export const PLANS = {
     label: 'QR Menü + Sipariş + Ödeme',
     features: ['qr.menu', 'qr.order', 'qr.pay', 'qr.split'],
   },
-  full: { label: 'Tümü', features: [...FEATURES] },
-} as const satisfies Record<string, { label: string; features: readonly Feature[] }>;
+  full: { label: 'Tümü', features: [...QR_FEATURES] },
+} as const satisfies Record<string, { label: string; features: readonly QrFeature[] }>;
 export type PlanId = keyof typeof PLANS;
 export const PLAN_IDS = Object.keys(PLANS) as [PlanId, ...PlanId[]];
 
@@ -47,7 +56,8 @@ export function licenseExpired(
 
 /**
  * Paket + tek tek acilan/kapatilan ozellikler. Askiya alinan ya da lisansi dolan isletmede hepsi
- * kapali.
+ * kapali. Pakette olmayan varsayilan-acik ozellik (cloud.backup) acikca kapatilmadikca aciktir;
+ * QR menusuz lisansla acilan ('none' paketli) isletmede de.
  */
 export function tenantFeatures(tenant: {
   plan: string;
@@ -60,25 +70,34 @@ export function tenantFeatures(tenant: {
   const overrides = parseOverrides(tenant.features);
   const active = tenant.status === 'active' && !licenseExpired(tenant);
   return Object.fromEntries(
-    FEATURES.map((feature) => [feature, active && (overrides[feature] ?? base.has(feature))]),
+    FEATURES.map((feature) => [
+      feature,
+      active && (overrides[feature] ?? (base.has(feature) || DEFAULT_ON.has(feature))),
+    ]),
   ) as FeatureMap;
 }
 
 /** Lisanstaki ozelliklere en yakin paket (yalniz etiket icin). QR menu yoksa 'none'. */
 export function planFromLicense(features: Record<string, boolean> | undefined): PlanId | 'none' {
-  const has = (feature: Feature) => features?.[feature] === true;
+  const has = (feature: QrFeature) => features?.[feature] === true;
   if (!has('qr.menu')) return 'none';
-  if (FEATURES.every(has)) return 'full';
+  if (QR_FEATURES.every(has)) return 'full';
   if (has('qr.pay')) return 'pay';
   if (has('qr.order')) return 'order';
   return 'menu';
 }
 
-/** Lisanstaki ozellikler birebir: her bilinen ozellik icin acik/kapali (paket ne derse desin). */
+/**
+ * Lisanstaki ozellikler birebir: her bilinen ozellik icin acik/kapali (paket ne derse desin).
+ * Varsayilan-acik ozellik lisansta acikca `false` degilse acik yazilir.
+ */
 export function licenseFeatureOverrides(
   features: Record<string, boolean> | undefined,
 ): Record<Feature, boolean> {
   return Object.fromEntries(
-    FEATURES.map((feature) => [feature, features?.[feature] === true]),
+    FEATURES.map((feature) => [
+      feature,
+      DEFAULT_ON.has(feature) ? features?.[feature] !== false : features?.[feature] === true,
+    ]),
   ) as Record<Feature, boolean>;
 }

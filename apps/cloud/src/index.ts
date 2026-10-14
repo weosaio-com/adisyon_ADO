@@ -4,6 +4,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { AppEnv } from './env';
 import { ApiError, errorBody } from './lib/http';
 import { adminRoutes } from './routes/admin';
+import { backupRoutes, BACKUP_ROUTE_PREFIX, isBackupPath } from './routes/backups';
 import { posRoutes } from './routes/pos';
 import { publicRoutes } from './routes/public';
 import { updateRoutes } from './routes/updates';
@@ -21,18 +22,19 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer');
 });
 
-// Menu en fazla ~2000 urun; gorseller ayrica 1 MB ile sinirli.
-app.use(
-  '/api/*',
-  bodyLimit({
-    maxSize: 5 * 1024 * 1024,
-    onError: (c) => c.json(errorBody('PAYLOAD_TOO_LARGE', 'İstek çok büyük.'), 413),
-  }),
-);
+// Menu en fazla ~2000 urun; gorseller ayrica 1 MB ile sinirli. Bulut yedegi muaf: R2'nin en kucuk
+// parca boyu (5 MiB) bu sinira esit. O uclar Content-Length ister ve kendi ust sinirini (95 MB)
+// uygular (routes/backups.ts).
+const apiBodyLimit = bodyLimit({
+  maxSize: 5 * 1024 * 1024,
+  onError: (c) => c.json(errorBody('PAYLOAD_TOO_LARGE', 'İstek çok büyük.'), 413),
+});
+app.use('/api/*', (c, next) => (isBackupPath(c.req.path) ? next() : apiBodyLimit(c, next)));
 
 app.get('/api/health', (c) => c.json({ success: true, data: { ok: true } }));
 app.route('/', publicRoutes);
 app.route('/', updateRoutes);
+app.route(BACKUP_ROUTE_PREFIX, backupRoutes);
 app.route('/api/pos', posRoutes);
 app.route('/api/admin', adminRoutes);
 

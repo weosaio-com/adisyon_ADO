@@ -22,9 +22,12 @@
     },
   ],
   // UPDATES: program guncellemeleri (release.yml yukler; UPDATE_SYSTEM.md).
+  // BACKUPS: POS'larin sifreli bulut yedekleri (CLOUD_BACKUP.md). Yarim kalan multipart
+  // yuklemeleri R2 varsayilan olarak 7 gun sonra iptal eder; ek kural gerekmez.
   "r2_buckets": [
     { "binding": "IMAGES", "bucket_name": "ado-qr-images" },
     { "binding": "UPDATES", "bucket_name": "ado-updates" },
+    { "binding": "BACKUPS", "bucket_name": "ado-backups" },
   ],
   // Lisans imzasini dogrulayan acik anahtar (gizli degil): programin uretim profiliyle ayni
   // (apps/desktop/profiles/prod.json, LICENSING.md). Bos = lisansla baglanma kapali.
@@ -48,6 +51,7 @@
       "r2_buckets": [
         { "binding": "IMAGES", "bucket_name": "ado-qr-images-test" },
         { "binding": "UPDATES", "bucket_name": "ado-updates-test" },
+        { "binding": "BACKUPS", "bucket_name": "ado-backups-test" },
       ],
       // Deneme lisans anahtari (apps/desktop/profiles/test.json ile ayni). vars miras alinmaz.
       "vars": {
