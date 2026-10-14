@@ -1,0 +1,33 @@
+// ==============================================================================
+// CLOUD_BACKUP.prisma — Sahip: Bulut yedegi (Faz A / A3)
+// Bu dosyayi yalnizca sahibi degistirir (.github/CODEOWNERS). Bkz. CONTRIBUTING.md.
+// Cok-dosyali Prisma semasi: tum prisma/schema/*.prisma birlestirilir.
+// ==============================================================================
+
+// Yerel yedeklerin buluta yuklenme durumu (yedek basina bir satir). Dosyanin kendisi zaten
+// dukkanin anahtariyla sifrelidir; bulut yalniz sifreli kopyayi saklar. Tasarim: CLOUD_BACKUP.md.
+model CloudBackupUpload {
+  id         String    @id // ULID
+  branchId   String    @map("branch_id")
+  backupId   String    @unique @map("backup_id") // backups.id
+  status     String    @default("pending") // pending | uploading | done | failed
+  cloudId    String?   @map("cloud_id") // buluttaki yedek kimligi (tamamlaninca)
+  sizeBytes  BigInt    @map("size_bytes")
+  attempts   Int       @default(0)
+  lastError  String?   @map("last_error")
+  uploadedAt DateTime? @map("uploaded_at")
+  // Multipart (95 MB ustu) devam bilgisi: kesilen yukleme kalan parcalardan surer.
+  uploadId   String?   @map("upload_id")
+  partSize   Int?      @map("part_size")
+  partsDone  String?   @map("parts_done") // JSON (TEXT): [{ partNumber, etag }]
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  version   Int       @default(1)
+  deviceId  String?   @map("device_id")
+  syncState String    @default("pending") @map("sync_state")
+
+  @@index([branchId, status])
+  @@map("cloud_backup_uploads")
+}
