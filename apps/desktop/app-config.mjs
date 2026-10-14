@@ -1,6 +1,7 @@
 // Derleme profili: apps/desktop/profiles/<profil>.json -> paketteki resources/app-config.json.
 // Profil, kurulumun hangi buluta baglanacagini, hangi lisans ve guncelleme anahtarlarina
-// guvenecegini ve guncelleme kanalini belirler; kullanici bunlari girmez. Electron'suz
+// guvenecegini, guncelleme kanalini ve lisans politikasini (zorunluluk, deneme/ek sure, destek
+// iletisimi; LICENSING.md §8) belirler; kullanici bunlari girmez. Electron'suz
 // (selfcheck.mjs ile test edilir).
 import { readFileSync } from 'node:fs';
 import { UPDATE_CHANNELS } from './update-manifest.mjs';
@@ -40,7 +41,18 @@ const emptyConfig = () => ({
   licensePublicKey: '',
   channel: 'stable',
   updatePublicKeys: [],
+  // Lisans politikasi: paketli surumde zorunluluk varsayilan ACIK (acik anahtar yoksa yine de
+  // hicbir sey kilitlenmez). Deneme 0 gun: lisans girilmeden satis yok. Ek sure 7 gun.
+  licenseEnforce: true,
+  trialDays: 0,
+  graceDays: 7,
+  supportContact: '',
 });
+
+// Backend env semasiyla ayni sinirlar (ADO_TRIAL_DAYS / ADO_GRACE_DAYS / ADO_SUPPORT_CONTACT).
+const MAX_POLICY_DAYS = 90;
+const MAX_SUPPORT_CONTACT = 200;
+const isPolicyDays = (value) => Number.isInteger(value) && value >= 0 && value <= MAX_POLICY_DAYS;
 
 export function validateAppConfig(raw, { strict = false } = {}) {
   const errors = [];
@@ -72,8 +84,14 @@ export function validateAppConfig(raw, { strict = false } = {}) {
     if (UPDATE_CHANNELS.includes(raw.channel)) config.channel = raw.channel;
     else errors.push(`channel: ${UPDATE_CHANNELS.join(' | ')} olmali`);
   }
-  if (raw.updatePublicKey) {
-    const keys = String(raw.updatePublicKey)
+  // Profil virgullu metin (updatePublicKey) tasir; build-bundle'in yazdigi paketteki
+  // app-config.json ise dogrulanmis bicimi (updatePublicKeys dizisi). Ikisi de okunur: aksi halde
+  // paketli surum acilista anahtarlari kaybeder ve guncelleme kapali kalirdi.
+  const updateKeys =
+    raw.updatePublicKey ||
+    (Array.isArray(raw.updatePublicKeys) ? raw.updatePublicKeys.join(',') : '');
+  if (updateKeys) {
+    const keys = String(updateKeys)
       .split(',')
       .map((key) => key.trim())
       .filter(Boolean);
@@ -81,6 +99,22 @@ export function validateAppConfig(raw, { strict = false } = {}) {
     else errors.push('updatePublicKey: base64 Ed25519 SPKI olmali (virgulle birden cok)');
   } else if (strict && raw.profile === 'prod') {
     errors.push('updatePublicKey: uretim profilinde bos olamaz');
+  }
+
+  // Lisans politikasi (istege bagli; hataliysa varsayilan kalir).
+  if (raw.licenseEnforce !== undefined) {
+    if (typeof raw.licenseEnforce === 'boolean') config.licenseEnforce = raw.licenseEnforce;
+    else errors.push('licenseEnforce: true | false olmali');
+  }
+  for (const field of ['trialDays', 'graceDays']) {
+    if (raw[field] === undefined) continue;
+    if (isPolicyDays(raw[field])) config[field] = raw[field];
+    else errors.push(`${field}: 0-${MAX_POLICY_DAYS} arasi tam sayi olmali`);
+  }
+  if (raw.supportContact !== undefined) {
+    const contact = typeof raw.supportContact === 'string' ? raw.supportContact.trim() : null;
+    if (contact !== null && contact.length <= MAX_SUPPORT_CONTACT) config.supportContact = contact;
+    else errors.push(`supportContact: en fazla ${MAX_SUPPORT_CONTACT} karakterlik metin olmali`);
   }
   return { config, errors };
 }
@@ -103,5 +137,11 @@ export function appConfigEnv(config) {
     CLOUD_API_URL: config.cloudUrl,
     ADO_LICENSE_PUBLIC_KEY: config.licensePublicKey,
     ADO_BUILD_PROFILE: config.profile ?? '',
+    // Paketli surumde zorunluluk acik; yalniz profil acikca false derse kapali.
+    ADO_LICENSE_ENFORCE: config.licenseEnforce === false ? '0' : '1',
+    // Bos metin backend'de 0 gun sayilirdi: varsayilanlar acikca yazilir.
+    ADO_TRIAL_DAYS: String(config.trialDays ?? 0),
+    ADO_GRACE_DAYS: String(config.graceDays ?? 7),
+    ADO_SUPPORT_CONTACT: config.supportContact ?? '',
   };
 }

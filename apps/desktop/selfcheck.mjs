@@ -156,18 +156,78 @@ const restoreFixture = (marker) => {
     { strict: true },
   );
   assert.deepStrictEqual(ok.errors, [], 'uretim profili: lisans ve guncelleme anahtari var');
+  // Lisans politikasi profilde yoksa varsayilan: zorunlu, deneme 0, ek sure 7 gun.
+  const policyDefaults = { licenseEnforce: true, trialDays: 0, graceDays: 7, supportContact: '' };
+  const policyEnvDefaults = {
+    ADO_LICENSE_ENFORCE: '1',
+    ADO_TRIAL_DAYS: '0',
+    ADO_GRACE_DAYS: '7',
+    ADO_SUPPORT_CONTACT: '',
+  };
   assert.deepStrictEqual(ok.config, {
     profile: 'prod',
     cloudUrl: 'https://menu.ornek.com',
     licensePublicKey: pub,
     channel: 'stable',
     updatePublicKeys: [pub, pub2],
+    ...policyDefaults,
   });
   assert.deepStrictEqual(appConfigEnv(ok.config), {
     CLOUD_API_URL: 'https://menu.ornek.com',
     ADO_LICENSE_PUBLIC_KEY: pub,
     ADO_BUILD_PROFILE: 'prod',
+    ...policyEnvDefaults,
   });
+
+  // Lisans politikasi alanlari: zorunluluk, deneme/ek sure (0-90 gun), destek iletisimi.
+  const policy = validateAppConfig({
+    profile: 'test',
+    licenseEnforce: false,
+    trialDays: 14,
+    graceDays: 3,
+    supportContact: '  0850 000 00 00 · destek@ornek.com  ',
+  });
+  assert.deepStrictEqual(policy.errors, []);
+  assert.deepStrictEqual(
+    {
+      licenseEnforce: policy.config.licenseEnforce,
+      trialDays: policy.config.trialDays,
+      graceDays: policy.config.graceDays,
+      supportContact: policy.config.supportContact,
+    },
+    {
+      licenseEnforce: false,
+      trialDays: 14,
+      graceDays: 3,
+      supportContact: '0850 000 00 00 · destek@ornek.com',
+    },
+  );
+  const policyEnv = appConfigEnv(policy.config);
+  assert.strictEqual(policyEnv.ADO_LICENSE_ENFORCE, '0', 'yalniz false kapatir');
+  assert.strictEqual(policyEnv.ADO_TRIAL_DAYS, '14');
+  assert.strictEqual(policyEnv.ADO_GRACE_DAYS, '3');
+  assert.strictEqual(policyEnv.ADO_SUPPORT_CONTACT, '0850 000 00 00 · destek@ornek.com');
+  const badPolicy = validateAppConfig({
+    profile: 'test',
+    licenseEnforce: 'evet',
+    trialDays: 91,
+    graceDays: 1.5,
+    supportContact: 'x'.repeat(201),
+  });
+  assert.strictEqual(badPolicy.errors.length, 4, 'hatali politika alanlari raporlanir');
+  assert.deepStrictEqual(
+    {
+      licenseEnforce: badPolicy.config.licenseEnforce,
+      trialDays: badPolicy.config.trialDays,
+      graceDays: badPolicy.config.graceDays,
+      supportContact: badPolicy.config.supportContact,
+    },
+    policyDefaults,
+    'hatali alan varsayilanda kalir (zorunluluk acik)',
+  );
+  assert.strictEqual(validateAppConfig({ profile: 'test', graceDays: -1 }).errors.length, 1);
+  assert.strictEqual(validateAppConfig({ profile: 'test', supportContact: 42 }).errors.length, 1);
+  assert.deepStrictEqual(validateAppConfig({ profile: 'test', trialDays: 90 }).errors, []);
 
   // Derlemede (strict) uretim profili lisans/guncelleme anahtari ve adres olmadan gecmez.
   assert.ok(validateAppConfig({ profile: 'prod' }, { strict: true }).errors.length >= 3);
@@ -200,22 +260,47 @@ const restoreFixture = (marker) => {
     licensePublicKey: pub,
     channel: 'stable',
     updatePublicKeys: [],
+    ...policyDefaults,
   });
 
-  // Eksik dosya acilisi durdurmaz: her sey kapali.
+  // Eksik dosya acilisi durdurmaz: bulut ve lisans anahtari bos (acik anahtar yokken zorunluluk
+  // backend'de etkisizdir, kimse kilitlenmez).
   const missing = loadAppConfig(join(tempDir('ado-cfg-'), 'yok.json'));
   assert.strictEqual(missing.errors.length, 1);
   assert.deepStrictEqual(appConfigEnv(missing.config), {
     CLOUD_API_URL: '',
     ADO_LICENSE_PUBLIC_KEY: '',
     ADO_BUILD_PROFILE: '',
+    ...policyEnvDefaults,
   });
 
   // Repodaki profiller: test derlenebilir olmali; uretim en azindan bicimce dogru.
   const profile = (name) =>
     JSON.parse(readFileSync(join(import.meta.dirname, 'profiles', `${name}.json`), 'utf8'));
-  assert.deepStrictEqual(validateAppConfig(profile('test'), { strict: true }).errors, []);
+  const built = validateAppConfig(profile('test'), { strict: true });
+  assert.deepStrictEqual(built.errors, []);
   assert.deepStrictEqual(validateAppConfig(profile('prod')).errors, []);
+  assert.strictEqual(appConfigEnv(built.config).ADO_LICENSE_ENFORCE, '1', 'test: lisans zorunlu');
+  assert.strictEqual(appConfigEnv(built.config).ADO_TRIAL_DAYS, '0', 'test: deneme yok');
+  assert.strictEqual(appConfigEnv(built.config).ADO_GRACE_DAYS, '7');
+  assert.strictEqual(
+    appConfigEnv(validateAppConfig(profile('prod')).config).ADO_LICENSE_ENFORCE,
+    '1',
+    'uretim: profilde yoksa zorunlu',
+  );
+
+  // Derleme -> calisma: build-bundle dogrulanmis config'i app-config.json'a yazar, main.mjs onu
+  // yeniden dogrular. Hicbir alan (guncelleme anahtarlari, lisans politikasi) yolda kaybolmamali.
+  const cfgDir = tempDir('ado-cfg-');
+  writeFileSync(join(cfgDir, 'app-config.json'), `${JSON.stringify(built.config, null, 2)}\n`);
+  const runtime = loadAppConfig(join(cfgDir, 'app-config.json'));
+  assert.deepStrictEqual(runtime.errors, []);
+  assert.deepStrictEqual(runtime.config, built.config, 'paketteki config aynen okunur');
+  assert.deepStrictEqual(appConfigEnv(runtime.config), appConfigEnv(built.config));
+  assert.ok(runtime.config.updatePublicKeys.length > 0, 'guncelleme anahtari kaybolmaz');
+  const policyRoundTrip = validateAppConfig(JSON.parse(JSON.stringify(policy.config)));
+  assert.deepStrictEqual(policyRoundTrip.config, policy.config, 'politika alanlari da korunur');
+  rmSync(cfgDir, { recursive: true, force: true });
 }
 
 // --- Veritabani guncellemesi: once kopya, sirali uygulama, hata geri alinir ---
