@@ -193,43 +193,51 @@
 
 **Reconnect akışı:** `/sync/health` OK → `POST /sync/mutations` (push) → `GET /sync/snapshot` (pull) → WS'e dön.
 
-### 5.12 QR Menü Bulut Bağlantısı (POS → bulut) _(uygulandı 2026-09; lisansla açma 2026-10)_
+### 5.12 Bulut Bağlantısı ve QR Menü (POS → bulut) _(uygulandı 2026-09; lisansla bağlanma 2026-10; her lisanslı kurulum 2026-10)_
 
 > Bulutun kendi API'si (müşteri menüsü, satıcı, `/api/pos/*`) ve kararlar: `QR_MENU_DESIGN.md`.
 > Bulut adresi programa gömülüdür (derleme profili → `CLOUD_API_URL`); kullanıcı adres ya da kod
-> girmez. Bağlanma imzalı lisansla olur (`LICENSING.md`).
+> girmez. Bağlanma imzalı lisansla olur (`LICENSING.md`). **Bağlantı ile QR menü ayrıdır:** lisans
+> numarası (`id`) olan her lisans buluta kendiliğinden bağlanır (son görülme, sürüm, sağlık,
+> lisans yenileme, uzaktan askı/iptal); QR menü bu bağlantı üzerinde ayrı bir anahtardır.
 
-- `GET /cloud/status` — kartın tek kaynağı:
-  - `mode`: `unconfigured` (bu kurulumda bulut yok) · `no_license` · `not_licensed` (lisans QR
-    menüyü içermiyor ya da lisans no yok) · `expired` · `off` (açılabilir) · `waiting_network`
-    (internet bekleniyor) · `conflict` (lisans başka bilgisayarda açık) · `lost` (bağlantı bulutta
-    geçersiz kılındı; neden `lostReason`: `superseded|rotated|revoked|unpaired|invalid`) · `on` ·
-    `suspended`.
-  - `enabled` (bulut tanımlı, kart görünür), `url` (QR kartlarındaki adres), `connected`,
-    `licenseId`, işletme/şube/paket, `licenseExpiresAt`, `conflictLastSeenAt`, son yayın zamanı ve
-    menü sürümü, `publishing`, son hata.
-- `POST /cloud/activate` `{ takeover?: boolean }` — "QR menüyü aç": lisansla buluta bağlanır
-  (`POST /api/pos/activate`: lisans, kurulum kimliği, şube), ilk yayın hemen başlar. Yanıt güncel
-  durumdur.
-  - Bulut yoksa `409 CLOUD_NOT_CONFIGURED`; lisans yok/QR menü yok/süresi dolmuş →
-    `403 LICENSE_REQUIRED | QR_MENU_NOT_LICENSED | LICENSE_EXPIRED`.
-  - İnternet yoksa (ya da bulut geçici hata verirse) istek saklanır: `mode: waiting_network`,
-    uzlaştırma kendiliğinden yeniden dener.
-  - Lisans başka kurulumda açıksa `mode: conflict`; sahibin onayıyla `takeover: true` devralır
-    (diğer bilgisayarın bağlantısı `superseded` olur).
-  - Diğer bulut hataları (ör. `ACTIVATION_DISABLED`, `TENANT_SUSPENDED`) HTTP hatası olarak döner.
-- `POST /cloud/publish` — şimdi yayınla (bekleyen yayını öne alır). Kapalıyken `409 CLOUD_NOT_CONNECTED`.
-- `DELETE /cloud/connection` — "QR menüyü kapat": bulutta menü ve masalar yayından kalkar, belirteç
-  iptal edilir. İnternet yoksa yerelde hemen kapanır; bulut tarafı bağlantı gelince tamamlanır.
-- Hepsi `settings.manage`; açma ve kapatma denetim kaydına yazılır (`cloud.activate`,
-  `cloud.disconnect`).
+- `GET /cloud/status` — kartların tek kaynağı:
+  - `link`: `unconfigured` · `no_license` · `legacy_license` (lisans numarası yok) · `linking` ·
+    `waiting_network` · `conflict` (lisans başka bilgisayarda bağlı) · `lost` (satıcı ya da başka
+    bilgisayar bağlantıyı aldı; neden `lostReason`) · `error` (bulut reddetti; seyrek yeniden
+    denenir) · `linked` · `suspended` · `expired` · `revoked`.
+  - `qr`: `off` · `on` · `not_licensed`; `qrPublish` (kullanıcının seçimi), `unpublishPending`.
+  - `connected`, `remoteState` (bulutun son bildirdiği lisans durumu), `lastSeenAt`,
+    `lastHeartbeatAt`, `linkError`, `blocked` (bulut yayını neden reddediyor), işletme/şube/paket,
+    `licenseExpiresAt`, `conflictLastSeenAt`, son yayın zamanı ve menü sürümü, `publishing`, son hata.
+  - Eski `mode` alanı kaldırıldı.
+- `POST /cloud/activate` `{ takeover?: boolean }` — "şimdi bağlan": bağlı değilse lisansla bağlanır
+  (`POST /api/pos/activate`), bağlıysa hemen heartbeat gönderir. Lisans numarası yoksa
+  `403 LICENSE_ID_REQUIRED`. Lisans başka kurulumda bağlıysa `link: conflict`; sahibin onayıyla
+  `takeover: true` devralır (diğer bilgisayarın bağlantısı `superseded` olur). Otomatik devralma yoktur.
+- `PUT /cloud/qr` `{ enabled: boolean }` — QR menüyü aç/kapat. Kapatınca bulutta menü ve masalar
+  yayından kalkar (`POST /api/pos/menu/unpublish`), **bağlantı kalır**; internet yoksa kapatma
+  bağlantı gelince tamamlanır. Açmak lisansta `qr.menu` ister.
+- `POST /cloud/publish` — şimdi yayınla. QR menü kapalıysa `409 QR_MENU_OFF`, bağlantı yoksa
+  `409 CLOUD_NOT_CONNECTED`.
+- `DELETE /cloud/connection` — eski sürümlerle uyum için "QR menüyü kapat" ile aynı.
+- Hepsi `settings.manage`; QR açma/kapatma denetim kaydına yazılır (`cloud.qr.enable`,
+  `cloud.qr.disable`).
+- **Kendiliğinden bağlanma:** açılışta, lisans girilince (`license.activated`) ve her uzlaştırmada;
+  yalnız ana şube. 0.3.0'dan yükseltmede bağlantı varsa QR menü açık kabul edilir ve lisans bir kez
+  buluta gönderilir (lisans kaydı eski işletmeleri bilmez).
+- **Heartbeat** (`CLOUD_HEARTBEAT_SECONDS`, varsayılan 3600; açılışta ve bağlanınca hemen):
+  `POST /api/pos/heartbeat` gövdesi `InstallMetricsService`'ten (veritabanı ve yedek boyutu, boş
+  disk, son yedek, son bulut yedeği) + sürüm + lisans numarası ve bitişi. Yanıtla bağlantı bilgileri
+  tazelenir ve `license.remote` olayı yayınlanır (bulut kaydında daha geç bitişli imzalı lisans
+  varsa `update` alanıyla). Eski Worker'da (`404`) `GET /status`'a düşer.
 - **Otomatik yayın:** `product.*`, `category.*`, `table.*`, `hall.*` ve `branch.updated` olayları
   şube başına 5 sn birleştirilen `cloud.publish` işini kuyruğa alır; iş eksik görselleri yükler,
   menüyü ve masa listesini gönderir. Arka plan işi 3 kez dener (5 sn, 10 sn arayla).
 - **Uzlaştırma** (`CLOUD_RECONCILE_SECONDS`, varsayılan 300 sn): son yayın başarısızsa ya da menü
   son yayından beri değiştiyse yeniden yayınlar (uzun internet kesintisi, kaçan olay); bekleyen
-  açma/kapatmayı ve lisans yenilemesini (`license.activated` → `PUT /api/pos/license`, belirteç
-  değişmez) tamamlar; saatte bir, yayın engelliyken her turda buluttan işletme durumunu okur.
+  bağlanmayı, QR kapatmayı ve lisans yenilemesini (`license.activated` → `PUT /api/pos/license`,
+  belirteç değişmez) tamamlar; heartbeat zamanı geldiyse (yayın engelliyken her turda) gönderir.
 - **Bulut hataları:** `401` bağlantıyı yerelde kaldırır (`mode: lost`, neden kartta); `403`
   (`TENANT_SUSPENDED`, `LICENSE_EXPIRED`, `QR_MENU_NOT_LICENSED`) yayını durdurur, belirteç korunur,
   engel kalkınca yayın kendiliğinden sürer.

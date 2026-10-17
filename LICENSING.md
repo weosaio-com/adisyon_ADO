@@ -87,12 +87,24 @@ Her kurulumun kalıcı kimliği veri dizinindeki `ado-install.json` dosyasındad
 (`apps/backend/src/common/util/install-id.ts`). Bilerek veritabanının dışındadır: yedek başka bir
 bilgisayara geri yüklendiğinde kimlik onunla gitmez, iki bilgisayar aynı kurulum gibi görünmez.
 
-## 7. QR menü bulutuna lisansla bağlanma
+## 7. Buluta lisansla bağlanma
 
-Program **Ayarlar › QR Menü › QR menüyü aç** dediğinde lisansı, kurulum kimliğini ve şube bilgisini
-buluta gönderir (`POST /api/pos/activate`). Bulut imzayı aynı açık anahtarla (`LICENSE_PUBLIC_KEY`)
-doğrular; lisans kimliği, süre ve `qr.menu` şarttır. İşletme lisans kimliğiyle ilk açılışta oluşur,
-satıcının bulutta ayrıca işletme açması gerekmez. Bir lisans aynı anda tek kurulumda açıktır;
-başka bilgisayara taşımak sahibin onayını ister. Lisans yenilenince program yeni lisansı buluta
-bildirir (`PUT /api/pos/license`), yeniden açmak gerekmez. Ayrıntı: `QR_MENU_DESIGN.md` §3.1,
-`API_DESIGN.md` §5.12. Eşleştirme kodu ve web işletme paneli kaldırıldı; bağlanmanın tek yolu lisanstır.
+Lisans numarası (`id`) olan her kurulum açılışta ve lisans girilince buluta **kendiliğinden**
+bağlanır; QR menü gerekmez. Program lisansı, kurulum kimliğini ve şube bilgisini gönderir
+(`POST /api/pos/activate`). Bulut imzayı aynı açık anahtarla (`LICENSE_PUBLIC_KEY`) doğrular; süresi
+dolmuş ama imzası geçerli lisans da "yalnız bağlantı" olarak bağlanır (yenileme böyle ulaşır).
+İşletme lisans kimliğiyle ilk bağlantıda oluşur ve lisans **kaydına** (`licenses`) yazılır.
+
+- Bir lisans aynı anda tek kurulumda bağlıdır; başka bilgisayara taşımak sahibin onayını ister
+  ("Bu bilgisayara al"), kendiliğinden devralma yoktur.
+- Program saatte bir heartbeat gönderir. Bulut lisansın durumunu (etkin, askıda, iptal, süresi
+  dolmuş) bildirir; kayıtta aynı numaralı ve daha geç bitişli imzalı lisans varsa onu da gönderir.
+  Program imzayı gömülü açık anahtarlarla doğrulayıp yeni lisansı kendisi kurar.
+- Satıcı lisansı `scripts/license.mjs register` ya da satıcı API'siyle (`PUT /api/admin/licenses`)
+  kayda ekler; iptal edilen lisans (`POST /api/admin/licenses/:id/revoke`) işletme silinse bile
+  yeniden bağlanamaz. QR menü, bağlantı üzerinde ayrı bir anahtardır ve lisansta `qr.menu` ister.
+- Aynı bitiş tarihli bir lisans (yalnız özellik eklenmiş) kendiliğinden gönderilmez; bitişi bir gün
+  ileri alın ya da anahtarı elle girin.
+
+Ayrıntı: `QR_MENU_DESIGN.md` §3.1, `API_DESIGN.md` §5.12. Eşleştirme kodu ve web işletme paneli
+kaldırıldı; bağlanmanın tek yolu lisanstır.

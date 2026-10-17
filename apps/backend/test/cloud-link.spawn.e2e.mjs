@@ -1,4 +1,4 @@
-// Bulut baglantisi (spawned; kendi portu 3061, sahte bulut 3069): lisansla kendiliginden baglanma,
+// Bulut baglantisi (spawned; kendi portu 3071, sahte bulut 3079): lisansla kendiliginden baglanma,
 // heartbeat araligi (1 sn), QR kapaliyken bulutta kalan menunun kaldirilmasi, eski bulut (heartbeat
 // ve unpublish yok), 0.3.0'dan yukseltme (QR menu acik kalir, lisans bir kez bildirilir) ve
 // license.remote olayi. Anahtar cifti her kosumda bellekte uretilir (dosyaya yazilmaz).
@@ -10,7 +10,7 @@ import { checklist, portOffset, prepareBackend } from './spawn-backend.mjs';
 
 const t = checklist('Bulut baglantisi (spawned)');
 const keys = generateLicenseKeyPair();
-const cloudUrl = `http://127.0.0.1:${3069 + portOffset()}`;
+const cloudUrl = `http://127.0.0.1:${3079 + portOffset()}`;
 const license = (overrides = {}) =>
   signLicense(
     buildPayload({
@@ -37,7 +37,7 @@ async function waitFor(read, accept, timeoutMs = 10000) {
 const fake = await startFakeCloud(cloudUrl, keys.publicKeyB64);
 const backend = prepareBackend({
   name: 'cloud-link',
-  port: 3061,
+  port: 3071,
   env: {
     CLOUD_API_URL: cloudUrl,
     CLOUD_RECONCILE_SECONDS: '1',
