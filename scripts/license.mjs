@@ -7,8 +7,12 @@
 //        [--id lic_xxx] [--plan yearly] [--grace 14] [--feature qr.menu=true ...]
 //   node scripts/license.mjs verify --pub <base64 SPKI> --license <ADO1....>
 //   node scripts/license.mjs public-key --key <ozel.pem>
+//   node scripts/license.mjs register --url <bulut adresi> --license <ADO1....> \
+//        [--notes "..."] [--token-env ADO_ADMIN_TOKEN]
 //
 // OZEL ANAHTAR ASLA REPOYA GIRMEZ: gen-key repo icindeki bir klasore yazmayi reddeder.
+// register: lisansi bulutun lisans kaydina yazar (PUT /api/admin/licenses). Satici API anahtari
+// yalniz ortam degiskeninden okunur (varsayilan ADO_ADMIN_TOKEN) ve hicbir yere yazdirilmaz.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   createPrivateKey,
@@ -159,6 +163,53 @@ function verifyCommand(values) {
   console.log(JSON.stringify(payload, null, 2));
 }
 
+/** Bulut adresi: https, ya da yerel deneme icin http://localhost / 127.0.0.1. */
+export function adminBaseUrl(raw) {
+  let url;
+  try {
+    url = new URL(String(raw ?? '').trim());
+  } catch {
+    throw new Error('--url gecerli bir adres olmali (or. https://bulut.ornek.com).');
+  }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+    throw new Error('--url https:// olmali (http:// yalniz localhost/127.0.0.1 icin).');
+  }
+  return url.origin;
+}
+
+async function registerCommand(values) {
+  if (!values.url || !values.license) throw new Error('--url ve --license gerekli.');
+  const base = adminBaseUrl(values.url);
+  const envName = values['token-env'] ?? 'ADO_ADMIN_TOKEN';
+  const token = process.env[envName]?.trim();
+  // Anahtarin kendisi asla yazdirilmaz; yalniz ortam degiskeninin adi.
+  if (!token) throw new Error(`${envName} ortam degiskeni tanimli degil (satici API anahtari).`);
+  const res = await fetch(`${base}/api/admin/licenses`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      licenseKey: String(values.license).trim(),
+      ...(values.notes !== undefined ? { notes: values.notes } : {}),
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.success) {
+    const error = body.error ?? {};
+    throw new Error(
+      `Kayit reddedildi (HTTP ${res.status} ${error.code ?? ''}): ${error.message ?? ''}`.trim(),
+    );
+  }
+  const lic = body.data;
+  console.log(
+    `${res.status === 201 ? 'Kaydedildi' : 'Guncellendi'}: ${lic.id} (${lic.customer}), bitis ${lic.exp}` +
+      `${lic.tenant ? `, isletme ${lic.tenant.name}` : ''}${lic.revoked ? ', IPTAL EDILMIS' : ''}`,
+  );
+  if (!lic.applied) {
+    console.log(`Kayitta daha gec bitisli bir anahtar var (${lic.exp}); bu anahtar uygulanmadi.`);
+  }
+}
+
 function main(argv) {
   const [command, ...rest] = argv;
   const { values } = parseArgs({
@@ -176,23 +227,28 @@ function main(argv) {
       feature: { type: 'string', multiple: true },
       pub: { type: 'string' },
       license: { type: 'string' },
+      url: { type: 'string' },
+      notes: { type: 'string' },
+      'token-env': { type: 'string' },
     },
   });
   if (command === 'gen-key') return genKey(values);
   if (command === 'sign') return signCommand(values);
   if (command === 'verify') return verifyCommand(values);
+  if (command === 'register') return registerCommand(values);
   if (command === 'public-key') {
     if (!values.key) throw new Error('--key <ozel.pem> gerekli.');
     return console.log(publicKeyFromPrivate(readFileSync(values.key, 'utf8')));
   }
-  throw new Error('Komut: gen-key | sign | verify | public-key (ayrinti: dosya basi).');
+  throw new Error('Komut: gen-key | sign | verify | public-key | register (ayrinti: dosya basi).');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    main(process.argv.slice(2));
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  }
+  // register agdan bekler (async); diger komutlarin hatasi da ayni yoldan yakalanir.
+  Promise.resolve()
+    .then(() => main(process.argv.slice(2)))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : error);
+      process.exitCode = 1;
+    });
 }

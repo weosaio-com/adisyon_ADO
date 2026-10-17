@@ -36,10 +36,14 @@ http://localhost:5174. Vite `/api` ve `/img` isteklerini `wrangler dev`'e (8787)
 
 ### Lisansla bağlanma
 
-İşletme bulutta ayrıca açılmaz: POS lisansıyla ilk bağlandığında (`POST /api/pos/activate`) bulut
-imzayı `LICENSE_PUBLIC_KEY` ile doğrular, işletmeyi lisans kimliğiyle açar ve belirteç döner
-(ayrıntı: `LICENSING.md`, `QR_MENU_DESIGN.md` §5). Yerelde denemek için bir anahtar çifti üretip açık
-anahtarı `.dev.vars`'a yazın; lisansı aynı araçla imzalayın:
+İşletme bulutta ayrıca açılmaz: lisanslı (lisans numaralı) her POS kurulumu açılışta ve lisans
+girilince buluta **kendiliğinden** bağlanır (`POST /api/pos/activate`; QR menü şart değildir).
+Bulut imzayı `LICENSE_PUBLIC_KEY` ile doğrular, işletmeyi lisans kimliğiyle açar, lisansı lisans
+kaydına (`licenses`) yazar ve belirteç döner. POS sonra saatte bir heartbeat gönderir (son görülme,
+sürüm, disk ve yedek sağlığı); yanıtta lisansın uzak durumu (etkin, askıda, süresi dolmuş, iptal)
+ve kayıtta daha yeni bir lisans varsa anahtarın kendisi döner (ayrıntı: `LICENSING.md`,
+`QR_MENU_DESIGN.md` §3, §5). QR menü bu bağlantının üzerinde ayrıca açılıp kapanır. Yerelde denemek
+için bir anahtar çifti üretip açık anahtarı `.dev.vars`'a yazın; lisansı aynı araçla imzalayın:
 
 ```bash
 node scripts/license.mjs gen-key --out ~/ado-lisans-yerel
@@ -51,7 +55,8 @@ node scripts/license.mjs sign --key ~/ado-lisans-yerel/ado-license-private.pem \
 POS'u bu buluta bağlamak için backend'i aynı açık anahtar ve yerel adresle başlatın
 (`ADO_LICENSE_PUBLIC_KEY=<açık anahtar>`, `CLOUD_API_URL=http://127.0.0.1:8787`; `http://` yalnız
 `localhost`/`127.0.0.1` için kabul edilir, gerçek adres `https://` olmalıdır). İmzalı lisansı POS'ta
-**Ayarlar › Lisans**'a girip **Ayarlar › QR Menü** kartında **QR menüyü aç** deyin.
+**Ayarlar › Lisans**'a girin: kartta "Bulut: bağlı" görünür. QR menü için **Ayarlar › QR Menü**
+kartında **QR menüyü aç** deyin. Heartbeat aralığı `CLOUD_HEARTBEAT_SECONDS` (varsayılan 3600).
 
 `LICENSE_PUBLIC_KEY` boşsa etkinleştirme `503 ACTIVATION_DISABLED` döner.
 
@@ -114,7 +119,8 @@ kartları yeniden çalışır. Geri dönmek gerekirse:
 ### Telefonla deneme
 
 1. Test profiliyle derlenmiş programı kurun (`pnpm --filter @ado/desktop dist:test`; bulut adresi test
-   ortamı). Deneme lisansını **Ayarlar › Lisans**'a girip **Ayarlar › QR Menü › QR menüyü aç** deyin.
+   ortamı). Deneme lisansını **Ayarlar › Lisans**'a girin (kartta "Bulut: bağlı"), sonra **Ayarlar ›
+   QR Menü › QR menüyü aç** deyin.
 2. **Masa QR kodları**'ndan bir kartı basıp telefonla okutun: menü açılır, işletme adı ve masa
    doğrudur.
 3. Programda bir ürünü **Tükendi** yapın; telefonda sayfayı yenileyin: rozet birkaç saniyede görünür.
@@ -153,7 +159,8 @@ Bir kez yapılır. Komutlar depo kökünden çalıştırılır.
    `wrangler.jsonc`'a `"routes": [{ "pattern": "menu.ornek.com", "custom_domain": true }]` ekleyip
    yeniden yükleyin. Sertifika otomatik gelir.
 10. **Kontrol.** `https://menu.ornek.com/api/health` → `{"success":true,"data":{"ok":true}}`. Üretim
-    profiliyle derlenmiş programda lisansı girip **QR menüyü aç** deyin.
+    profiliyle derlenmiş programda lisansı girin (Lisans kartında "Bulut: bağlı"), sonra **QR menüyü
+    aç** deyin.
 
 Sonraki sürümler yalnız 8. adımdır; yeni bir migration varsa önce 6. adım.
 
@@ -169,23 +176,40 @@ Sonraki sürümler yalnız 8. adımdır; yeni bir migration varsa önce 6. adım
 6. POS bilgisayarının internetini kesin: satış sürer, kartta yayın hatası görünür; internet gelince
    menü kendiliğinden güncellenir (beklemek istemezseniz **Şimdi yayınla**).
 
-### İşletme yönetimi (satıcı API'si)
+### İşletme ve lisans yönetimi (satıcı API'si)
 
 Tüm istekler `Authorization: Bearer <ADMIN_TOKEN>` ister. İşletmeler POS'un lisansla ilk
-bağlanmasında kendiliğinden açılır.
+bağlanmasında kendiliğinden açılır. Sonraki yönetim paneli (Faz B) aynı uçları kullanır.
 
 | İş | İstek |
 |---|---|
 | Paketleri listele | `GET /api/admin/plans` |
-| İşletmeleri listele / ayrıntı (şube, son görülme, POS sürümü) | `GET /api/admin/tenants` · `GET /api/admin/tenants/:id` |
+| İşletmeleri listele / ayrıntı (şube, son görülme, POS sürümü ve kurulumu, son heartbeat sağlığı, lisans kaydı durumu) | `GET /api/admin/tenants` · `GET /api/admin/tenants/:id` |
 | Özellik aç/kapat, askıya al | `PATCH /api/admin/tenants/:id` `{ features?, status?, plan?, name? }` |
-| POS bağlantısını kaldır (çalınan lisans, bilgisayar değişimi) | `POST /api/admin/tenants/:id/revoke` |
-| İşletmeyi sil (şube, menü, masalarla) | `DELETE /api/admin/tenants/:id` |
+| POS bağlantısını kaldır (bilgisayar değişimi; POS sahibin onayı olmadan yeniden bağlanmaz) | `POST /api/admin/tenants/:id/revoke` |
+| İşletmeyi sil (şube, menü, masalarla; lisans kaydı kalır) | `DELETE /api/admin/tenants/:id` |
+| Lisansları listele (işletme, son görülme, sürüm, sağlık, iptal) | `GET /api/admin/licenses` |
+| Lisans ayrıntısı (imzalı anahtar dahil) | `GET /api/admin/licenses/:id` |
+| Lisans kaydet / yenile (imza doğrulanır; kayıt geri gitmez, eskisi `applied: false`) | `PUT /api/admin/licenses` `{ licenseKey, notes? }` |
+| Lisansı iptal et (çalınan lisans, iade) / iptali kaldır | `POST /api/admin/licenses/:id/revoke` `{ reason? }` · `POST /api/admin/licenses/:id/unrevoke` |
 
 Paketler: `menu` (QR Menü), `order`, `pay`, `full`. QR-1'de yalnız `qr.menu` özelliği kullanılır.
-Ad, paket ve özellikler imzalı lisanstan gelir ve her etkinleştirme ile lisans yenilemesinde yeniden
-yazılır (satıcının `PATCH` ile yaptığı değişiklik yenilemeye kadar geçerlidir). Askıya alma satıcı
-kararıdır, yenilemede korunur.
+Ad, paket ve özellikler lisans kaydındaki geçerli (en geç bitişli) lisanstan gelir ve her bağlanma,
+lisans yenilemesi ve satıcı kaydında yeniden yazılır (satıcının `PATCH` ile yaptığı değişiklik
+yenilemeye kadar geçerlidir). Askıya alma satıcı kararıdır, yenilemede korunur.
+
+**Lisans kaydı (`licenses`).** Bağlanma (`activation`), POS'un lisans yenilemesi (`renewal`) ve
+satıcı (`admin`) yazar; kaynak, anahtarı ilk kimin getirdiğini söyler. Kayıttaki anahtar yalnız
+bitişi (exp + ek süre) daha geç ya da eşitse değişir. Satıcının kaydettiği yeni lisans POS'a bir
+sonraki heartbeat'te gider (aynı lisans numarası ve daha geç `exp`; aynı bitişli, yalnız özelliği
+değişen anahtar kendiliğinden gitmez: bitişi bir gün ileri alın ya da anahtarı programa girin).
+Komut satırından: `ADO_ADMIN_TOKEN=… node scripts/license.mjs register --url https://<bulut>
+--license ADO1.… [--notes "…"]` (anahtar yalnız ortam değişkeninden okunur, yazdırılmaz).
+
+**İptal.** `revoke` sonrası bağlanma ve yenileme `403 LICENSE_REVOKED` alır, yayın durur, menü ve
+masalar yayından kalkar; POS belirteci korunur, POS durumu heartbeat'te `revoked` olarak öğrenir.
+İşletme silinse de kayıt ve iptal kalır. `unrevoke` sonrası POS bir sonraki heartbeat'te `active`
+görür ve QR menü açıksa yeniden yayınlar.
 
 ### İşletim notları
 
