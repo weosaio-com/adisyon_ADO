@@ -41,6 +41,8 @@ model Expense {
   syncState String    @default("pending") @map("sync_state")
 
   @@index([branchId, categoryId])
+  // Rapor/liste: sube + tarih araligi (spent_at)
+  @@index([branchId, spentAt])
   @@map("expenses")
 }
 
@@ -62,5 +64,7 @@ model Income {
   syncState String    @default("pending") @map("sync_state")
 
   @@index([branchId])
+  // Rapor/liste: sube + tarih araligi (received_at)
+  @@index([branchId, receivedAt])
   @@map("incomes")
 }

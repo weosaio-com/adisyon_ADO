@@ -5,17 +5,21 @@
 // ==============================================================================
 
 model Backup {
-  id        String  @id
-  branchId  String  @map("branch_id")
-  path      String
+  id            String  @id
+  branchId      String  @map("branch_id")
+  path          String
   // BigInt: 2 GB ustu veritabaninin yedegi Int'e sigmaz (yanitta sayiya cevrilir; main.ts).
-  sizeBytes BigInt  @map("size_bytes")
-  type      String // auto | manual | pre_update | imported
+  sizeBytes     BigInt  @map("size_bytes")
+  type          String // auto | manual | pre_update | imported
   // 1: IV + etiket + veri (eski); 2: sikistirilmis akis bicimi (baslik + veri + etiket).
-  format    Int     @default(1)
-  encrypted Boolean @default(true)
-  checksum  String
-  createdBy String? @map("created_by")
+  format        Int     @default(1)
+  encrypted     Boolean @default(true)
+  checksum      String
+  createdBy     String? @map("created_by")
+  // Bulut klasorune (OneDrive/Drive) alinan kopyanin yolu; yedek silinince kopya da silinir.
+  cloudCopyPath String? @map("cloud_copy_path")
+  // Yedek anindaki veri parmak izi: degisiklik yoksa gunluk otomatik yedek atlanir.
+  fingerprint   String?
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
