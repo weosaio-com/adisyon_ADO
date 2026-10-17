@@ -4,6 +4,7 @@ import { sha256Hex } from './crypto';
 import type { BranchRow, TenantRow } from './db';
 import { ApiError } from './http';
 import { licenseExpired, tenantFeatures } from './plans';
+import { findLicense, isRevoked, licenseRevokedError } from './registry';
 
 /**
  * POS belirteci (Bearer) dogrulamasi ve ortak POS yardimcilari. routes/pos.ts'ten tasindi:
@@ -18,34 +19,35 @@ const APP_VERSION_PATTERN = /^[0-9A-Za-z.+-]{1,40}$/;
 
 export type RevocationReason = 'rotated' | 'superseded' | 'revoked' | 'unpaired';
 
+/** Surum metni gecerliyse kendisi, degilse null (baslik ve heartbeat govdesi ayni kural). */
+export function validAppVersion(value: string | null | undefined): string | null {
+  const text = value?.trim() ?? '';
+  return APP_VERSION_PATTERN.test(text) ? text : null;
+}
+
 /** POS surumu (X-Ado-Version): satici guncelleme yayilimini izler. Gecersizse yok sayilir. */
 export function appVersion(c: Context<AppEnv>): string | null {
-  const value = c.req.header('X-Ado-Version')?.trim() ?? '';
-  return APP_VERSION_PATTERN.test(value) ? value : null;
+  return validAppVersion(c.req.header('X-Ado-Version'));
 }
 
 export function revocationError(reason: RevocationReason | undefined): ApiError {
   switch (reason) {
     case 'rotated':
-      return new ApiError(
-        401,
-        'POS_TOKEN_ROTATED',
-        'Bu bilgisayarın QR menü bağlantısı yenilendi. QR menüyü yeniden açın.',
-      );
+      return new ApiError(401, 'POS_TOKEN_ROTATED', 'Bu bilgisayarın bulut bağlantısı yenilendi.');
     case 'superseded':
       return new ApiError(
         401,
         'POS_TOKEN_SUPERSEDED',
-        'Bu lisansla QR menü başka bir bilgisayarda açıldı.',
+        'Bu lisans başka bir bilgisayarda buluta bağlandı.',
       );
     case 'revoked':
       return new ApiError(
         401,
         'POS_TOKEN_REVOKED',
-        'QR menü bağlantısı satıcı tarafından kaldırıldı.',
+        'Bulut bağlantısı satıcı tarafından kaldırıldı.',
       );
     case 'unpaired':
-      return new ApiError(401, 'POS_TOKEN_UNPAIRED', 'QR menü kapatıldı.');
+      return new ApiError(401, 'POS_TOKEN_UNPAIRED', 'Bulut bağlantısı kapatıldı.');
     default:
       return new ApiError(401, 'POS_TOKEN_INVALID', 'POS bağlantısı geçersiz. Yeniden bağlanın.');
   }
@@ -126,9 +128,15 @@ export const posAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
-/** Yayin icin: isletme askida, lisans dolmus ya da QR menu hakki yoksa 403 (belirtec gecerli kalir). */
+/**
+ * Yayin icin: lisans iptal edilmis, isletme askida, lisans dolmus ya da QR menu hakki yoksa 403
+ * (belirtec gecerli kalir: POS heartbeat'le durumu ogrenmeye devam eder).
+ */
 export const requireActive: MiddlewareHandler<AppEnv> = async (c, next) => {
   const { tenant } = c.get('pos');
+  if (tenant.license_id && isRevoked(await findLicense(c.env.DB, tenant.license_id))) {
+    throw licenseRevokedError();
+  }
   if (tenant.status === 'suspended') {
     throw new ApiError(
       403,

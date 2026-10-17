@@ -26,9 +26,16 @@ describe('satici API', () => {
     });
     expect(detail.body.data).not.toHaveProperty('users');
     expect(detail.body.data.branches).toHaveLength(1);
-    expect(detail.body.data.branches[0]).toMatchObject({ id: shop.branchId, menu: null });
+    // Heartbeat gelmeden saglik bilgisi yok.
+    expect(detail.body.data.branches[0]).toMatchObject({
+      id: shop.branchId,
+      menu: null,
+      health: null,
+    });
     expect(detail.body.data.branches[0].pos.pairedAt).toBeTruthy();
+    expect(detail.body.data.branches[0].pos.installId).toEqual(expect.any(String));
     expect(detail.body.data.branches[0]).not.toHaveProperty('source');
+    expect(detail.body.data.registry).toMatchObject({ revoked: false, source: 'activation' });
   });
 
   it('isletme acma, eslestirme kodu ve parola uclari kaldirildi', async () => {

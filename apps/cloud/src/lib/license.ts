@@ -67,18 +67,31 @@ export async function verifyLicense(
 
 export interface UsableLicense {
   payload: LicensePayload & { id: string };
+  /** Bitis ani (exp + ek sure, UTC ISO). */
   expiresAt: string;
+  /** Suresi dolmus mu (yalniz `allowExpired` ile donebilir). */
+  expired: boolean;
+}
+
+export interface LicenseCheckOptions {
+  /** QR menu hakki sart mi (varsayilan evet; baglanma ve yenileme `false` verir). */
+  requireQrMenu?: boolean;
+  /**
+   * Suresi dolmus ama imzasi gecerli lisans kabul edilsin mi. Baglanma ve yenileme kabul eder
+   * ("yalniz baglanti": menu kapali kalir, yenileme bu kuruluma ulasabilir).
+   */
+  allowExpired?: boolean;
+  now?: Date;
 }
 
 /**
- * Etkinlestirme ve yenileme icin ortak kontrol: imza, kimlik, sure ve (istenirse) QR menu hakki.
- * Yenileme QR menusuz lisansi da kabul eder: ozellik kapanir, baglanti durur.
- * Hata kodlari POS'ta ayri durumlara karsilik gelir.
+ * Etkinlestirme, yenileme ve satici kaydi icin ortak kontrol: imza, kimlik, (istenirse) sure ve
+ * QR menu hakki. Hata kodlari POS'ta ayri durumlara karsilik gelir.
  */
 export async function requireUsableLicense(
   env: Pick<Env, 'LICENSE_PUBLIC_KEY'>,
   licenseKey: string,
-  { requireQrMenu = true, now = new Date() }: { requireQrMenu?: boolean; now?: Date } = {},
+  { requireQrMenu = true, allowExpired = false, now = new Date() }: LicenseCheckOptions = {},
 ): Promise<UsableLicense> {
   const payload = await verifyLicense(licenseKey, licensePublicKeys(env));
   if (!payload) {
@@ -88,15 +101,16 @@ export async function requireUsableLicense(
     throw new ApiError(
       400,
       'LICENSE_ID_REQUIRED',
-      'Bu lisans QR menü için uygun değil (lisans numarası yok). Satıcınızdan yeni lisans isteyin.',
+      'Bu lisans buluta bağlanamaz (lisans numarası yok). Satıcınızdan yeni lisans isteyin.',
     );
   }
   const expiresAt = licenseExpiresAtUtc(payload);
-  if (expiresAt.getTime() <= now.getTime()) {
+  const expired = expiresAt.getTime() <= now.getTime();
+  if (expired && !allowExpired) {
     throw new ApiError(403, 'LICENSE_EXPIRED', 'Lisansın süresi dolmuş.');
   }
   if (requireQrMenu && payload.f?.[QR_MENU_FEATURE] !== true) {
     throw new ApiError(403, 'QR_MENU_NOT_LICENSED', 'Lisansınız QR menüyü içermiyor.');
   }
-  return { payload: { ...payload, id: payload.id }, expiresAt: expiresAt.toISOString() };
+  return { payload: { ...payload, id: payload.id }, expiresAt: expiresAt.toISOString(), expired };
 }

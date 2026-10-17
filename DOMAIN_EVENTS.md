@@ -139,14 +139,15 @@
 - **Amaci:** Ayarlar › Lisans'tan yeni bir lisans anahtari etkinlestirildi (imza ve sure dogrulandi).
 - **Yayinlandigi yer:** `LicenseService.activate` (post-commit; bayraklar tazelendikten sonra).
 - **Payload:** `{ licenseId, customerName, features }`. Anahtarin kendisi ASLA event'e konmaz.
-- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService`: QR menu aciksa yeni lisans buluta
-  bildirilir (`PUT /api/pos/license`, belirtec degismez); lisans kimligi degistiyse baglanti kapanir
-  ve "QR menuyu ac" yeniden gerekir.
+- **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService`: bulut bagliysa yeni lisans buluta
+  bildirilir (`PUT /api/pos/license`, belirtec degismez); bagli degilse lisansla kendiliginden
+  baglanilir (lisans numarasi varsa). Lisans kimligi degistiyse eski baglanti kapanir, yenisi kurulur.
 
 ### `license.remote` (Faz A sozlesmesi)
 - **Amaci:** Bulut, bu kurulumun lisansi hakkinda bilgi verdi: kayittaki durum (etkin, askida,
   iptal, suresi dolmus) ve varsa ayni kimlikli daha yeni imzali lisans.
-- **Yayinlandigi yer:** `CloudService`, her basarili heartbeat'ten sonra (kalici degil).
+- **Yayinlandigi yer:** `CloudService`, yalniz her basarili `POST /api/pos/heartbeat`'ten sonra
+  (kalici degil; eski Worker'a `GET /status` geri dususunde yayinlanmaz).
 - **Payload:** `{ licenseId, state, update?, serverTime, receivedAt }`. `update` imzali anahtarin
   kendisidir; tuketici imzayi gomulu acik anahtarlarla dogrulamadan kurmaz.
 - **Dinleyen moduller:** `LicenseService` (uzaktan yenilemeyi kurar, askiya alma/iptali ve bulut

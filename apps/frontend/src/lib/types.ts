@@ -231,36 +231,54 @@ export interface PrintJobRow {
   text: string; // yaziciya giden metin (onizleme)
 }
 
-// QR menu bulut baglantisi (GET /cloud/status). Durumlar: backend cloud.state.ts CloudMode.
-export type CloudMode =
-  | 'unconfigured' // bu kurulumda bulut adresi yok
+// Bulut baglantisi + QR menu (GET /cloud/status). Durumlar: backend cloud.state.ts.
+// Baglanti (Lisans kartindaki satir): lisansli her kurulum buluta kendiliginden baglanir.
+export type CloudLinkMode =
+  | 'unconfigured' // bu kurulumda bulut adresi yok (satir gorunmez)
   | 'no_license' // lisans girilmemis
-  | 'not_licensed' // lisans QR menuyu icermiyor
-  | 'expired' // lisans suresi dolmus
-  | 'off' // acilabilir
-  | 'waiting_network' // acma istendi, internet bekleniyor
-  | 'conflict' // lisans baska bilgisayarda acik
-  | 'lost' // baglanti bulutta gecersiz kilindi
-  | 'on' // acik
-  | 'suspended'; // bulut isletmeyi askiya almis
+  | 'legacy_license' // lisans numarasi olmayan eski lisans: baglanamaz
+  | 'linking' // birazdan baglanacak
+  | 'waiting_network' // internet yok, kendiliginden yeniden denenir
+  | 'conflict' // lisans baska bilgisayarda bagli ("Bu bilgisayara al")
+  | 'lost' // satici bu bilgisayarin baglantisini kaldirdi ("Yeniden bağlan")
+  | 'error' // bulut baglanmayi reddetti; seyrek yeniden denenir
+  | 'linked' // bagli
+  | 'suspended' // satici askiya almis
+  | 'expired' // buluta gore lisans suresi dolmus
+  | 'revoked'; // lisans satici tarafindan iptal edilmis
+
+// QR menu (QR Menu karti): baglantidan ayri ac/kapat ayari.
+export type CloudQrMode = 'off' | 'on' | 'not_licensed';
 
 export type CloudLostReason = 'superseded' | 'rotated' | 'revoked' | 'unpaired' | 'invalid';
+export type CloudBlockedReason = 'suspended' | 'expired' | 'not_licensed' | 'revoked';
+export type CloudRemoteState = 'active' | 'suspended' | 'revoked' | 'expired';
 
 export interface CloudStatus {
-  mode: CloudMode;
-  enabled: boolean; // bu kurulumda QR menu bulutu tanimli mi
-  connected: boolean;
+  // --- Bulut baglantisi ---
+  enabled: boolean; // bu kurulumda bulut tanimli mi (satir ve QR karti gorunur)
   url: string | null; // QR kartlarindaki adres
+  connected: boolean;
+  link: CloudLinkMode;
   licenseId: string | null;
+  remoteState: CloudRemoteState | null;
+  lastSeenAt: string | null; // bulutla son basarili temas
+  lastHeartbeatAt: string | null;
+  lostReason: CloudLostReason | null;
+  conflictLastSeenAt: string | null; // diger bilgisayarin son gorulmesi
+  linkError: string | null; // bulutun baglanma reddi (error modunda)
   branchName: string | null;
   tenantName: string | null;
   tenantStatus: 'active' | 'suspended' | null;
   planLabel: string | null;
-  menuEnabled: boolean | null; // paket QR menuyu iceriyor mu
   licenseExpiresAt: string | null;
   pairedAt: string | null;
-  lostReason: CloudLostReason | null;
-  conflictLastSeenAt: string | null;
+  // --- QR menu ---
+  qr: CloudQrMode;
+  qrPublish: boolean; // sahibin ac/kapat ayari
+  menuEnabled: boolean | null; // bulutta QR menu hakki (bagli degilken bilinmez)
+  blocked: CloudBlockedReason | null; // bulut yayini reddediyor
+  unpublishPending: boolean; // internetsiz kapatma bulutta henuz tamamlanmadi
   lastPublishedAt: string | null;
   lastMenuVersion: number | null;
   lastError: string | null;

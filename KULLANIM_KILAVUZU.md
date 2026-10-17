@@ -115,6 +115,10 @@ Müşteri masadaki QR kodu telefonunun kamerasıyla okutur ve menünüzü görü
 alerjenler, İngilizce ve "tükendi" bilgisi. Uygulama kurmaya gerek yoktur. Menü **bu programdan**
 yönetilir; ayrı bir hesap, adres ya da kod gerekmez. QR menü lisansınıza bağlıdır.
 
+> Lisanslı program internete çıktığında buluta **kendiliğinden** bağlanır (Ayarlar › Lisans'ta
+> "Bulut: bağlı" yazar). Bu bağlantı yenilenen lisansın gelmesi ve bulut yedeği içindir; QR menü bu
+> bağlantı üzerinde ayrıca açılıp kapatılır.
+
 1. **Lisans:** **Ayarlar › Lisans** bölümüne satıcınızın verdiği lisans anahtarını yapıştırıp
    **Lisansı Etkinleştir** deyin. Bölümde "QR menü: dahil" yazmalıdır.
 2. **Ürün bilgileri:** **Ürünler**'de ürünü açıp **QR menü bilgileri**'ne dokunun: fotoğraf (telefon
@@ -131,11 +135,11 @@ yönetilir; ayrı bir hesap, adres ya da kod gerekmez. QR menü lisansınıza ba
   güncellenir (birkaç saniye). İnternet kesikse değişiklikler bağlantı gelince yayınlanır. Beklemek
   istemezseniz kartta **Şimdi yayınla** deyin.
 - **Lisans yenileme:** Yeni lisansı **Ayarlar › Lisans**'a girmeniz yeter; QR menü açık kalır.
-- **Tek bilgisayar:** Bir lisansla QR menü tek bilgisayardan yönetilir. Başka bilgisayarda açmak
-  isterseniz kart "başka bir bilgisayarda açık" der; **Bu bilgisayara taşı** derseniz diğer
-  bilgisayar menüyü artık güncelleyemez.
-- **Kapatma:** **QR menüyü kapat** deyince masalardaki QR kodlar menü açmaz. Yeniden açınca aynı
-  kartlar yine çalışır.
+- **Tek bilgisayar:** Bir lisans tek bilgisayarda bağlı olur. Başka bilgisayarda kullanmak
+  isterseniz Lisans bölümü "bu lisans başka bilgisayarda açık" der; **Bu bilgisayara al** derseniz
+  diğer bilgisayar artık buluta bağlanamaz ve menüyü güncelleyemez.
+- **Kapatma:** **QR menüyü kapat** deyince masalardaki QR kodlar menü açmaz; buluta bağlantı (lisans
+  yenileme, bulut yedeği) sürer. Yeniden açınca aynı kartlar yine çalışır.
 - Menüde alerjen bilgisi için "personele danışın" notu her zaman yer alır.
 - Müşterinin gördüğü QR menü uygulama değildir; her zaman web'den, en güncel haliyle açılır.
 - Eskiden kullanılan web işletme paneli kaldırıldı. Telefona yüklediyseniz internetteyken açtığınızda

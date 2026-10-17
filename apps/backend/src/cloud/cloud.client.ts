@@ -1,8 +1,8 @@
-import type { MenuSnapshot, MenuTable } from '@ado/shared';
+import type { HeartbeatRequest, MenuSnapshot, MenuTable } from '@ado/shared';
 
 /** Buluttaki POS API'sinin (apps/cloud src/routes/pos.ts) istemcisi. */
 
-/** ApplicationSetting `cloud.connection`: lisansla acilan baglanti. */
+/** ApplicationSetting `cloud.connection`: lisansla kendiliginden kurulan baglanti. */
 export interface CloudConnection {
   /** Baglanilan bulut (programa gomulu adres; acilista degistiyse baglanti duser). */
   url: string;
@@ -142,12 +142,28 @@ export const cloudApi = {
       json: { licenseKey },
     }),
 
+  /** Eski bulut (heartbeat yok) icin: isletme durumu, menu ve masa sayisi. */
   status: (auth: CloudAuth) =>
     cloudRequest<PosInfo & { menu: { version: number } | null; tableCount: number }>(
       auth.url,
       '/api/pos/status',
       { method: 'GET', token: auth.token },
     ),
+
+  /** Saatlik heartbeat; yanit @ado/shared heartbeatResponseSchema ile dogrulanir (cagiranda). */
+  heartbeat: (auth: CloudAuth, body: HeartbeatRequest) =>
+    cloudRequest<unknown>(auth.url, '/api/pos/heartbeat', {
+      method: 'POST',
+      token: auth.token,
+      json: body,
+    }),
+
+  /** "QR menuyu kapat": menu ve masalar kalkar, baglanti kalir. */
+  unpublish: (auth: CloudAuth) =>
+    cloudRequest<{ unpublished: boolean }>(auth.url, '/api/pos/menu/unpublish', {
+      method: 'POST',
+      token: auth.token,
+    }),
 
   checkImages: (auth: CloudAuth, keys: string[]) =>
     cloudRequest<{ missing: string[] }>(auth.url, '/api/pos/images/check', {
@@ -177,6 +193,7 @@ export const cloudApi = {
       json: { tables },
     }),
 
+  /** Eski baglantiyi bulutta kapatir (belirtec iptal; farkli lisans, adres degisti). */
   unpair: (auth: CloudAuth) =>
     cloudRequest<{ unpaired: boolean }>(auth.url, '/api/pos/unpair', {
       method: 'POST',

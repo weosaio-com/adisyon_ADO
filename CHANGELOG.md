@@ -18,6 +18,13 @@ Sürümleme: [SemVer](https://semver.org/).
   `PRAGMA optimize`. Denetim ve iş kayıtlarına dokunulmaz.
 - `GET /storage` ve `POST /storage/cleanup`; Ayarlar'da **Depolama** kartı.
 - Rapor sorguları için tarih indeksleri (ödeme, fiş, gider, gelir, veresiye hareketleri).
+- **Her lisanslı kurulum buluta bağlanır:** QR menü gerekmeden, açılışta ve lisans girilince;
+  saatlik heartbeat ile son görülme, sürüm ve sağlık (veritabanı/yedek boyutu, boş disk, son
+  yedek) buluta gider; bulut lisans durumunu bildirir ve yenilenen lisansı gönderir
+  (`license.remote`). Bulutta lisans kaydı (`licenses`), `POST /api/pos/heartbeat`,
+  `POST /api/pos/menu/unpublish`, satıcı API'si `GET/PUT /api/admin/licenses`, `revoke`,
+  `unrevoke`; iptal edilen lisans işletme silinse de bağlanamaz. `scripts/license.mjs register`.
+- `PUT /cloud/qr`: QR menü bağlantıdan ayrı açılır/kapanır; Lisans kartında bulut bağlantısı satırı.
 
 ### Changed
 
@@ -25,6 +32,9 @@ Sürümleme: [SemVer](https://semver.org/).
 - Masaüstü açılışında backend kapanırsa hata hemen ve gerçek nedeniyle (çıkış kodu, son satırlar,
   log yolu) gösterilir.
 - `backups.size_bytes` BigInt (2 GB üstü veritabanı) ve `format` sütunu.
+- Bulutta etkinleştirme artık `qr.menu` istemez; süresi dolmuş imzalı lisans ve askıdaki işletme de
+  bağlanır (menü kapalı kalır). `GET /cloud/status` `mode` yerine `link` + `qr` döner; "QR menüyü
+  kapat" bağlantıyı kesmez. Denetim eylemleri `cloud.qr.enable` / `cloud.qr.disable`.
 
 ## [0.3.0] - 2026-10-11
 

@@ -33,7 +33,9 @@ export default function QrCodesScreen() {
 
   // Adres programa gomulu: QR menu henuz acik olmasa da kartlar basilabilir (kodlar yereldir).
   const cloudUrl = status.data?.url ?? null;
-  const menuOn = status.data?.mode === 'on';
+  const qrOn = status.data?.qr === 'on';
+  // Musteri menuyu ancak QR menu acik, bulut bagli ve yayin engelsizken gorur.
+  const menuLive = qrOn && status.data?.connected === true && !status.data.blocked;
   const hallOrder = useMemo(
     () => new Map((halls.data ?? []).map((hall, index) => [hall.id, { hall, index }])),
     [halls.data],
@@ -114,13 +116,14 @@ export default function QrCodesScreen() {
         </div>
       ) : (
         <>
-          {!status.isLoading && !menuOn && (
+          {!status.isLoading && !menuLive && (
             <p
               className="mx-6 mt-4 rounded-lg bg-amber-50 p-2 text-sm text-amber-900 print:hidden"
               data-testid="qr-menu-off"
             >
-              QR menü henüz açık değil. Kartları basabilirsiniz; müşteriler menüyü Ayarlar › QR Menü
-              kartından QR menüyü açınca görür.
+              {qrOn
+                ? 'QR menü açık ama şu an yayınlanmıyor; nedenini Ayarlar › QR Menü kartında görün. Kartları yine de basabilirsiniz.'
+                : 'QR menü henüz açık değil. Kartları basabilirsiniz; müşteriler menüyü Ayarlar › QR Menü kartından QR menüyü açınca görür.'}
             </p>
           )}
           <p className="px-6 pt-4 text-sm text-slate-500 print:hidden">

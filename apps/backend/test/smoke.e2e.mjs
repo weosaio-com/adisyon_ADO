@@ -798,10 +798,12 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
     `QR masa kodu yenilendi (${rotateStatus})`,
   );
 
-  // --- QR MENU BULUT: lisansla acma + otomatik yayin + uzlastirma (sahte bulut) ---
+  // --- BULUT: lisansla kendiliginden baglanti, heartbeat, QR menu ac/kapat (sahte bulut) ---
   // Backend ve bu test ayni ortami paylasir: CLOUD_API_URL (programa gomulu adres),
   // ADO_LICENSE_PUBLIC_KEY (lisans dogrulama), ADO_LICENSE_PRIVATE_KEY_FILE (test lisansi imzalar).
   // CI'da `node scripts/license.mjs gen-key --github-env` uretir; yerelde yoksa bolum atlanir.
+  // Heartbeat araligi varsayilan (1 saat): acilista/baglaninca bir kez, yayin engelliyken her
+  // uzlastirmada ve "simdi baglan" (bagliyken yenile) ile gider.
   const cloudUrl = process.env.CLOUD_API_URL?.trim();
   const licensePub = process.env.ADO_LICENSE_PUBLIC_KEY?.trim();
   const licenseKeyFile = process.env.ADO_LICENSE_PRIVATE_KEY_FILE?.trim();
@@ -823,35 +825,117 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
         }),
         privateKeyPem,
       );
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     await upload(`/products/${qrProd.id}/image`, png);
     const cloudStatus = async () => (await call('GET', '/cloud/status')).data;
+    const qr = (enabled) => call('PUT', '/cloud/qr', { enabled });
 
+    // Lisans yok: bulut tanimli ama baglanilmaz, QR menu lisans ister.
     const unlicensed = await cloudStatus();
     const { status: noLicStatus, data: noLic } = await call('POST', '/cloud/activate', {});
+    const { status: noLicQr } = await qr(true);
     assert(
-      unlicensed.mode === 'no_license' &&
+      unlicensed.link === 'no_license' &&
+        unlicensed.qr === 'not_licensed' &&
         unlicensed.url === cloudUrl &&
+        unlicensed.connected === false &&
         noLicStatus === 403 &&
-        noLic.error?.code === 'LICENSE_REQUIRED',
-      `BULUT lisans yokken QR menu acilamaz; adres programa gomulu (${unlicensed.mode})`,
+        noLic.error?.code === 'LICENSE_REQUIRED' &&
+        noLicQr === 403 &&
+        fake.state.activations.length === 0,
+      `BULUT lisans yokken baglanilmaz; adres programa gomulu (${unlicensed.link})`,
     );
+
+    // QR menusuz lisans: kendiliginden baglanir (QR menu sart degil), heartbeat gider.
     const { status: licStatus, data: lic } = await call('POST', '/license/activate', {
-      licenseKey: smokeLicense(),
+      licenseKey: smokeLicense({ features: { 'cloud.backup': true } }),
     });
     assert(
-      licStatus < 400 && lic.licenseId === 'lic_smoke_0001' && lic.features?.['qr.menu'] === true,
-      `BULUT lisans etkinlestirildi, QR menu dahil (${licStatus})`,
+      licStatus < 400 && lic.licenseId === 'lic_smoke_0001' && !lic.features?.['qr.menu'],
+      `BULUT QR menusuz lisans etkinlestirildi (${licStatus})`,
     );
-    assert((await cloudStatus()).mode === 'off', 'BULUT lisansla QR menu acilmaya hazir');
-
-    const { status: actStatus, data: activated } = await call('POST', '/cloud/activate', {});
+    const linked = await waitFor(
+      cloudStatus,
+      (s) => s.link === 'linked' && Boolean(s.lastHeartbeatAt),
+      15000,
+    );
     assert(
-      actStatus < 400 &&
-        activated.mode === 'on' &&
-        activated.branchName === 'Smoke Lokanta' &&
+      linked.link === 'linked' &&
+        linked.connected &&
         fake.state.activations.length === 1 &&
-        (fake.state.activations[0].installId ?? '').length >= 8,
-      `BULUT lisansla acildi, kurulum kimligi gonderildi (${actStatus})`,
+        (fake.state.activations[0].installId ?? '').length >= 8 &&
+        !fake.state.activations[0].takeover,
+      `BULUT lisansla kendiliginden baglandi, kurulum kimligi gonderildi (${linked.link})`,
+    );
+    // Saglik alanlari saglayicilara baglidir (yedek, bulut yedegi): bilinmeyen deger null gider.
+    const firstBeat = fake.state.heartbeats[0];
+    const healthKeys = ['dbBytes', 'backupsBytes', 'freeDiskBytes'];
+    assert(
+      firstBeat?.licenseId === 'lic_smoke_0001' &&
+        firstBeat.licenseExp === '2099-01-01' &&
+        healthKeys.every((key) => firstBeat[key] === null || typeof firstBeat[key] === 'number') &&
+        ['appVersion', 'lastBackupAt', 'lastCloudBackupAt'].every((key) => key in firstBeat) &&
+        linked.remoteState === 'active' &&
+        Boolean(linked.lastSeenAt),
+      'BULUT heartbeat gitti (lisans, saglik), uzak durum etkin',
+    );
+    const { status: qrNotLic, data: qrNotLicBody } = await qr(true);
+    assert(
+      linked.qr === 'not_licensed' &&
+        fake.state.menus.length === 0 &&
+        qrNotLic === 403 &&
+        qrNotLicBody.error?.code === 'QR_MENU_NOT_LICENSED',
+      `BULUT QR menusuz lisansta QR menu acilmaz, menu gitmez (${linked.qr})`,
+    );
+    const { data: settingsList } = await call('GET', '/settings');
+    assert(
+      !settingsList.some((row) => row.key.startsWith('cloud.')),
+      'BULUT belirteci ve QR ayari /settings listesinde gorunmez',
+    );
+
+    // Bagliyken "simdi baglan" durumu yeniler: heartbeat + license.remote olayi (SSE yalniz adi).
+    const sseRemote = await fetch(`${BASE}/events/stream`, {
+      headers: { Accept: 'text/event-stream', Authorization: `Bearer ${token}` },
+    });
+    const remoteReader = sseRemote.body.getReader();
+    const remoteEvent = (async () => {
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await remoteReader.read();
+        if (done) return buf;
+        buf += dec.decode(value, { stream: true });
+        if (buf.includes('license.remote')) return buf;
+      }
+    })();
+    const beatsBefore = fake.state.heartbeats.length;
+    const { data: refreshed } = await call('POST', '/cloud/activate', {});
+    const remoteMsg = await Promise.race([remoteEvent, sleep(5000).then(() => '')]);
+    await remoteReader.cancel().catch(() => {});
+    assert(
+      refreshed.link === 'linked' &&
+        fake.state.heartbeats.length === beatsBefore + 1 &&
+        remoteMsg.includes('license.remote') &&
+        !remoteMsg.includes('ADO1.'),
+      `BULUT bagliyken yenile: heartbeat, license.remote olayi (anahtarsiz) (${refreshed.link})`,
+    );
+
+    // QR menulu lisans (ayni kimlik): buluta bildirilir, belirtec degismez; QR menu acilabilir.
+    await call('POST', '/license/activate', { licenseKey: smokeLicense() });
+    const synced = await waitFor(cloudStatus, (s) => s.qr === 'off', 10000);
+    assert(
+      synced.qr === 'off' &&
+        fake.state.licenses.length === 1 &&
+        fake.state.licenses[0].f?.['qr.menu'] === true &&
+        fake.state.activations.length === 1,
+      `BULUT yeni lisans belirtec degismeden bildirildi, QR menu acilabilir (${synced.qr})`,
+    );
+
+    // QR menuyu ac: ilk yayin (menu, gorsel, masalar).
+    const { status: qrOnStatus, data: qrOn } = await qr(true);
+    assert(
+      qrOnStatus < 400 && qrOn.qr === 'on' && qrOn.qrPublish === true,
+      `BULUT QR menu acildi (${qrOnStatus} ${qrOn.qr})`,
     );
     const firstPublish = await waitFor(cloudStatus, (s) => s.lastMenuVersion >= 1, 10000);
     const published = fake.state.menus.at(-1);
@@ -871,11 +955,6 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
     assert(
       fake.state.tables.some((t) => t.code === rotated.publicCode && t.name === tQr.name),
       'BULUT masa kodlari yayinlandi',
-    );
-    const { data: settingsList } = await call('GET', '/settings');
-    assert(
-      !settingsList.some((row) => row.key.startsWith('cloud.')),
-      'BULUT belirteci /settings listesinde gorunmez',
     );
 
     // Isletme bilgisi ve salon degisikligi de menuyu gunceller.
@@ -947,97 +1026,170 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
       'BULUT worker vazgecince uzlastirma yayini tamamladi',
     );
 
-    // Askiya alinan isletme: yayin durur, kart gosterir; askidan cikinca kendiliginden surer.
+    // Askiya alinan isletme: yayin durur, satir askida der; askidan cikinca kendiliginden surer.
     fake.state.suspended = true;
     await call('PATCH', `/products/${qrProd.id}`, { description: 'Askı testi' });
-    const suspended = await waitFor(cloudStatus, (s) => s.mode === 'suspended', 15000);
-    assert(suspended.mode === 'suspended', `BULUT askiya alma kartta gorunur (${suspended.mode})`);
+    const suspended = await waitFor(cloudStatus, (s) => s.link === 'suspended', 15000);
+    assert(
+      suspended.link === 'suspended' && suspended.blocked === 'suspended' && suspended.connected,
+      `BULUT askiya alma gorunur, baglanti kalir (${suspended.link})`,
+    );
     const suspendedVersion = fake.state.version;
     fake.state.suspended = false;
     const resumed = await waitFor(
       cloudStatus,
-      (s) => s.mode === 'on' && s.lastMenuVersion > suspendedVersion,
+      (s) => s.link === 'linked' && s.lastMenuVersion > suspendedVersion,
       20000,
     );
-    assert(resumed.mode === 'on', 'BULUT askidan cikinca yayin kendiliginden surdu');
+    assert(resumed.link === 'linked', 'BULUT askidan cikinca yayin kendiliginden surdu');
 
-    // Lisans yenileme: ayni kimlik buluta bildirilir (yanit beklemez), yeniden acmak gerekmez.
+    // Lisans yenileme: ayni kimlik buluta bildirilir (yanit beklemez), yeniden baglanmak gerekmez.
     const { status: renewStatus } = await call('POST', '/license/activate', {
       licenseKey: smokeLicense({ exp: '2099-06-01' }),
     });
     const renewed = await waitFor(
       () => fake.state.licenses.length,
-      (n) => n > 0,
+      (n) => n > 1,
       10000,
     );
     assert(
       renewStatus < 400 &&
-        renewed === 1 &&
-        fake.state.licenses[0].exp === '2099-06-01' &&
+        renewed === 2 &&
+        fake.state.licenses[1].exp === '2099-06-01' &&
         fake.state.activations.length === 1,
       `BULUT yeni lisans belirtec degismeden buluta bildirildi (${renewStatus})`,
     );
 
-    // Baska bilgisayar devraldi: kart nedenini soyler; geri almak sahibin onayini ister.
+    // QR menuyu kapat: menu ve masalar buluttan kalkar, baglanti kalir; kapaliyken yayin yok.
+    await waitFor(cloudStatus, (s) => !s.publishing, 15000);
+    const tokenBefore = fake.state.token;
+    const { data: qrOff } = await qr(false);
+    assert(
+      qrOff.qr === 'off' &&
+        qrOff.connected &&
+        qrOff.link === 'linked' &&
+        fake.state.unpublished === 1 &&
+        fake.state.tables.length === 0 &&
+        fake.state.token === tokenBefore &&
+        fake.state.unpaired === 0,
+      `BULUT QR menu kapatildi: menu kalkti, baglanti kaldi (${qrOff.qr})`,
+    );
+    const { status: noPublish, data: noPublishBody } = await call('POST', '/cloud/publish');
+    assert(
+      noPublish === 409 && noPublishBody.error?.code === 'QR_MENU_OFF',
+      `BULUT QR menu kapaliyken yayin istenemez (${noPublish})`,
+    );
+    const menusWhileOff = fake.state.menus.length;
+    await call('PATCH', `/products/${qrProd.id}`, { description: 'Kapalıyken' });
+    await sleep(6500);
+    assert(
+      fake.state.menus.length === menusWhileOff,
+      'BULUT QR menu kapaliyken degisiklik yayinlanmaz',
+    );
+
+    // Yeniden ac: ayni masa kodlari yayinlanir (basili QR kartlari calisir).
+    await qr(true);
+    const reopened = await waitFor(
+      () => fake.state.tables.find((t) => t.code === rotated.publicCode),
+      Boolean,
+      15000,
+    );
+    assert(Boolean(reopened), 'BULUT yeniden acinca ayni masa kodlari yayinlandi');
+
+    // Internet yokken kapatma: yerelde hemen kapanir, bulutta internet gelince tamamlanir.
+    await waitFor(cloudStatus, (s) => !s.publishing && s.lastMenuVersion >= 1, 15000);
+    fake.state.unavailable = true;
+    const { data: offlineOff } = await qr(false);
+    assert(
+      offlineOff.qr === 'off' && offlineOff.unpublishPending && fake.state.unpublished === 1,
+      `BULUT internet yokken kapatma yerelde hemen gecerli (${offlineOff.qr})`,
+    );
+    fake.state.unavailable = false;
+    const remoteOff = await waitFor(cloudStatus, (s) => !s.unpublishPending, 15000);
+    assert(
+      !remoteOff.unpublishPending && fake.state.unpublished === 2 && fake.state.tables.length === 0,
+      'BULUT kapatma internet gelince bulutta da tamamlandi',
+    );
+    await qr(true);
+    await waitFor(cloudStatus, (s) => !s.publishing && s.lastMenuVersion >= 1, 15000);
+
+    // Baska bilgisayar devraldi: satir "Bu bilgisayara al" ister, kendiliginden geri almaz.
     fake.state.revoke = 'POS_TOKEN_SUPERSEDED';
     await call('PATCH', `/products/${qrProd.id}`, { description: 'Devralma testi' });
-    const lost = await waitFor(cloudStatus, (s) => s.mode === 'lost', 15000);
+    const lost = await waitFor(cloudStatus, (s) => s.link === 'conflict', 15000);
     assert(
-      lost.mode === 'lost' && lost.lostReason === 'superseded' && !lost.connected,
-      `BULUT baska bilgisayar devralinca kart nedenini gosterir (${lost.mode})`,
+      lost.link === 'conflict' && lost.lostReason === 'superseded' && !lost.connected,
+      `BULUT baska bilgisayar devralinca onay istenir (${lost.link})`,
     );
     fake.state.revoke = null;
     fake.state.otherInstall = 'baska-kurulum-0001';
-    const { data: conflict } = await call('POST', '/cloud/activate', {});
+    const activationsBefore = fake.state.activations.length;
+    await sleep(5000);
     assert(
-      conflict.mode === 'conflict' && Boolean(conflict.conflictLastSeenAt),
-      `BULUT lisans baska bilgisayarda acikken onay istenir (${conflict.mode})`,
+      fake.state.activations.length === activationsBefore &&
+        (await cloudStatus()).link === 'conflict',
+      'BULUT devralinan lisans kendiliginden geri alinmaz',
     );
-    const { data: takeover } = await call('POST', '/cloud/activate', { takeover: true });
-    assert(
-      takeover.mode === 'on' && fake.state.activations.at(-1)?.takeover === true,
-      `BULUT onayla bu bilgisayara tasindi (${takeover.mode})`,
-    );
-
-    // Internet yokken acma: istek saklanir, baglanti gelince kendiliginden acilir.
-    const { data: off } = await call('DELETE', '/cloud/connection');
-    const unpairedBefore = fake.state.unpaired;
-    assert(
-      off.connected === false && unpairedBefore >= 1,
-      'BULUT QR menu kapatildi, buluta bildirildi',
-    );
+    // Internet yokken "Bu bilgisayara al": istek saklanir, internet gelince devralinir.
+    const menusBeforeTakeover = fake.state.menus.length;
     fake.state.unavailable = true;
-    const { data: waiting } = await call('POST', '/cloud/activate', {});
+    const { data: waiting } = await call('POST', '/cloud/activate', { takeover: true });
     assert(
-      waiting.mode === 'waiting_network',
-      `BULUT internet yokken acma bekletilir (${waiting.mode})`,
+      waiting.link === 'waiting_network',
+      `BULUT internet yokken baglanma bekletilir (${waiting.link})`,
     );
     fake.state.unavailable = false;
-    const reopened = await waitFor(cloudStatus, (s) => s.mode === 'on', 15000);
-    assert(reopened.mode === 'on', 'BULUT internet gelince QR menu kendiliginden acildi');
-
-    // Internet yokken kapatma: yerelde hemen kapanir, bulutta baglanti gelince tamamlanir.
-    await waitFor(cloudStatus, (s) => !s.publishing, 15000);
-    fake.state.unavailable = true;
-    const { data: offlineOff } = await call('DELETE', '/cloud/connection');
+    const takenOver = await waitFor(cloudStatus, (s) => s.link === 'linked', 15000);
     assert(
-      offlineOff.connected === false &&
-        offlineOff.mode === 'off' &&
-        fake.state.unpaired === unpairedBefore,
-      `BULUT internet yokken kapatma yerelde hemen gecerli (${offlineOff.mode})`,
+      takenOver.link === 'linked' && fake.state.activations.at(-1)?.takeover === true,
+      `BULUT onayla bu bilgisayara alindi (${takenOver.link})`,
     );
-    fake.state.unavailable = false;
-    const remoteOff = await waitFor(
-      () => fake.state.unpaired,
-      (n) => n === unpairedBefore + 1,
+    const republished = await waitFor(
+      () => fake.state.menus.length,
+      (n) => n > menusBeforeTakeover,
       15000,
     );
     assert(
-      remoteOff === unpairedBefore + 1,
-      'BULUT kapatma internet gelince bulutta da tamamlandi',
+      republished > menusBeforeTakeover &&
+        fake.state.tables.some((t) => t.code === rotated.publicCode),
+      'BULUT devralinca QR menu yeniden yayinlandi',
     );
-    const { status: noCloud } = await call('POST', '/cloud/publish');
-    assert(noCloud === 409, `BULUT QR menu kapaliyken yayin istenemez (${noCloud})`);
+
+    // Lisans iptali (bulut kaydi): heartbeat 'revoked' der, yayin durur; kaldirilinca surer.
+    await waitFor(cloudStatus, (s) => !s.publishing, 15000);
+    fake.state.licenseRevoked = true;
+    const { data: revoked } = await call('POST', '/cloud/activate', {});
+    assert(
+      revoked.link === 'revoked' && revoked.remoteState === 'revoked' && revoked.connected,
+      `BULUT lisans iptali heartbeat ile ogrenildi (${revoked.link})`,
+    );
+    const revokedVersion = fake.state.version;
+    fake.state.licenseRevoked = false;
+    const unrevoked = await waitFor(
+      cloudStatus,
+      (s) => s.link === 'linked' && s.lastMenuVersion > revokedVersion,
+      20000,
+    );
+    assert(unrevoked.link === 'linked', 'BULUT iptal kaldirilinca yayin kendiliginden surdu');
+
+    // Iptal edilmis lisans yeniden baglanamaz (belirtec gecersiz kalinca): satir "iptal" der.
+    await waitFor(cloudStatus, (s) => !s.publishing, 15000);
+    fake.state.licenseRevoked = true;
+    fake.state.revoke = 'POS_TOKEN_INVALID';
+    await call('POST', '/cloud/activate', {});
+    fake.state.revoke = null;
+    const refused = await waitFor(cloudStatus, (s) => s.link === 'revoked' && !s.connected, 15000);
+    assert(
+      refused.link === 'revoked' && !refused.connected,
+      `BULUT iptal edilmis lisans yeniden baglanamaz (${refused.link})`,
+    );
+    fake.state.licenseRevoked = false;
+    const { data: relinked } = await call('POST', '/cloud/activate', {});
+    assert(
+      relinked.link === 'linked' && relinked.connected,
+      `BULUT iptal kalkinca sahibin istegiyle yeniden baglandi (${relinked.link})`,
+    );
+    await waitFor(cloudStatus, (s) => !s.publishing, 15000);
     fake.close();
   }
 

@@ -1,6 +1,7 @@
 // "Spawned" e2e yardimcisi: backend'i masaustu kabugu gibi (IPC kanaliyla, ts-node) kendi
 // veritabani, veri dizini ve portuyla baslatir. Her test dosyasi kendi portunu kullanir
-// (updates 3021, bulut yedegi 3031, lisans 3041, temel 3051); boylece birbirine dokunmazlar.
+// (updates 3021, bulut yedegi 3031, lisans 3041, temel 3051, depolama 3061, bulut baglantisi
+// 3071 + sahte bulut 3079); boylece birbirine dokunmazlar.
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { createRequire } from 'node:module';

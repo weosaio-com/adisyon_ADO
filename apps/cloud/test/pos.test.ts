@@ -149,6 +149,33 @@ describe('POS yayini', () => {
     expect(duplicate.status).toBe(422);
   });
 
+  it('QR menuyu kapatma (unpublish) menu ve masalari kaldirir, belirtec ve baglanti kalir', async () => {
+    const { token } = await activatedBranch();
+    const code = tableCode();
+    await call('PUT', '/api/pos/menu', { token, json: sampleMenu() });
+    await call('PUT', '/api/pos/tables', { token, json: { tables: [{ code, name: 'Masa 1' }] } });
+    expect((await call('GET', `/api/m/${code}`)).status).toBe(200);
+
+    // Belirtecsiz olmaz (Hono: alt yol posAuth'u kendisi tasir).
+    const anonymous = await call('POST', '/api/pos/menu/unpublish');
+    expect([anonymous.status, anonymous.body.error?.code]).toEqual([401, 'POS_TOKEN_INVALID']);
+
+    const res = await call('POST', '/api/pos/menu/unpublish', { token });
+    expect([res.status, res.body.data]).toEqual([200, { unpublished: true }]);
+    expect((await call('GET', `/api/m/${code}`)).body.error?.code).toBe('TABLE_NOT_FOUND');
+    const status = await call('GET', '/api/pos/status', { token });
+    expect([status.status, status.body.data.menu, status.body.data.tableCount]).toEqual([
+      200,
+      null,
+      0,
+    ]);
+    // Yeniden acinca ayni belirtecle ayni kodlar yayinlanir.
+    await call('PUT', '/api/pos/menu', { token, json: sampleMenu() });
+    await call('PUT', '/api/pos/tables', { token, json: { tables: [{ code, name: 'Masa 1' }] } });
+    const again = await call('GET', `/api/m/${code}`);
+    expect([again.status, again.body.data.version]).toEqual([200, 1]);
+  });
+
   it('kapatip yeniden acinca ayni masa kodlari yeniden yayinlanir (basili QR calisir)', async () => {
     const licenseKey = await signLicense(licensePayload());
     const installId = unique('inst');

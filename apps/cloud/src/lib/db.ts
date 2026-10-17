@@ -122,27 +122,58 @@ export async function menuMeta(
   return row ? { version: row.version, updatedAt: row.updated_at } : null;
 }
 
-/** Sube ozeti (satici API'si). */
+/** POS'un son heartbeat'te bildirdigi saglik bilgisi (satici API'si); hic bildirmediyse null. */
+export type HealthColumns = Pick<
+  BranchRow,
+  | 'health_reported_at'
+  | 'health_db_bytes'
+  | 'health_backups_bytes'
+  | 'health_free_disk_bytes'
+  | 'health_last_backup_at'
+  | 'health_last_cloud_backup_at'
+  | 'health_license_exp'
+>;
+
+export function healthView(row: HealthColumns) {
+  if (!row.health_reported_at) return null;
+  return {
+    reportedAt: row.health_reported_at,
+    dbBytes: row.health_db_bytes,
+    backupsBytes: row.health_backups_bytes,
+    freeDiskBytes: row.health_free_disk_bytes,
+    lastBackupAt: row.health_last_backup_at,
+    lastCloudBackupAt: row.health_last_cloud_backup_at,
+    licenseExp: row.health_license_exp,
+  };
+}
+
+/** Sube ozeti (satici API'si): bagli POS, son gorulme, surum, saglik, menu. */
 export async function branchSummaries(db: D1Database, tenantId: string) {
   const { results } = await db
     .prepare(
-      `SELECT b.id, b.name, b.pos_paired_at, b.pos_last_seen_at, b.pos_app_version,
+      `SELECT b.id, b.name, b.pos_paired_at, b.pos_last_seen_at, b.pos_app_version, b.install_id,
+              b.health_reported_at, b.health_db_bytes, b.health_backups_bytes,
+              b.health_free_disk_bytes, b.health_last_backup_at, b.health_last_cloud_backup_at,
+              b.health_license_exp,
               m.version AS menu_version, m.updated_at AS menu_updated_at,
               (SELECT COUNT(*) FROM tables t WHERE t.branch_id = b.id) AS table_count
        FROM branches b LEFT JOIN menus m ON m.branch_id = b.id
        WHERE b.tenant_id = ? ORDER BY b.created_at`,
     )
     .bind(tenantId)
-    .all<{
-      id: string;
-      name: string;
-      pos_paired_at: string | null;
-      pos_last_seen_at: string | null;
-      pos_app_version: string | null;
-      menu_version: number | null;
-      menu_updated_at: string | null;
-      table_count: number;
-    }>();
+    .all<
+      HealthColumns & {
+        id: string;
+        name: string;
+        pos_paired_at: string | null;
+        pos_last_seen_at: string | null;
+        pos_app_version: string | null;
+        install_id: string | null;
+        menu_version: number | null;
+        menu_updated_at: string | null;
+        table_count: number;
+      }
+    >();
   return results.map((row) => ({
     id: row.id,
     name: row.name,
@@ -151,8 +182,10 @@ export async function branchSummaries(db: D1Database, tenantId: string) {
           pairedAt: row.pos_paired_at,
           lastSeenAt: row.pos_last_seen_at,
           appVersion: row.pos_app_version,
+          installId: row.install_id,
         }
       : null,
+    health: healthView(row),
     menu: row.menu_version ? { version: row.menu_version, updatedAt: row.menu_updated_at } : null,
     tableCount: row.table_count,
   }));

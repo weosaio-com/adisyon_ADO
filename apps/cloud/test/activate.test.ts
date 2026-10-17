@@ -5,7 +5,9 @@ import fixture from './fixtures/license-fixture.json';
 import {
   activate,
   call,
+  heartbeat,
   licensePayload,
+  registryRow,
   sampleMenu,
   sha256Hex,
   signLicense,
@@ -13,6 +15,17 @@ import {
 } from './helpers';
 
 const tokenHash = (token: string) => sha256Hex(new TextEncoder().encode(token));
+
+async function foreignKey(): Promise<string> {
+  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as CryptoKeyPair;
+  const pkcs8 = new Uint8Array(
+    (await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer,
+  );
+  return btoa(String.fromCharCode(...pkcs8));
+}
 
 describe('lisans dogrulamasi', () => {
   it("Node araciyla (scripts/license.mjs) imzalanan lisans Worker'da dogrulanir", async () => {
@@ -69,6 +82,18 @@ describe('POS lisansla etkinlestirme', () => {
     expect(status.status).toBe(200);
     expect(status.body.data.license.id).toBe(payload.id);
     expect(status.body.data.menu).toBeNull();
+
+    // Lisans kaydi da ogrenir (kaynak: etkinlestirme), isletmeye baglanir.
+    const tenantId = await tenantIdOf(res.body.data.branch.id);
+    expect(await registryRow(payload.id)).toMatchObject({
+      tenant_id: tenantId,
+      customer: 'Deneme Lokantası',
+      exp: '2099-01-01',
+      grace_days: 14,
+      expires_at: '2099-01-15T00:00:00.000Z',
+      source: 'activation',
+      revoked_at: null,
+    });
   });
 
   it('ayni kurulum yeniden baglaninca belirtec yenilenir; eskisi ROTATED', async () => {
@@ -115,22 +140,11 @@ describe('POS lisansla etkinlestirme', () => {
     expect((await activate({ licenseKey, installId: unique('inst') })).status).toBe(201);
   });
 
-  it('gecersiz, kimliksiz, suresi dolmus ya da QR menusuz lisans reddedilir', async () => {
-    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
-      'sign',
-      'verify',
-    ])) as CryptoKeyPair;
-    const pkcs8 = new Uint8Array(
-      (await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer,
-    );
-    const foreign = btoa(String.fromCharCode(...pkcs8));
+  it('gecersiz ya da kimliksiz lisans reddedilir', async () => {
     const cases: Array<[string, number, string]> = [
-      [await signLicense(licensePayload(), foreign), 400, 'LICENSE_INVALID'],
+      [await signLicense(licensePayload(), await foreignKey()), 400, 'LICENSE_INVALID'],
       ['ADO1.bozuk.anahtar-ama-yeterince-uzun', 400, 'LICENSE_INVALID'],
       [await signLicense(licensePayload({ id: undefined })), 400, 'LICENSE_ID_REQUIRED'],
-      [await signLicense(licensePayload({ exp: '2020-01-01', g: 0 })), 403, 'LICENSE_EXPIRED'],
-      [await signLicense(licensePayload({ f: { 'qr.menu': false } })), 403, 'QR_MENU_NOT_LICENSED'],
-      [await signLicense(licensePayload({ f: undefined })), 403, 'QR_MENU_NOT_LICENSED'],
     ];
     for (const [licenseKey, status, code] of cases) {
       const res = await activate({ licenseKey });
@@ -143,16 +157,58 @@ describe('POS lisansla etkinlestirme', () => {
     expect(badInstall.status).toBe(422);
   });
 
-  it('askiya alinan isletme etkinlestirilemez', async () => {
+  it('QR menusuz lisans baglanir; yayin 403 QR_MENU_NOT_LICENSED', async () => {
+    for (const f of [{ 'qr.menu': false }, undefined]) {
+      const res = await activate({ licenseKey: await signLicense(licensePayload({ f })) });
+      expect(res.status).toBe(201);
+      expect(res.body.data.tenant.plan).toBe('none');
+      expect(res.body.data.tenant.features['qr.menu']).toBe(false);
+      const token = res.body.data.token;
+      const menu = await call('PUT', '/api/pos/menu', { token, json: sampleMenu() });
+      expect([menu.status, menu.body.error?.code]).toEqual([403, 'QR_MENU_NOT_LICENSED']);
+      // Baglanti gecerli: durum ve heartbeat calisir.
+      expect((await call('GET', '/api/pos/status', { token })).status).toBe(200);
+      expect((await heartbeat(token)).body.data.remote.state).toBe('active');
+    }
+  });
+
+  it('suresi dolmus lisans yalniz baglanir: yayin 403 LICENSE_EXPIRED, uzak durum expired', async () => {
+    const payload = licensePayload({ exp: '2020-01-01', g: 0 });
+    const res = await activate({ licenseKey: await signLicense(payload) });
+    expect(res.status).toBe(201);
+    expect(res.body.data.license).toEqual({
+      id: payload.id,
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    });
+    expect(Object.values(res.body.data.tenant.features).every((on) => on === false)).toBe(true);
+    const token = res.body.data.token;
+    const menu = await call('PUT', '/api/pos/menu', { token, json: sampleMenu() });
+    expect([menu.status, menu.body.error?.code]).toEqual([403, 'LICENSE_EXPIRED']);
+    const beat = await heartbeat(token, { licenseId: payload.id, licenseExp: payload.exp });
+    expect(beat.body.data.remote).toEqual({ state: 'expired' });
+  });
+
+  it('askiya alinan isletme baglanir ama yayin 403 TENANT_SUSPENDED', async () => {
     const licenseKey = await signLicense(licensePayload());
-    const first = await activate({ licenseKey });
+    const installId = unique('inst');
+    const first = await activate({ licenseKey, installId });
     const tenantId = await tenantIdOf(first.body.data.branch.id);
     await call('PATCH', `/api/admin/tenants/${tenantId}`, {
       admin: true,
       json: { status: 'suspended' },
     });
-    const res = await activate({ licenseKey });
-    expect([res.status, res.body.error?.code]).toEqual([403, 'TENANT_SUSPENDED']);
+    const res = await activate({ licenseKey, installId });
+    expect(res.status).toBe(201);
+    expect(res.body.data.tenant.status).toBe('suspended');
+    expect(res.body.data.tenant.features['qr.menu']).toBe(false);
+    const menu = await call('PUT', '/api/pos/menu', {
+      token: res.body.data.token,
+      json: sampleMenu(),
+    });
+    expect([menu.status, menu.body.error?.code]).toEqual([403, 'TENANT_SUSPENDED']);
+    // Baska kurulum yine onaysiz devralamaz.
+    const other = await activate({ licenseKey });
+    expect([other.status, other.body.error?.code]).toEqual([409, 'ACTIVE_ON_OTHER_INSTALL']);
   });
 
   it("ayni IP'den denemeler sinirlanir", async () => {
@@ -170,26 +226,83 @@ async function tenantIdOf(branchId: string): Promise<string> {
   return row?.tenant_id ?? '';
 }
 
+describe('lisans kaydi (registry)', () => {
+  it('eski anahtarla baglanma kaydi geri goturmez; isletme kayittaki yeni lisansi tasir', async () => {
+    const payload = licensePayload({ exp: '2099-06-01', c: 'Yeni Lokanta' });
+    const newer = await signLicense(payload);
+    const installId = unique('inst');
+    expect((await activate({ licenseKey: newer, installId })).status).toBe(201);
+
+    // Ayni kurulum eski anahtarla yeniden baglanir (or. eski yedekten donus).
+    const older = await signLicense({ ...payload, exp: '2098-01-01', c: 'Eski Lokanta' });
+    const res = await activate({ licenseKey: older, installId });
+    expect(res.status).toBe(201);
+    expect(res.body.data.license?.expiresAt).toBe('2099-06-15T00:00:00.000Z');
+    expect(res.body.data.tenant.name).toBe('Yeni Lokanta');
+    expect(await registryRow(payload.id)).toMatchObject({
+      license_key: newer,
+      exp: '2099-06-01',
+      customer: 'Yeni Lokanta',
+      source: 'activation',
+    });
+  });
+
+  it('esit bitisli farkli anahtar yerine gecer (ozellik eklenen lisans)', async () => {
+    const payload = licensePayload({ f: {} });
+    const installId = unique('inst');
+    const first = await activate({ licenseKey: await signLicense(payload), installId });
+    expect(first.body.data.tenant.features['qr.menu']).toBe(false);
+    const withMenu = await signLicense({ ...payload, f: { 'qr.menu': true } });
+    const second = await activate({ licenseKey: withMenu, installId });
+    expect(second.body.data.tenant.features['qr.menu']).toBe(true);
+    expect((await registryRow(payload.id))?.license_key).toBe(withMenu);
+  });
+});
+
 describe('lisans yenileme ve durum', () => {
   it('ayni kimlikli yeni lisans belirteci degistirmeden sureyi uzatir', async () => {
     const payload = licensePayload({ exp: '2098-01-01' });
     const { body } = await activate({ licenseKey: await signLicense(payload) });
     const token = body.data.token;
 
+    const renewedKey = await signLicense({ ...payload, exp: '2099-06-01', c: 'Yeni Ad' });
     const renewed = await call('PUT', '/api/pos/license', {
       token,
-      json: { licenseKey: await signLicense({ ...payload, exp: '2099-06-01', c: 'Yeni Ad' }) },
+      json: { licenseKey: renewedKey },
     });
     expect(renewed.status).toBe(200);
     expect(renewed.body.data.license.expiresAt).toBe('2099-06-15T00:00:00.000Z');
     expect(renewed.body.data.tenant.name).toBe('Yeni Ad');
     expect((await call('GET', '/api/pos/status', { token })).status).toBe(200);
+    expect(await registryRow(payload.id)).toMatchObject({
+      license_key: renewedKey,
+      exp: '2099-06-01',
+      source: 'renewal',
+    });
 
     const mismatch = await call('PUT', '/api/pos/license', {
       token,
       json: { licenseKey: await signLicense(licensePayload()) },
     });
     expect([mismatch.status, mismatch.body.error?.code]).toEqual([409, 'LICENSE_ID_MISMATCH']);
+  });
+
+  it('eski ya da suresi dolmus anahtarla yenileme kabul edilir ama kayit geri gitmez', async () => {
+    const payload = licensePayload({ exp: '2099-01-01' });
+    const current = await signLicense(payload);
+    const { body } = await activate({ licenseKey: current });
+    const token = body.data.token;
+    const stale = await call('PUT', '/api/pos/license', {
+      token,
+      json: { licenseKey: await signLicense({ ...payload, exp: '2020-01-01', g: 0 }) },
+    });
+    expect(stale.status).toBe(200);
+    expect(stale.body.data.license.expiresAt).toBe('2099-01-15T00:00:00.000Z');
+    expect(stale.body.data.tenant.features['qr.menu']).toBe(true);
+    expect(await registryRow(payload.id)).toMatchObject({
+      license_key: current,
+      source: 'activation',
+    });
   });
 
   it('QR menusuz yenileme ozelligi kapatir: yayin 403, musteri sayfasi kapali', async () => {
@@ -246,7 +359,7 @@ describe('lisans yenileme ve durum', () => {
 });
 
 describe('QR menuyu kapatma ve satici islemleri', () => {
-  it('kapatinca menu ve masalar yayindan kalkar, belirtec UNPAIRED', async () => {
+  it('eski POS (0.3.0) kapatinca menu ve masalar yayindan kalkar, belirtec UNPAIRED', async () => {
     const { body } = await activate();
     const token = body.data.token;
     await call('PUT', '/api/pos/menu', { token, json: sampleMenu() });
