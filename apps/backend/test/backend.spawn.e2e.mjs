@@ -16,7 +16,7 @@ try {
   const first = Array.isArray(list.data) ? list.data[0] : null;
   t.check(list.status === 200 && first !== null, 'yedek listesi okunur');
   t.check(typeof first?.sizeBytes === 'number' && first.sizeBytes > 0, 'listede boyut sayi');
-  t.check(first?.format === 1, 'mevcut yedek bicimi 1');
+  t.check(first?.format === 2, 'yeni yedek bicimi 2 (sikistirilmis akis)');
 } finally {
   await backend.stop(child);
 }
