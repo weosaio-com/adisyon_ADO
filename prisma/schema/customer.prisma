@@ -70,5 +70,7 @@ model DebtTransaction {
   syncState String    @default("pending") @map("sync_state")
 
   @@index([debtAccountId])
+  // Rapor: veresiye tahsilati tarih araligi (occurred_at)
+  @@index([occurredAt])
   @@map("debt_transactions")
 }

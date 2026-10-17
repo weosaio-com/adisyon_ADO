@@ -23,7 +23,8 @@
       "migrations.mjs",
       "backend-process.mjs",
       "update-manifest.mjs",
-      "updater.mjs"
+      "updater.mjs",
+      "startup.mjs"
     ],
     "extraResources": [
       {

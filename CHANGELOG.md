@@ -5,6 +5,27 @@ Sürümleme: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Akıllı yedek saklama:** yedekler sıkıştırılmış akış biçiminde (v2: gzip + AES-256-GCM, etiket
+  sonda) alınır, bellek veritabanı boyutuyla büyümez. Son 7 günün her günü, son 4 haftanın her
+  haftası, son 6 ayın her ayı için birer yedek kalır; elle/güncelleme öncesi/içe aktarılan
+  yedekler 90 gün; en yeni 3 hiç silinmez; disk azsa yalnız en yeniler kalır. Bulut klasörü
+  kopyaları da aynı kurala uyar ve arayüzden silinince birlikte silinir. Değişiklik yoksa günlük
+  otomatik yedek alınmaz. İçe aktarma sınırı 8 GB (akışla). `STORAGE.md`.
+- **Günlük temizlik (05:30):** biten arka plan işleri, eski yazdırma işleri, işlenmiş çevrimdışı
+  işlem kayıtları, eski oturumlar, yetim görseller ve artık geçici dosyalar silinir;
+  `PRAGMA optimize`. Denetim ve iş kayıtlarına dokunulmaz.
+- `GET /storage` ve `POST /storage/cleanup`; Ayarlar'da **Depolama** kartı.
+- Rapor sorguları için tarih indeksleri (ödeme, fiş, gider, gelir, veresiye hareketleri).
+
+### Changed
+
+- `/health` yalnız veritabanına bakar: disk dolu olsa da program açılır.
+- Masaüstü açılışında backend kapanırsa hata hemen ve gerçek nedeniyle (çıkış kodu, son satırlar,
+  log yolu) gösterilir.
+- `backups.size_bytes` BigInt (2 GB üstü veritabanı) ve `format` sütunu.
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

@@ -1,7 +1,8 @@
 import assert from 'node:assert';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
-// Sifreli yedek dosyasi bicimi (degismedi): IV(12) + AuthTag(16) + AES-256-GCM veri.
+// Eski (v1) sifreli yedek bicimi: IV(12) + AuthTag(16) + AES-256-GCM veri. Yeni yedekler v2
+// (backup.format.ts: sikistirilmis akis, etiket sonda); anahtar turetme ikisinde de ayni.
 // AES anahtari = sha256(ham anahtar metni). Ham anahtar paketli surumde ilk
 // acilista uretilir (userData/secrets.json -> BACKUP_ENCRYPTION_KEY, 64 hex).
 const ALGORITHM = 'aes-256-gcm';
@@ -9,7 +10,8 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 export const BACKUP_HEADER_BYTES = IV_BYTES + TAG_BYTES;
 
-const aesKey = (rawKey: string): Buffer => createHash('sha256').update(rawKey).digest();
+/** Ham anahtar metninden AES-256 anahtari (v1 ve v2 ortak; kurtarma anahtari ikisini de acar). */
+export const aesKey = (rawKey: string): Buffer => createHash('sha256').update(rawKey).digest();
 
 export function encryptBackup(plain: Buffer, rawKey: string): Buffer {
   const iv = randomBytes(IV_BYTES);

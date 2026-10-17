@@ -164,7 +164,13 @@
   `pre_update` yedeği). Yalnız masaüstü programında çalışır; ayrıntı `UPDATE_SYSTEM.md`.
   _(uygulandı 2026-10)_
 - `GET/POST /plugins` · `POST /plugins/:id/enable|disable` (yükleme/kaldırma **audit**)
-- `POST /backups` · `GET /backups` · `POST /backups/:id/restore` (Owner)
+- `POST /backups` · `GET /backups` · `POST /backups/:id/restore` (Owner). Yeni yedekler sıkıştırılmış
+  akış biçimindedir (`format: 2`); eski biçim (`1`) açılmaya devam eder. Akıllı saklama ve
+  değişiklik yoksa günlük yedeğin atlanması: `STORAGE.md`. _(2026-10)_
+- `GET /storage` · `POST /storage/cleanup` — veritabanı/yedek/görsel/log boyutu, boş disk, son
+  temizlik; elle temizlik (`backup.manage`, temizlik **audit**). _(2026-10)_
+- `GET /health` — canlılık: yalnız veritabanına bakar, disk dolu olsa da 200 döner (masaüstü
+  açılışı ve CI buna bağlı). Disk bilgisi `GET /storage`'dadır. _(2026-10)_
 - `GET /sync/status` — çevrimiçi/çevrimdışı/bekleyen kayıt sayısı (Faz 2 bulut sync; Faz 1 stub)
 
 ### 5.11 İstemci-Offline Senkron (Faz 1) — Waiter tablet ⇄ yerel sunucu

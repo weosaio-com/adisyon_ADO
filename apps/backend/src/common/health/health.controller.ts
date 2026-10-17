@@ -1,25 +1,18 @@
 import { Controller, Get } from '@nestjs/common';
-import {
-  HealthCheck,
-  HealthCheckService,
-  DiskHealthIndicator,
-  MemoryHealthIndicator,
-} from '@nestjs/terminus';
-import { parse } from 'node:path';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Public } from '../decorators/public.decorator';
 
-// Disk kontrolu kok surucuye bakar: Windows'ta 'C:\\', Linux'ta '/'.
-// (terminus 'path' olarak surucu koku bekler; './' Windows'ta gecersiz.)
-const STORAGE_ROOT = parse(process.cwd()).root;
-
+/**
+ * Canlilik denetimi: yalniz veritabani. Masaustu kabugu acilista, CI ve yayin duman testi bu
+ * ucun 200 donmesini bekler. Disk dolulugu burada DENETLENMEZ (dolu disk yuzunden program hic
+ * acilmiyordu); disk bilgisi /storage'da, temizlik oradan yapilir.
+ */
 @Controller('health')
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly prismaService: PrismaService,
-    private readonly disk: DiskHealthIndicator,
-    private readonly memory: MemoryHealthIndicator,
   ) {}
 
   @Get()
@@ -35,8 +28,6 @@ export class HealthController {
           return { database: { status: 'down' } };
         }
       },
-      () => this.memory.checkHeap('memory_heap', 150 * 1024 * 1024), // 150MB heap limit
-      () => this.disk.checkStorage('storage', { path: STORAGE_ROOT, thresholdPercent: 0.95 }), // 95% disk usage threshold
     ]);
   }
 }

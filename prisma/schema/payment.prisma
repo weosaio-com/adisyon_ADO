@@ -35,6 +35,8 @@ model Payment {
 
   @@index([orderId])
   @@index([customerId])
+  // Rapor/kasa: tarih araligi sorgulari (paid_at)
+  @@index([paidAt])
   @@map("payments")
 }
 
@@ -61,5 +63,7 @@ model Receipt {
   syncState String    @default("pending") @map("sync_state")
 
   @@index([orderId])
+  // Rapor: basilan fisler tarih araligi (printed_at)
+  @@index([printedAt])
   @@map("receipts")
 }

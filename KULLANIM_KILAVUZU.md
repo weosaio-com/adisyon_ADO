@@ -294,7 +294,16 @@ Böylece hiçbir sipariş sessizce kaybolmaz.
 
 ## 10. Yedekleme
 
-- **Otomatik günlük yedek:** Her gün sabah **06:00**'da sistem kendi kendine yedek alır.
+- **Otomatik günlük yedek:** Her gün sabah **06:00**'da sistem kendi kendine yedek alır. O gün
+  hiçbir değişiklik olmadıysa yeni yedek alınmaz.
+- **Akıllı saklama:** Yedekler sıkıştırılır ve eskileri kendiliğinden silinir. Son 7 günün her
+  günü, son 4 haftanın her haftası ve son 6 ayın her ayı için birer yedek kalır; elle alınan ve
+  güncelleme öncesi yedekler 90 gün tutulur. En yeni 3 yedek hiç silinmez. Disk dolmak üzereyse
+  yalnız en yeni yedekler kalır.
+- **Depolama:** **Ayarlar › Depolama** veritabanının ve yedeklerin kapladığı yeri, boş diski ve son
+  temizliği gösterir; **Şimdi temizle** ile temizlik elle çalıştırılır. Program her sabah 05:30'da
+  eski teknik kayıtları (yazdırma işleri, oturumlar vb.) temizler; satış, kasa ve denetim
+  kayıtlarına dokunmaz.
 - **Bulut kopyası (isteğe bağlı):** Ayarlardan bir senkron klasörü (OneDrive, Google Drive vb.)
   seçerseniz şifreli yedekler oraya da kopyalanır.
 - **Kurtarma anahtarı (mutlaka saklayın):** Yedekler şifrelidir. **Ayarlar › Yedekler › Kurtarma

@@ -177,6 +177,7 @@ export interface Backup {
   type: string; // auto | manual | pre_update | imported
   sizeBytes: number;
   createdAt: string;
+  format?: number; // 1: eski bicim, 2: sikistirilmis akis bicimi
 }
 
 // Cakisan offline mutasyonun Owner onay kaydi. OFFLINE_DESIGN.md §9.2

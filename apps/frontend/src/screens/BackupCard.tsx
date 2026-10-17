@@ -29,7 +29,11 @@ export default function BackupCard({
     queryKey: ['backups'],
     queryFn: () => api<Backup[]>('/backups'),
   });
-  const refresh = () => qc.invalidateQueries({ queryKey: ['backups'] });
+  // Yedek alinca/silinince saklama kurallari da calisir: depolama karti da tazelenir.
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['backups'] });
+    void qc.invalidateQueries({ queryKey: ['storage'] });
+  };
 
   // Bulut klasoru + otomatik yedek ayarlari (settings.manage gerektirir).
   const canSettings = hasPerm('settings.manage');
@@ -137,6 +141,11 @@ export default function BackupCard({
           }}
         />
       </div>
+      <p className="mb-2 text-xs text-slate-500">
+        Yedekler akıllı saklanır: son 7 günün her günü, son 4 haftanın her haftası ve son 6 ayın her
+        ayı için birer yedek kalır; elle alınan yedekler 90 gün tutulur. Diskte yer azalırsa yalnız
+        en yeni yedekler kalır.
+      </p>
       {canSettings && (
         <div className="mb-3 space-y-2 rounded-lg bg-slate-50 p-2 text-sm">
           <div className="flex items-center gap-2">
@@ -165,12 +174,12 @@ export default function BackupCard({
                 saveSetting.mutate({ key: 'backup.autoDaily', value: e.target.checked })
               }
             />
-            Günlük otomatik yedek (06:00)
+            Günlük otomatik yedek (06:00; veri değişmediyse alınmaz)
           </label>
           <p className="text-xs text-slate-400">
             Şifreli yedek dosyası bu klasöre de kopyalanır; OneDrive/Google Drive gibi bir senkron
-            klasörü seçerseniz buluta yüklemeyi sağlayıcının uygulaması yapar. Yedekler asla
-            otomatik silinmez.
+            klasörü seçerseniz buluta yüklemeyi sağlayıcının uygulaması yapar. Silinen yedeğin bu
+            klasördeki kopyası da silinir; klasördeki başka dosyalara dokunulmaz.
           </p>
           {cloudDirSaved && (
             <p className="text-xs font-medium text-amber-700">
@@ -216,7 +225,11 @@ export default function BackupCard({
       {backups.data?.length === 0 && <p className="text-sm text-slate-400">Henüz yedek yok.</p>}
       <ul className="divide-y">
         {(backups.data ?? []).map((b) => (
-          <li key={b.id} className="flex items-center gap-2 py-2 text-sm">
+          <li
+            key={b.id}
+            className="flex items-center gap-2 py-2 text-sm"
+            title={b.format === 2 ? 'Sıkıştırılmış şifreli yedek' : 'Şifreli yedek (eski biçim)'}
+          >
             <span className="min-w-0 flex-1 text-slate-600">
               {formatDateTime(b.createdAt)}
               <span className="text-slate-400">
@@ -240,7 +253,8 @@ export default function BackupCard({
             </button>
             <button
               onClick={() => {
-                if (window.confirm('Bu yedek silinsin mi?')) remove.mutate(b.id);
+                if (window.confirm('Bu yedek silinsin mi? Bulut klasöründeki kopyası da silinir.'))
+                  remove.mutate(b.id);
               }}
               disabled={remove.isPending}
               className="rounded-lg bg-red-600 px-2 py-1 font-medium text-white disabled:opacity-40"
