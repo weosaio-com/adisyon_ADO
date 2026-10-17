@@ -25,6 +25,12 @@ Sürümleme: [SemVer](https://semver.org/).
   `POST /api/pos/menu/unpublish`, satıcı API'si `GET/PUT /api/admin/licenses`, `revoke`,
   `unrevoke`; iptal edilen lisans işletme silinse de bağlanamaz. `scripts/license.mjs register`.
 - `PUT /cloud/qr`: QR menü bağlantıdan ayrı açılır/kapanır; Lisans kartında bulut bağlantısı satırı.
+- **Otomatik bulut yedeği:** yerel yedeğin şifreli hali (dükkânın kendi anahtarıyla; bulut okuyamaz)
+  buluta yüklenir: 95 MB'a kadar tek parça, büyükse kaldığı yerden devam eden parçalı yükleme;
+  hata olursa 1/5/15 dk sonra, sonra saatte bir yeniden dener. Bulutta lisans başına en yeni 30 +
+  son 12 ayın her ayından bir yedek kalır; kota 10 GiB. İlk kurulumda **Buluttan geri yükle**
+  (lisans anahtarı + kurtarma anahtarı). Bulutta `/api/pos/backups/*` (R2 `BACKUPS`), `cloud.backup`
+  özelliği varsayılan açık. Ayarlar'da **Bulut yedeği** kartı. `CLOUD_BACKUP.md`.
 
 ### Changed
 

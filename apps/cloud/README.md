@@ -91,6 +91,8 @@ Bir kez yapılır (hesap ve oturum için aşağıdaki **Yayına alma**'nın 1–
    `wrangler.jsonc` › `env.test` içindeki `00000000-…` yerine yazıp commit'leyin.
 2. `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images-test` ve
    `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-updates-test` (program güncellemeleri)
+   ve `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-backups-test` (bulut yedeği;
+   `CLOUD_BACKUP.md`). Yarım kalan parçalı yüklemeleri R2 7 günde kendisi siler; ek kural gerekmez.
 3. Deneme lisans anahtarının açık anahtarını `wrangler.jsonc` › `env.test` › `vars.LICENSE_PUBLIC_KEY`
    ve programın `apps/desktop/profiles/test.json` dosyasına aynı değerle yazın (`LICENSING.md` §5).
 4. `pnpm --filter @ado/cloud db:migrate:test`
@@ -144,7 +146,8 @@ Bir kez yapılır. Komutlar depo kökünden çalıştırılır.
    (gizli değildir).
 4. **Depolar.** `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-qr-images` ve
    `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-updates` (program güncellemeleri;
-   yüklemeyi release iş akışı yapar, `UPDATE_SYSTEM.md` §4)
+   yüklemeyi release iş akışı yapar, `UPDATE_SYSTEM.md` §4) ve
+   `pnpm --filter @ado/cloud exec wrangler r2 bucket create ado-backups` (bulut yedeği)
 5. **Lisans açık anahtarı.** Gerçek lisans anahtarının açık anahtarını `wrangler.jsonc` ›
    `vars.LICENSE_PUBLIC_KEY` ve `apps/desktop/profiles/prod.json` dosyasına yazıp commit'leyin (gizli
    değildir; özel anahtar asla depoya girmez).
