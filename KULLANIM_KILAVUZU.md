@@ -149,6 +149,20 @@ Bu ayarlar bittiğinde sistem satışa hazırdır.
 
 ---
 
+### 5.6 Lisans — **Ayarlar › Lisans**
+
+Satıcınızın verdiği lisans anahtarını **Ayarlar › Lisans** bölümüne yapıştırıp **Lisansı
+Etkinleştir** deyin. Lisans girilmeden menü, masa, kullanıcı ve yazıcı ayarları yapılabilir ama
+**yeni adisyon açılamaz**.
+
+- Lisansın bitmesine 14 gün kala ekranın üstünde uyarı şeridi çıkar.
+- Süre bitince **7 gün ek süre** vardır; şerit hangi gün kilitleneceğini yazar.
+- Ek süre de bitince yeni adisyon açılamaz. Açık hesaplar yine ödenip kapatılır; raporlar, kasa
+  kapanışı, yedek ve ayarlar her zaman açıktır.
+- Yeni lisansı girdiğiniz an kilit kalkar. Program internete bağlıysa satıcının yenilediği lisans
+  kendiliğinden gelir ve kurulur.
+- Bilgisayarın saati geri alınsa da süre uzamaz.
+
 ## 6. Tablet ve Telefonların Bağlanması
 
 Ana makinede **Ayarlar › Sunucu Adresi** kartı, tablet ve telefonlarda kullanılacak adresleri
@@ -366,6 +380,12 @@ Güncelleme dosyaları imzalıdır; imzası tutmayan dosya kurulmaz. Beklemek is
 **QR menü güncellenmiyor / kartta "Son yayın başarısız" yazıyor.**
 - Ana makinenin internet bağlantısını kontrol edin. Program birkaç dakika içinde kendisi yeniden
   dener; bağlantı gelince kartta **Şimdi yayınla** diyebilirsiniz. Satış bundan etkilenmez.
+**Yeni adisyon açılmıyor, "Lisans" penceresi çıkıyor.**
+
+- Lisans girilmemiş ya da süresi ve ek süresi dolmuş, veya satıcı lisansı askıya almış. Açık
+  hesaplar yine kapatılabilir. Pencereden yeni lisans anahtarını girin ya da satıcınızla görüşün;
+  penceredeki iletişim bilgisi satıcınızındır.
+
 - Kartta "Lisansınız QR menüyü içermiyor", "süresi doldu" ya da "askıya alındı" yazıyorsa satıcınızla
   görüşün. Yeni lisansı girdiğinizde ya da askı kalkınca yayın kendiliğinden sürer.
 - Kartta "başka bir bilgisayarda açıldı" yazıyorsa QR menü o bilgisayardan yönetiliyor; bu

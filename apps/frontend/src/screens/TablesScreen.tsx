@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError, getUser, hasPerm } from '../lib/api';
+import { api, ApiError, getUser, hasPerm, LICENSE_LOCKED_CODE } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus } from '../lib/format';
 import type { Order, PrintJobRow, Table } from '../lib/types';
@@ -62,13 +62,18 @@ export default function TablesScreen() {
   for (const draft of localDrafts.data ?? [])
     if (draft.tableId && !draft.serverId) localByTable.set(draft.tableId, draft);
 
+  // Lisans kilidinde lisans penceresi kendiliginden acilir (lib/api.ts); ayrica uyari gosterilmez.
+  const orderOpenError = (error: unknown) => {
+    if (error instanceof ApiError && error.code === LICENSE_LOCKED_CODE) return;
+    alert(error instanceof ApiError ? error.message : 'Adisyon açılamadı.');
+  };
   const createOrder = useMutation({
     mutationFn: (tableId: string) => api<Order>('/orders', { method: 'POST', body: { tableId } }),
     onSuccess: (order) => {
       qc.invalidateQueries({ queryKey: ['orders', 'open'] });
       nav(`/orders/${order.id}`);
     },
-    onError: (error) => alert(error instanceof ApiError ? error.message : 'Adisyon açılamadı.'),
+    onError: orderOpenError,
   });
   const createTakeaway = useMutation({
     mutationFn: (type: 'takeaway' | 'delivery') =>
@@ -77,7 +82,7 @@ export default function TablesScreen() {
       qc.invalidateQueries({ queryKey: ['orders', 'open'] });
       nav(`/orders/${order.id}`);
     },
-    onError: (error) => alert(error instanceof ApiError ? error.message : 'Adisyon açılamadı.'),
+    onError: orderOpenError,
   });
   const cancelOrder = useMutation({
     mutationFn: (orderId: string) =>

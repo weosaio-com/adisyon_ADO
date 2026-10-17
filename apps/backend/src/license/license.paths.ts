@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { API_PREFIX } from '../common/http/api-prefix';
 
 // Lisans suresi dolsa bile ASLA engellenmeyen yazma uclari. Not: tum yazmalari durduran eski
-// guard emekli (license.guard.ts); yeni politika yalniz yeni adisyonu kilitler (LICENSING.md §8).
+// guard kaldirildi; yeni politika yalniz yeni adisyonu kilitler (LICENSING.md §8).
 // Liste, hep acik kalmasi gereken alanlarin belgesi olarak ve geriye uyumluluk icin durur.
 //   - /auth/*    -> giris yapip lisansi yenileyebilmeli
 //   - /license/* -> yeni anahtari girebilmeli
