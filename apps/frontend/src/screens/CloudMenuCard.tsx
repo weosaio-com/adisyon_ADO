@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { CloudLostReason, CloudStatus } from '../lib/types';
+import type { CloudLinkMode, CloudStatus } from '../lib/types';
 
 const PRIMARY =
   'w-full rounded-lg bg-blue-600 py-2 font-semibold text-white disabled:opacity-40 hover:bg-blue-700';
@@ -13,16 +13,28 @@ function when(iso: string | null): string {
     : '—';
 }
 
-const LOST: Record<CloudLostReason, string> = {
-  superseded: 'Bu lisansla QR menü başka bir bilgisayarda açıldı.',
-  rotated: 'Bu bilgisayarın QR menü bağlantısı yenilendi.',
-  revoked: 'QR menü bağlantısı satıcı tarafından kaldırıldı.',
-  unpaired: 'QR menü başka bir yerden kapatıldı.',
-  invalid: 'QR menü bağlantısı artık geçerli değil.',
+// QR menu acikken bulut baglantisi henuz yoksa ne bekleniyor (baglanti Lisans kartinda yonetilir).
+const WAITING: Partial<Record<CloudLinkMode, string>> = {
+  linking: 'Bulut bağlantısı kuruluyor; bağlanınca menü kendiliğinden yayınlanır.',
+  waiting_network: 'İnternet bekleniyor; bağlantı gelince menü kendiliğinden yayınlanır.',
+  conflict:
+    'Bu lisans başka bir bilgisayarda buluta bağlı. Aşağıdaki Lisans bölümünden “Bu bilgisayara al” deyin.',
+  lost: 'Bu bilgisayarın bulut bağlantısı satıcı tarafından kaldırıldı. Lisans bölümünden yeniden bağlanın.',
+  error: 'Buluta bağlanılamadı; kendiliğinden yeniden denenecek.',
+  revoked: 'Lisansınız iptal edildi; QR menü yayınlanmıyor. Satıcınıza başvurun.',
+  suspended: 'QR menünüz askıya alındı; müşteri sayfası açılmaz. Satıcınızla görüşün.',
 };
 
-// QR menu: lisansla tek tikla acilir (adres ve kod girilmez); menu degistikce kendiliginden
-// yayinlanir. Kart her durumda ne yapilacagini soyler (backend cloud.state.ts CloudMode).
+// Bulutun yayini reddetme nedeni (bagliyken).
+const BLOCKED: Record<string, string> = {
+  suspended: 'QR menünüz askıya alındı; müşteri sayfası açılmaz. Satıcınızla görüşün.',
+  expired: 'Lisansınızın süresi doldu; QR menü yayınlanmıyor. Yeni lisansı Lisans bölümüne girin.',
+  revoked: 'Lisansınız iptal edildi; QR menü yayınlanmıyor. Satıcınıza başvurun.',
+};
+
+// QR menu: tek tikla acilir/kapanir (adres ve kod girilmez); acikken menu degistikce kendiliginden
+// yayinlanir. Bulut baglantisi lisansla kendiliginden kurulur ve Lisans kartinda gorunur; bu kart
+// yalniz QR menu yayinini yonetir (backend cloud.state.ts CloudQrMode).
 export default function CloudMenuCard({
   onError,
   onInfo,
@@ -35,20 +47,32 @@ export default function CloudMenuCard({
   const status = useQuery({
     queryKey: ['cloud', 'status'],
     queryFn: () => api<CloudStatus>('/cloud/status'),
-    // Yayin surerken ya da internet beklenirken sonucu hemen gostermek icin sik yokla.
-    refetchInterval: (query) =>
-      query.state.data?.publishing || query.state.data?.mode === 'waiting_network' ? 2000 : 30_000,
+    // Yayin, baglanma ya da bulutta kapatma surerken sonucu hemen gostermek icin sik yokla.
+    refetchInterval: (query) => {
+      const s = query.state.data;
+      const busy =
+        s?.publishing ||
+        s?.unpublishPending ||
+        (s?.qr === 'on' && (s.link === 'linking' || s.link === 'waiting_network'));
+      return busy ? 2000 : 30_000;
+    },
   });
   const apply = (next: CloudStatus) => qc.setQueryData(['cloud', 'status'], next);
 
-  const activate = useMutation({
-    mutationFn: (takeover: boolean) =>
-      api<CloudStatus>('/cloud/activate', { method: 'POST', body: takeover ? { takeover } : {} }),
-    onSuccess: (next) => {
+  const setQr = useMutation({
+    mutationFn: (enabled: boolean) =>
+      api<CloudStatus>('/cloud/qr', { method: 'PUT', body: { enabled } }),
+    onSuccess: (next, enabled) => {
       apply(next);
-      if (next.mode === 'on') onInfo('QR menü açıldı; menü yayınlanıyor.');
-      if (next.mode === 'waiting_network')
-        onInfo('İnternet yok. İnternet gelince QR menü kendiliğinden açılacak.');
+      if (!enabled) {
+        onInfo(
+          'QR menü kapatıldı. Masalardaki QR kodlar menü açmaz (yeniden açınca aynı kodlar çalışır).',
+        );
+      } else if (next.connected) {
+        onInfo('QR menü açıldı; menü yayınlanıyor.');
+      } else if (next.link === 'waiting_network') {
+        onInfo('İnternet yok. Bağlantı gelince QR menü kendiliğinden yayınlanacak.');
+      }
     },
     onError,
   });
@@ -57,180 +81,132 @@ export default function CloudMenuCard({
     onSuccess: apply,
     onError,
   });
-  // `close`: acik QR menuyu kapatma; degilse bekleyen acmadan/devralmadan vazgecme.
-  const disconnect = useMutation({
-    mutationFn: (_close: boolean) => api<CloudStatus>('/cloud/connection', { method: 'DELETE' }),
-    onSuccess: (next, close) => {
-      apply(next);
-      if (close) onInfo('QR menü kapatıldı. Masalardaki QR kodlar menü açmaz.');
-    },
-    onError,
-  });
 
   const s = status.data;
   // Bu kurulumda bulut tanimli degilse (derleme profili) kart gorunmez.
   if (!s?.enabled) return null;
-  const busy = activate.isPending || disconnect.isPending;
 
-  const openButton = (label: string, takeover = false) => (
+  const closeButton = (
     <button
-      onClick={() => activate.mutate(takeover)}
-      disabled={busy}
-      className={PRIMARY}
-      data-testid={takeover ? 'cloud-takeover' : 'cloud-activate'}
+      onClick={() => {
+        if (
+          window.confirm(
+            'QR menü kapatılsın mı? Masalardaki QR kodlar menü açmaz (yeniden açınca aynı kodlar çalışır).',
+          )
+        ) {
+          setQr.mutate(false);
+        }
+      }}
+      disabled={setQr.isPending}
+      className="text-sm text-red-600 hover:text-red-800 disabled:opacity-40"
+      data-testid="qr-disable"
     >
-      {activate.isPending ? 'Açılıyor…' : label}
-    </button>
-  );
-  const dismissButton = (
-    <button
-      onClick={() => disconnect.mutate(false)}
-      disabled={busy}
-      className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-40"
-    >
-      Vazgeç
+      QR menüyü kapat
     </button>
   );
 
   let body: React.ReactNode;
-  switch (s.mode) {
-    case 'no_license':
-      body = (
+  if (s.qr === 'not_licensed') {
+    body =
+      s.link === 'no_license' ? (
         <p className={`${NOTE} bg-slate-50 text-slate-700`} data-testid="cloud-no-license">
           QR menü için önce aşağıdaki <b>Lisans</b> bölümünden lisansınızı girin.
         </p>
-      );
-      break;
-    case 'not_licensed':
-      body = (
+      ) : s.link === 'legacy_license' ? (
         <p className={`${NOTE} bg-amber-50 text-amber-900`}>
+          Lisansınızda lisans numarası yok; QR menü için satıcınızdan yeni lisans isteyin.
+        </p>
+      ) : (
+        <p className={`${NOTE} bg-amber-50 text-amber-900`} data-testid="qr-not-licensed">
           Lisansınız QR menüyü içermiyor. Satıcınızla görüşün.
         </p>
       );
-      break;
-    case 'expired':
-      body = (
-        <p className={`${NOTE} bg-red-50 text-red-700`}>
-          Lisansınızın süresi doldu; QR menü yayınlanmıyor. Yeni lisansı aşağıdaki <b>Lisans</b>{' '}
-          bölümüne girin.
+  } else if (s.qr === 'off') {
+    body = (
+      <div className="space-y-2">
+        <p className="text-xs text-slate-500">
+          Müşteriler masadaki QR kodu okutup menüyü telefonda görür. Menü bu programdan yönetilir;
+          ürün ve fiyat değiştikçe kendiliğinden güncellenir.
         </p>
-      );
-      break;
-    case 'off':
-      body = (
-        <div className="space-y-2">
-          <p className="text-xs text-slate-500">
-            Müşteriler masadaki QR kodu okutup menüyü telefonda görür. Menü bu programdan yönetilir;
-            ürün ve fiyat değiştikçe kendiliğinden güncellenir.
+        {s.unpublishPending && (
+          <p className={`${NOTE} bg-amber-50 text-amber-900`} data-testid="qr-unpublish-pending">
+            QR menü kapatıldı; buluttan kaldırma internet gelince tamamlanacak.
           </p>
-          {openButton('QR menüyü aç')}
-        </div>
-      );
-      break;
-    case 'waiting_network':
-      body = (
-        <div className="space-y-2">
-          <p className={`${NOTE} bg-amber-50 text-amber-900`} data-testid="cloud-waiting">
-            İnternet bekleniyor. Bağlantı gelince QR menü kendiliğinden açılacak.
+        )}
+        <button
+          onClick={() => setQr.mutate(true)}
+          disabled={setQr.isPending}
+          className={PRIMARY}
+          data-testid="qr-enable"
+        >
+          {setQr.isPending ? 'Açılıyor…' : 'QR menüyü aç'}
+        </button>
+      </div>
+    );
+  } else if (!s.connected) {
+    body = (
+      <div className="space-y-2">
+        <p className={`${NOTE} bg-amber-50 text-amber-900`} data-testid="qr-waiting">
+          {WAITING[s.link] ?? WAITING.linking}
+          {s.link === 'error' && s.linkError ? ` (${s.linkError})` : ''}
+        </p>
+        {closeButton}
+      </div>
+    );
+  } else {
+    const blocked = s.blocked ? BLOCKED[s.blocked] : undefined;
+    body = (
+      <div className="space-y-3">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+          <dt className="text-slate-500">İşletme</dt>
+          <dd className="font-medium text-slate-800">
+            {s.tenantName}
+            {s.branchName && s.branchName !== s.tenantName ? ` · ${s.branchName}` : ''}
+          </dd>
+          <dt className="text-slate-500">Adres</dt>
+          <dd className="truncate text-slate-800">{s.url}</dd>
+          <dt className="text-slate-500">Son yayın</dt>
+          <dd className="text-slate-800" data-testid="cloud-last-published">
+            {s.publishing
+              ? 'Yayınlanıyor…'
+              : s.lastPublishedAt
+                ? `${when(s.lastPublishedAt)} (sürüm ${s.lastMenuVersion})`
+                : 'Henüz yok'}
+          </dd>
+        </dl>
+        {blocked && (
+          <p className={`${NOTE} bg-red-50 text-red-700`} data-testid="cloud-suspended">
+            {blocked}
           </p>
-          {dismissButton}
-        </div>
-      );
-      break;
-    case 'conflict':
-      body = (
-        <div className="space-y-2">
-          <p className={`${NOTE} bg-amber-50 text-amber-900`} data-testid="cloud-conflict">
-            Bu lisansla QR menü başka bir bilgisayarda açık
-            {s.conflictLastSeenAt ? ` (son görülme ${when(s.conflictLastSeenAt)})` : ''}. Bu
-            bilgisayara taşırsanız diğer bilgisayar menüyü artık güncelleyemez.
+        )}
+        {s.lastError && !s.publishing && !blocked && (
+          <p className={`${NOTE} bg-red-50 text-red-700`} data-testid="cloud-error">
+            Son yayın başarısız ({when(s.lastErrorAt)}): {s.lastError}. Kendiliğinden yeniden
+            denenecek.
           </p>
-          {openButton('Bu bilgisayara taşı', true)}
-          {dismissButton}
-        </div>
-      );
-      break;
-    case 'lost':
-      body = (
-        <div className="space-y-2">
-          <p className={`${NOTE} bg-amber-50 text-amber-900`} data-testid="cloud-lost">
-            {LOST[s.lostReason ?? 'invalid']}
-          </p>
-          {s.lostReason === 'superseded'
-            ? openButton('Bu bilgisayarda aç', true)
-            : openButton('QR menüyü yeniden aç')}
-          {dismissButton}
-        </div>
-      );
-      break;
-    default:
-      body = (
-        <div className="space-y-3">
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-slate-500">İşletme</dt>
-            <dd className="font-medium text-slate-800">
-              {s.tenantName}
-              {s.branchName && s.branchName !== s.tenantName ? ` · ${s.branchName}` : ''}
-            </dd>
-            <dt className="text-slate-500">Adres</dt>
-            <dd className="truncate text-slate-800">{s.url}</dd>
-            <dt className="text-slate-500">Son yayın</dt>
-            <dd className="text-slate-800" data-testid="cloud-last-published">
-              {s.publishing
-                ? 'Yayınlanıyor…'
-                : s.lastPublishedAt
-                  ? `${when(s.lastPublishedAt)} (sürüm ${s.lastMenuVersion})`
-                  : 'Henüz yok'}
-            </dd>
-          </dl>
-          {s.mode === 'suspended' && (
-            <p className={`${NOTE} bg-red-50 text-red-700`} data-testid="cloud-suspended">
-              QR menünüz askıya alındı; müşteri sayfası açılmaz. Satıcınızla görüşün.
-            </p>
-          )}
-          {s.lastError && !s.publishing && s.mode === 'on' && (
-            <p className={`${NOTE} bg-red-50 text-red-700`} data-testid="cloud-error">
-              Son yayın başarısız ({when(s.lastErrorAt)}): {s.lastError}. Kendiliğinden yeniden
-              denenecek.
-            </p>
-          )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => publish.mutate()}
-              disabled={publish.isPending || s.publishing || s.mode !== 'on'}
-              className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white disabled:opacity-40"
-            >
-              Şimdi yayınla
-            </button>
-            <button
-              onClick={() => nav('/qr-codes')}
-              className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-semibold text-slate-800"
-            >
-              Masa QR kodları
-            </button>
-          </div>
-          <p className="text-xs text-slate-500">
-            Ürün, kategori, masa ve işletme bilgisi değişiklikleri birkaç saniye içinde
-            kendiliğinden yayınlanır. İnternet kesikse bağlantı gelince yayınlanır.
-          </p>
+        )}
+        <div className="flex gap-2">
           <button
-            onClick={() => {
-              if (
-                window.confirm(
-                  'QR menü kapatılsın mı? Masalardaki QR kodlar menü açmaz (yeniden açınca aynı kodlar çalışır).',
-                )
-              ) {
-                disconnect.mutate(true);
-              }
-            }}
-            disabled={busy}
-            className="text-sm text-red-600 hover:text-red-800 disabled:opacity-40"
-            data-testid="cloud-disconnect"
+            onClick={() => publish.mutate()}
+            disabled={publish.isPending || s.publishing || Boolean(blocked)}
+            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
-            QR menüyü kapat
+            Şimdi yayınla
+          </button>
+          <button
+            onClick={() => nav('/qr-codes')}
+            className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-semibold text-slate-800"
+          >
+            Masa QR kodları
           </button>
         </div>
-      );
+        <p className="text-xs text-slate-500">
+          Ürün, kategori, masa ve işletme bilgisi değişiklikleri birkaç saniye içinde kendiliğinden
+          yayınlanır. İnternet kesikse bağlantı gelince yayınlanır.
+        </p>
+        {closeButton}
+      </div>
+    );
   }
 
   return (

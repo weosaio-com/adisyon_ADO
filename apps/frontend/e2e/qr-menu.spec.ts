@@ -4,9 +4,10 @@ import { buildPayload, signLicense } from '../../../scripts/license.mjs';
 
 // QR menu uctan uca: POS (:3001) + bulut (apps/cloud, `wrangler dev`). Bulut adresi
 // E2E_CLOUD_URL ile verilir; verilmezse bu dosya calismaz (playwright.config testIgnore).
-// CI'da e2e-cloud isi kosar. QR menu lisansla acilir: test lisansi ADO_LICENSE_PRIVATE_KEY_FILE ile
-// imzalanir; acik anahtari POS (ADO_LICENSE_PUBLIC_KEY) ve bulut (LICENSE_PUBLIC_KEY) bilir. POS'un
-// gomulu bulut adresi (CLOUD_API_URL) E2E_CLOUD_URL ile ayni olmali.
+// CI'da e2e-cloud isi kosar. Lisans girilince POS buluta kendiliginden baglanir (Lisans kartinda
+// "Bulut: bagli"); QR menu ayrica acilir. Test lisansi ADO_LICENSE_PRIVATE_KEY_FILE ile imzalanir;
+// acik anahtari POS (ADO_LICENSE_PUBLIC_KEY) ve bulut (LICENSE_PUBLIC_KEY) bilir. POS'un gomulu
+// bulut adresi (CLOUD_API_URL) E2E_CLOUD_URL ile ayni olmali.
 const ORIGIN = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3001';
 const API = `${ORIGIN}/api/v1`;
 const CLOUD = process.env.E2E_CLOUD_URL ?? 'http://127.0.0.1:8787';
@@ -147,11 +148,11 @@ test.describe('POS’lu işletme', () => {
   });
 
   test.afterAll(async () => {
-    // Diger testler bulutsuz POS bekler.
-    await pos('DELETE', '/cloud/connection', undefined, fx.token).catch(() => undefined);
+    // Diger testler yayinsiz POS bekler (bulut baglantisi lisansla kalir).
+    await pos('PUT', '/cloud/qr', { enabled: false }, fx.token).catch(() => undefined);
   });
 
-  test('lisansla aç, otomatik yayın, tükendi yansır, kapatınca QR menü açmaz', async ({
+  test('lisansla kendiliğinden bağlan, QR menüyü aç, tükendi yansır, kapatınca QR açmaz', async ({
     page,
     browser,
   }) => {
@@ -165,9 +166,14 @@ test.describe('POS’lu işletme', () => {
     await page.getByRole('button', { name: 'Lisansı Etkinleştir' }).click();
     await expect(page.getByTestId('license-qr-menu')).toHaveText('QR menü: dahil');
 
-    // QR menu tek tikla acilir: bulut adresi programa gomulu, kod girilmez.
+    // Program buluta kendiliginden baglanir (adres programa gomulu, kod girilmez).
+    const cloudLink = page.getByTestId('cloud-link');
+    await expect(cloudLink).toHaveAttribute('data-mode', 'linked', { timeout: 30_000 });
+    await expect(cloudLink).toContainText('Bulut: bağlı');
+
+    // QR menu ayrica, tek tikla acilir.
     const cloudCard = page.getByTestId('cloud-card');
-    await cloudCard.getByTestId('cloud-activate').click();
+    await cloudCard.getByTestId('qr-enable').click();
     await expect(cloudCard.getByTestId('cloud-last-published')).toContainText('sürüm', {
       timeout: 30_000,
     });
@@ -197,10 +203,12 @@ test.describe('POS’lu işletme', () => {
       )
       .toBe(1);
 
-    // QR menu kapatilir: masadaki kod artik menu acmaz (yeniden acinca ayni kodlar calisir).
+    // QR menu kapatilir: masadaki kod artik menu acmaz (yeniden acinca ayni kodlar calisir);
+    // bulut baglantisi kalir.
     page.once('dialog', (dialog) => void dialog.accept());
-    await cloudCard.getByTestId('cloud-disconnect').click();
-    await expect(cloudCard.getByTestId('cloud-activate')).toBeVisible();
+    await cloudCard.getByTestId('qr-disable').click();
+    await expect(cloudCard.getByTestId('qr-enable')).toBeVisible();
+    await expect(cloudLink).toHaveAttribute('data-mode', 'linked');
     await customer.reload();
     await expect(customer.getByTestId('menu-error')).toHaveAttribute(
       'data-code',
