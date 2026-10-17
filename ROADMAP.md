@@ -4,8 +4,21 @@
 > **ne zaman** ekleneceğini kaydeder. Amaç: ne aşırı-mühendislik (ürünü geciktiren erken altyapı),
 > ne eksik-mühendislik. Her madde: **neden ertelendi + hangi tetikleyici geldiğinde eklenir.**
 
-**Durum:** Sürüm 1.0 · **Oluşturuldu:** 2026-07-15 · **Tür:** Yaşayan doküman
+**Durum:** Sürüm 1.0 · **Oluşturuldu:** 2026-07-15 · **Güncellendi:** 2026-10-17 · **Tür:** Yaşayan doküman
 İlgili: `ARCHITECTURE.md` (bütünsel harita), `SYSTEM_ANALYSIS.md`.
+
+---
+
+## Ürün fazları (2026-10-13 kararı)
+
+Sahibin kararıyla önce program satışa hazır hale getirildi, sonra satıcı paneli, en son canlıya
+geçiş.
+
+| Faz | Kapsam | Durum |
+|-----|--------|-------|
+| **A — Program satışa hazır (0.4.0)** | Akıllı yedek saklama ve günlük temizlik (`STORAGE.md`); her lisanslı kurulum buluta bağlanır, saatlik heartbeat (son görülme, sürüm, sağlık); bulut lisans kaydı, uzaktan yenileme/askı/iptal; otomatik şifreli bulut yedeği ve buluttan geri yükleme (`CLOUD_BACKUP.md`); lisans politikası (lisanssız satış yok, 14 gün uyarı + 7 gün ek süre, kilit yalnız yeni adisyonda; `LICENSING.md` §8) | ✅ 2026-10-17 (PR #27–#31) |
+| **B — Satıcı yönetim paneli** | Kod açmadan: işletmeler ve lisanslar (ver, yenile, iptal), sürüm yayınlama, bulut yedeği ve son görülme görünümü, ödeme/abonelik takibi. Ayrı admin Worker + Cloudflare Access (birkaç kişi, e-postayla). Başında karar: lisans imzalama yeri | Sırada |
+| **C — Canlıya geçiş** | Kalıcı alan adı, canlı D1/R2/Worker, gösterilmeden üretilen üretim anahtarları, kod imzalama sertifikası, KVKK metinleri, ilk gerçek müşteri | Faz B'den sonra |
 
 ---
 
@@ -50,10 +63,10 @@ Tümü **framework primitifleriyle** (elle yeniden icat yok), mevcut mimariyi bo
 
 | Sistem | Neden ertelendi | Tetikleyici |
 |--------|-----------------|-------------|
-| **Monitoring / Metrics panosu** | Tam metrik gözlemlenebilirliği ürün yokken erken | Frontend + Faz 2 phone-home; şimdilik hafif health + sayaç yeter |
+| **Monitoring / Metrics panosu** | Tam metrik gözlemlenebilirliği ürün yokken erken | 🟡 **0.4.0:** saatlik heartbeat buluta son görülme, sürüm, veritabanı/yedek boyutu, boş disk ve son yedek zamanını yazar (`branches.health_*`); görünüm Faz B satıcı panelinde |
 | **Time Machine** | Altyapı değil, **audit üzerine okuma/UI**; hash-zincirli audit veriyi zaten tutuyor | Frontend gelince timeline endpoint + ekran |
 | **Undo (dar kapsam)** | Genel undo tehlikeli; finansal kayıt asla geri alınmaz (ters-kayıt var) | Sadece commit-öncesi UI aksiyonları (sipariş iletmeden kalem silme) — sipariş UI'ında |
-| **Cloud yedekleme** | ✅ **2026-07-19 tamamlandı** — şifreli yedek, kullanıcının seçtiği senkron klasörüne kopyalanıyor (`backup.cloudDir`, isteğe bağlı); buluta yüklemeyi sağlayıcının masaüstü istemcisi (OneDrive/Drive/Dropbox) yapar. Günlük otomatik yedek 06:00 (`backup.autoDaily`). Doğrudan S3/Drive API'si: merkezi sunucu senaryosu doğarsa |
+| **Cloud yedekleme** | ✅ **2026-07-19 tamamlandı** — şifreli yedek, kullanıcının seçtiği senkron klasörüne kopyalanıyor (`backup.cloudDir`, isteğe bağlı); buluta yüklemeyi sağlayıcının masaüstü istemcisi (OneDrive/Drive/Dropbox) yapar. Günlük otomatik yedek 06:00 (`backup.autoDaily`). ✅ **0.4.0:** otomatik şifreli bulut yedeği (R2; bulut içeriği okuyamaz), lisans başına saklama ve kota, yeni bilgisayarda buluttan geri yükleme (`CLOUD_BACKUP.md`) |
 | **İnternet üzerinden erişim** | Veri tek makinede; güvenli uzak erişim Faz 2 offline/sync motoruna dayanır (`sync_state`/`device_id` alanları hazır) | Faz 2 sync motoru + barındırma kararı |
 
 ---
@@ -71,4 +84,4 @@ Tümü **framework primitifleriyle** (elle yeniden icat yok), mevcut mimariyi bo
 | Boşluk | Neden önemli | Plan |
 |--------|--------------|------|
 | **Test / CI** | ✅ **Tamamlandı** — birim self-check (payments/orders/reports calc) + e2e smoke (30 kontrol) + CI kapısı | Yeni kritik modül geldikçe smoke'a kontrol eklenir |
-| **Hata izleme / telemetri** | Müşteri PC'sinde çalışan üründe sahadaki çökmeleri görmek şart | Faz 2 phone-home; şimdilik yapısal log (pino) + crash recovery |
+| **Hata izleme / telemetri** | Müşteri PC'sinde çalışan üründe sahadaki çökmeleri görmek şart | 🟡 **0.4.0:** heartbeat sağlık özetini gönderir (phone-home); çökme raporu henüz yok — yapısal log (pino) + crash recovery |

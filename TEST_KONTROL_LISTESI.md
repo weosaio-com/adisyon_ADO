@@ -224,3 +224,59 @@ ve kasa bilgisayarından **Güncellemeyi kur** deyin.
 düğme pasiftir. Onaydan sonra "Program güncelleniyor" sayfası çıkar; program kapanır ve birkaç
 dakika içinde yeni sürümle kendiliğinden açılır. Veriler yerindedir; **Ayarlar › Yedekler**'de
 güncelleme öncesi yedek görünür; kartta "Son kurulum: … kuruldu" yazar.
+
+## 18. (0.4.0) Eski sürümün üzerine kurulum
+
+**Yap:** 0.3.0 ya da 0.2.0 kurulu, içinde gerçek veri olan bilgisayarda, gün sonundan sonra
+`Adisyon-POS-Setup-0.4.0.exe`'yi çalıştırın (0.3.0 bu sürümü kendiliğinden almaz). Yönetici olarak
+girin ve **Ayarlar › Lisans**'a bakın; lisans yoksa deneme lisansını girin.
+
+**Beklenen:** Ürünler, masalar, kullanıcılar ve geçmiş raporlar yerindedir. **Ayarlar › Güncelleme**
+"Sürüm 0.4.0" der. **Ayarlar › Yedekler**'de eski yedekler listelenir. Lisans kartında
+"Bulut: bağlı · son görülme …" yazar. QR menü açıksa açık kalır; basılı QR kartları çalışır.
+
+## 19. (0.4.0) Depolama kartı
+
+**Yap:** **Ayarlar › Depolama** kartına bakın, **Şimdi temizle** deyin.
+
+**Beklenen:** Veritabanı, Yedekler, Ürün görselleri, Kayıt dosyaları ve Boş disk alanı satırları
+doludur. Yedek sayısı **Ayarlar › Yedekler**'deki listeyle aynıdır. Temizlikten sonra "Son temizlik:
+…" satırı çıkar; ürünler, adisyonlar ve raporlar değişmez.
+
+## 20. (Test bulutu güncellenince) Bulut yedeği ve başka bilgisayara geri yükleme
+
+**Yap:** Kasa bilgisayarında **Ayarlar › Yedekler › Kurtarma anahtarı**'nı yönetici şifresiyle açıp
+not alın. **Ayarlar › Bulut Yedeği › Şimdi buluta yedekle** deyin. Sonra programın hiç kurulmadığı
+başka bir Windows bilgisayara 0.4.0'ı kurun. İlk açılış ekranında **Yedekleriniz buluttaysa:
+buluttan geri yükleyin**'e tıklayın. Lisans anahtarını girip **Buluttaki yedekleri listele** deyin.
+En üstteki yedeği seçin, kurtarma anahtarını girip **Yedeği geri yükle** deyin. İstenince programı
+kapatıp açın.
+
+**Beklenen:** Kasa bilgisayarında kart birkaç dakika içinde "Son bulut yedeği: …" gösterir. Yeni
+bilgisayarda yedekler en yenisi üstte listelenir. Yanlış kurtarma anahtarı reddedilir. Geri
+yüklemeden sonra kasa bilgisayarının ürünleri, masaları ve kullanıcıları gelir; eski şifrelerle
+girilir. Yeni bilgisayarın Lisans kartında "bu lisans başka bilgisayarda açık" ve **Bu bilgisayara
+al** düğmesi görünür. Denemede bu düğmeye **basmayın**: basarsanız kasa bilgisayarının bulut
+bağlantısı kesilir.
+
+## 21. (0.4.0) Lisans kilidi
+
+**Yap:** Test sürümünü lisans girmeden kurun (ya da 20. adımdaki yeni bilgisayarı sıfırdan kurun).
+Yönetici olarak girin, bir ürün ve bir masa ekleyin, masaya dokunup adisyon açmayı deneyin. Sonra
+çıkan pencereden deneme lisansını girin ve yeniden deneyin.
+
+**Beklenen:** Her ekranın üstünde kırmızı şerit "Lisans tanımlı değil: yeni adisyon açılamıyor…"
+yazar. Ürün ve masa eklenir; adisyon açılmaz ve lisans penceresi kendiliğinden açılır. Lisans
+girilince şerit kalkar, adisyon açılır.
+
+**Süresi geçmiş lisansla (isteğe bağlı):** satıcıdan bitiş tarihi birkaç gün önce geçmiş bir
+deneme lisansı istenip girilir. Şeritte "Lisans süresi doldu: … itibarıyla yeni adisyon
+açılamayacak (N gün kaldı)" yazar; adisyon hâlâ açılır. Ek süre bitince yeni adisyon açılmaz ama
+açık adisyon ödenip kapatılır; raporlar ve gün sonu çalışır.
+
+## 22. (0.4.1 yayınlanınca) 0.4.0'dan otomatik güncelleme
+
+**Yap:** 0.4.0 kurulu bilgisayarda 17. adımı yapın.
+
+**Beklenen:** 17. adımdaki gibi. Ek olarak güncellemeden sonra Lisans kartında "Bulut: bağlı" ve
+Bulut Yedeği kartında son bulut yedeği görünür.

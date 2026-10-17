@@ -133,6 +133,9 @@ dener. Program bildirimi bulduğunda Ayarlar › Güncelleme kartı yönetici on
 - **Kod imzalama sertifikası yok:** Windows SmartScreen ilk kurulumda uyarır. Güncelleme güvenliği
   Ed25519 imzası ve SHA-512 özetine dayanır (electron-updater'ın Authenticode denetimi sertifika
   olmadan yapılamaz).
+- **0.3.0 kendiliğinden güncellenmez:** 0.3.0 paketi `app-config.json`'daki açık anahtar dizisini
+  (`updatePublicKeys`) okuyamadığı için güncelleme denetlemez, kart görünmez (0.4.0'da düzeltildi). 0.3.0
+  kurulu bilgisayara 0.4.0 bir kez elle kurulur; sonraki sürümler kendiliğinden gelir.
 - **Geri alma:** otomatik geri alma yok. Kurulum öncesi şifreli yedek ve `pre-migrate` kopyası
   vardır; önceki sürüm elle yeniden kurulup yedek geri yüklenebilir.
 - **Beta kanalı:** derleme profilinde `channel: "beta"` ile ayrı bir derleme gerekir; kullanıcı arayüzünde
