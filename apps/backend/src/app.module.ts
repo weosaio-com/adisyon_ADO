@@ -33,7 +33,6 @@ import { DevicesModule } from './devices/devices.module';
 import { UsersModule } from './users/users.module';
 import { SyncModule } from './sync/sync.module';
 import { LicenseModule } from './license/license.module';
-import { LicenseGuard } from './license/license.guard';
 import { DesktopModule } from './desktop/desktop.module';
 import { UpdatesModule } from './updates/updates.module';
 import { InstallMetricsModule } from './common/metrics/install-metrics.module';
@@ -114,8 +113,6 @@ const isUnloggedRequest = (req: IncomingMessage): boolean => {
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
-    // Lisans en sonda: `license.enforce` ayari acilmadikca hicbir sey yapmaz.
-    { provide: APP_GUARD, useClass: LicenseGuard },
   ],
 })
 export class AppModule {}

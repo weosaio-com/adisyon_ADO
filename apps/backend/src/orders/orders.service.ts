@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { LicenseService } from '../license/license.service';
 import { computeItemTotals, applyOrderDiscounts } from './orders.calc';
 import type {
   OpenOrderDto,
@@ -55,6 +56,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly events: EventBusService,
+    private readonly license: LicenseService,
   ) {}
 
   private provenance(user: AuthUser): { deviceId?: string } {
@@ -81,6 +83,9 @@ export class OrdersService {
       }
     }
 
+    // Lisans kilidi YALNIZ yeni adisyonu durdurur (acik adisyon odenir/kapanir; bolme serbest).
+    // Cevrimdisi islem kilitten once tablette olusturulduysa (clientOpId ULID zamani) gecer.
+    await this.license.assertCanOpenOrder(user.branchId, { clientOpId: dto.clientOpId });
     await this.requireOpenCashSession(user.branchId);
 
     if (dto.tableId) {

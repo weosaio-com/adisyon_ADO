@@ -158,7 +158,13 @@
 - `GET/PATCH /settings` — application_settings (Owner)
 - `GET/PUT /settings/business` `{ name, address?, phone? }` — fiş başlığı (şube bilgisi) (`settings.manage`, **audit**) _(uygulandı 2026-09)_
 - `GET /audit-logs?action=&entityType=&from=&to=&cursor=` — filtre/arama (Owner) · `?format=csv` export
-- `GET /license` · `POST /license/activate` `{ key }` · `POST /license/deactivate`
+- `GET /license` · `POST /license/activate` `{ licenseKey }` — lisans durumu ve anahtar girişi
+  (`license.manage`, **audit** `license.activate`). `GET /license` mevcut alanlara ek olarak
+  politikayı döner: `phase` (`trial` · `unlicensed` · `active` · `expiring` · `grace` · `locked`),
+  `locked`, `lockAt`, `trialEndsAt`, `remoteState` (bulutun bildirdiği), `reason`, `graceDays`,
+  `banner` (`{ level, daysLeft, until }`), `supportContact`. Kilit yalnız **yeni adisyonu** durdurur
+  (`403 LICENSE_LOCKED`); açık adisyon ödenir/kapanır, rapor, yedek, ayar her zaman açıktır.
+  Ayrıntı: `LICENSING.md` §8. _(politika 2026-10)_
 - `GET /updates/status` · `POST /updates/check` · `POST /updates/approve` `{ version }` — otomatik
   güncelleme (`update.manage`; onay yalnız kasa bilgisayarından, açık adisyon/kasa yokken; önce
   `pre_update` yedeği). Yalnız masaüstü programında çalışır; ayrıntı `UPDATE_SYSTEM.md`.
@@ -309,7 +315,8 @@
 | `CASH_SESSION_NOT_OPEN` | açık kasa oturumu yok |
 | `VERSION_CONFLICT` | `version` uyuşmazlığı (409, iyimser kilit) |
 | `IDEMPOTENCY_REPLAY` | aynı anahtar — ilk sonuç döndü (bilgi) |
-| `LICENSE_INVALID` / `LICENSE_RESTRICTED` | lisans geçersiz / kısıtlı mod |
+| `LICENSE_INVALID` | lisans anahtarı geçersiz ya da bu kurulumda doğrulanamıyor |
+| `LICENSE_LOCKED` | lisans yok, süresi ve ek süresi doldu ya da uzaktan askıya alındı/iptal edildi: yeni adisyon açılamaz (403); çevrimdışı `OPEN_TABLE` aynı nedenle reddedilir |
 | `PRINTER_UNAVAILABLE` | yazıcı yok/kapalı → iş kuyruğa alındı |
 | `PRODUCT_UNAVAILABLE` | tükenen ürün siparişe eklenemez (409) |
 | `IMAGE_TOO_LARGE` / `IMAGE_TYPE_INVALID` | ürün görseli 1 MB üstü (413) / JPEG-PNG-WebP değil |

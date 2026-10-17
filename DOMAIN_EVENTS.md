@@ -136,7 +136,9 @@
 - **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService` (QR menude isletme adi/adres/telefon).
 
 ### `license.activated`
-- **Amaci:** Ayarlar › Lisans'tan yeni bir lisans anahtari etkinlestirildi (imza ve sure dogrulandi).
+- **Amaci:** Yeni bir lisans anahtari etkinlestirildi (imza ve sure dogrulandi): Ayarlar › Lisans'tan
+  (audit `license.activate`) ya da buluttan gelen yenilemeyle (`license.remote.update`, audit
+  `license.renewed_remote`).
 - **Yayinlandigi yer:** `LicenseService.activate` (post-commit; bayraklar tazelendikten sonra).
 - **Payload:** `{ licenseId, customerName, features }`. Anahtarin kendisi ASLA event'e konmaz.
 - **Dinleyen moduller:** `EventLoggerSubscriber`, `CloudService`: bulut bagliysa yeni lisans buluta

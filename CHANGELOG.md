@@ -32,15 +32,31 @@ Sürümleme: [SemVer](https://semver.org/).
   (lisans anahtarı + kurtarma anahtarı). Bulutta `/api/pos/backups/*` (R2 `BACKUPS`), `cloud.backup`
   özelliği varsayılan açık. Ayarlar'da **Bulut yedeği** kartı. `CLOUD_BACKUP.md`.
 
+- **Lisans politikası (satışa hazırlık):** lisans girilmeden yeni adisyon açılmaz (deneme 0 gün);
+  bitişten 14 gün önce uyarı şeridi, sonra 7 gün ek süre (lisanstaki `g` öncelikli), sonra yalnız
+  **yeni adisyon** kilitlenir (`403 LICENSE_LOCKED`; çevrimdışı `OPEN_TABLE` reddedilir, tablet
+  kuyruğu tıkanmaz). Açık adisyon ödenir/kapanır; rapor, yedek, ayar her zaman açık. Bulutun
+  askıya alma/iptal bildirimi 7 gün ek süreyle aynı kurala bağlanır; bulutun gönderdiği yeni lisans
+  imzası doğrulanıp kendiliğinden kurulur. Saat geri alınmasına karşı koruma (bulut saatiyle
+  düzeltme). Paketli sürümde zorunluluk açık (derleme profili: `licenseEnforce`, `trialDays`,
+  `graceDays`, `supportContact`). Uyarı şeridi ve lisans kilit penceresi. `LICENSING.md` §8.
+
 ### Changed
 
 - `/health` yalnız veritabanına bakar: disk dolu olsa da program açılır.
 - Masaüstü açılışında backend kapanırsa hata hemen ve gerçek nedeniyle (çıkış kodu, son satırlar,
   log yolu) gösterilir.
 - `backups.size_bytes` BigInt (2 GB üstü veritabanı) ve `format` sütunu.
+- Tüm yazmaları durduran eski lisans koruyucusu (`LicenseGuard`) kaldırıldı; kilit yalnız yeni
+  adisyondadır.
 - Bulutta etkinleştirme artık `qr.menu` istemez; süresi dolmuş imzalı lisans ve askıdaki işletme de
   bağlanır (menü kapalı kalır). `GET /cloud/status` `mode` yerine `link` + `qr` döner; "QR menüyü
   kapat" bağlantıyı kesmez. Denetim eylemleri `cloud.qr.enable` / `cloud.qr.disable`.
+
+### Fixed
+
+- Paketli sürüm, kurulum dosyasındaki `app-config.json`'dan güncelleme açık anahtarlarını okuyamıyor
+  ve otomatik güncelleme kapalı kalıyordu (0.3.0 paketinde); artık iki biçim de okunur.
 
 ## [0.3.0] - 2026-10-11
 
