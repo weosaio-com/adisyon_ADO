@@ -157,7 +157,8 @@
 - **Amaci:** Yeni bir yedek dosyasi olustu (otomatik, elle, guncelleme oncesi ya da ice aktarilan).
 - **Yayinlandigi yer:** `BackupService` (dosya ve kayit yazildiktan sonra).
 - **Payload:** `{ backupId, type, format, sizeBytes, createdAt }`.
-- **Dinleyen moduller:** Bulut yedegi (yeni yedegi beklemeden yukler).
+- **Dinleyen moduller:** `CloudBackupService` (yeni yedegi saatlik denetimi beklemeden buluta
+  yukler; olay kacsa da zamanlayici yakalar).
 
 ## Planlanan Event'ler (modul gelince eklenecek)
 

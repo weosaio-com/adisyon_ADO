@@ -8,6 +8,8 @@ import { defineConfig } from 'vitest/config';
 const license = generateKeyPairSync('ed25519');
 
 // Testler gercek Workers calisma zamaninda (workerd) kosar; D1 ve R2 yerel ve dosya basina ayri.
+// R2 baglantilari (IMAGES, UPDATES, BACKUPS) wrangler.jsonc'den gelir: burada `r2Buckets` yazmak
+// o listeyi ezer. Yerel R2 multipart'ta gercek 5 MiB alt sinirini ve SHA-256 denetimini uygular.
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({

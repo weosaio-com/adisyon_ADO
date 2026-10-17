@@ -5,6 +5,11 @@ export interface Env {
   IMAGES: R2Bucket;
   /** Program guncellemeleri (kurulum dosyasi, latest.yml, imzali ado-update.json). */
   UPDATES?: R2Bucket;
+  /**
+   * Bulut yedegi: POS'un dukkan anahtariyla sifreli yedek dosyalari (`backups/<lisans>/<yedek>`).
+   * Tanimli degilse /api/pos/backups kapalidir (503 BACKUPS_DISABLED). CLOUD_BACKUP.md.
+   */
+  BACKUPS?: R2Bucket;
   ASSETS: Fetcher;
   /** Satici (vendor) API anahtari. Tanimli degilse /api/admin kapalidir. */
   ADMIN_TOKEN?: string;
@@ -21,9 +26,18 @@ export interface PosContext {
   tenant: TenantRow;
 }
 
+/** Bulut yedegi kapisindan gecen istek: yedekler bu lisans kimligine yazilir. */
+export interface BackupAccess {
+  licenseId: string;
+  /** Lisans basina toplam yedek kotasi (bayt). */
+  quotaBytes: number;
+  bucket: R2Bucket;
+}
+
 export interface AppEnv {
   Bindings: Env;
   Variables: {
     pos: PosContext;
+    backup: BackupAccess;
   };
 }

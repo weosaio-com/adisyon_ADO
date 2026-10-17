@@ -50,7 +50,7 @@
 | Veresiye ekstre | ✅ | **CSV indir** (`/customers/:id/statement.csv`, yürüyen bakiye). PDF render sunum/frontend katmanı |
 | Stok (inventory) | 🟡 | Opt-in, varsayılan kapalı. Descope adayı |
 | Denetim (audit) | ✅ | — |
-| Yedek (backup) | ✅ | Al/listele/sil + **restore** (çöz+doğrula+stage; atomik takas restart'ta) + **günlük otomatik yedek (06:00)** + **isteğe bağlı bulut kopyası** (senkron klasörüne; OneDrive/Drive sağlayıcı bağımsız). **Akıllı saklama (2026-10):** sıkıştırılmış v2 biçim, günlük/haftalık/aylık saklama, değişiklik yoksa yedek alınmaz, günlük teknik kayıt temizliği ve Depolama kartı (`STORAGE.md`). **Kurtarma anahtarı + dosyadan geri yükleme + yeni bilgisayara taşıma** (kurulum ekranından; anahtar yeni makineye taşınır) |
+| Yedek (backup) | ✅ | Al/listele/sil + **restore** (çöz+doğrula+stage; atomik takas restart'ta) + **günlük otomatik yedek (06:00)** + **isteğe bağlı bulut kopyası** (senkron klasörüne; OneDrive/Drive sağlayıcı bağımsız). **Otomatik bulut yedeği (2026-10):** şifreli yedek buluta (R2) gider, yeni bilgisayarda buluttan geri yüklenir (`CLOUD_BACKUP.md`). **Akıllı saklama (2026-10):** sıkıştırılmış v2 biçim, günlük/haftalık/aylık saklama, değişiklik yoksa yedek alınmaz, günlük teknik kayıt temizliği ve Depolama kartı (`STORAGE.md`). **Kurtarma anahtarı + dosyadan geri yükleme + yeni bilgisayara taşıma** (kurulum ekranından; anahtar yeni makineye taşınır) |
 | Health / Worker / Scheduler / Feature-flags | ✅ | Bug'lar düzeltildi |
 
 ---

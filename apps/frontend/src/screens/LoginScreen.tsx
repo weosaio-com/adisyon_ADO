@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, apiUpload, login, loginPin, ApiError } from '../lib/api';
 import { pullSnapshot } from '../offline/engine';
 import { InstallButton, useInstallPrompt } from '../lib/install';
+import CloudRestoreForm from './CloudRestoreForm';
 
 type Mode = 'owner' | 'waiter';
 
@@ -300,7 +301,8 @@ function SetupForm({ onDone }: { onDone: () => void }) {
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [restoreMode, setRestoreMode] = useState(false);
+  // Yeni bilgisayar: yedek dosyasından ya da buluttaki otomatik yedekten geri yükleme.
+  const [restoreMode, setRestoreMode] = useState<'file' | 'cloud' | null>(null);
   const valid =
     username.trim().length >= 3 &&
     password.length >= 6 &&
@@ -328,7 +330,14 @@ function SetupForm({ onDone }: { onDone: () => void }) {
     }
   }
 
-  if (restoreMode) return <SetupRestoreForm onBack={() => setRestoreMode(false)} />;
+  if (restoreMode === 'file') return <SetupRestoreForm onBack={() => setRestoreMode(null)} />;
+  if (restoreMode === 'cloud') {
+    return (
+      <AuthShell>
+        <CloudRestoreForm onBack={() => setRestoreMode(null)} />
+      </AuthShell>
+    );
+  }
 
   return (
     <AuthShell>
@@ -390,10 +399,18 @@ function SetupForm({ onDone }: { onDone: () => void }) {
         </button>
         <button
           type="button"
-          onClick={() => setRestoreMode(true)}
+          onClick={() => setRestoreMode('file')}
           className="mt-4 w-full text-sm font-semibold text-stone-500 hover:text-ink-900"
         >
           Başka bilgisayardan mı taşıyorsunuz? Yedekten geri yükleyin
+        </button>
+        <button
+          type="button"
+          onClick={() => setRestoreMode('cloud')}
+          className="mt-2 w-full text-sm font-semibold text-stone-500 hover:text-ink-900"
+          data-testid="setup-cloud-restore"
+        >
+          Yedekleriniz buluttaysa: buluttan geri yükleyin
         </button>
       </form>
     </AuthShell>

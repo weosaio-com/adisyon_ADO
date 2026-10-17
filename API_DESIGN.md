@@ -167,6 +167,12 @@
 - `POST /backups` · `GET /backups` · `POST /backups/:id/restore` (Owner). Yeni yedekler sıkıştırılmış
   akış biçimindedir (`format: 2`); eski biçim (`1`) açılmaya devam eder. Akıllı saklama ve
   değişiklik yoksa günlük yedeğin atlanması: `STORAGE.md`. _(2026-10)_
+- `GET /cloud-backups/status` · `POST /cloud-backups/upload-now` · `PUT /cloud-backups/settings`
+  `{ enabled }` — otomatik bulut yedeği: son yükleme, bekleyen, hata; şimdi yükle; aç/kapat
+  (`backup.manage`). İlk kurulumda (kullanıcı yokken, yalnız kasa bilgisayarından)
+  `POST /cloud-backups/setup/list` `{ licenseKey }` ve `POST /cloud-backups/setup/restore`
+  `{ licenseKey, cloudBackupId, recoveryKey }` buluttan geri yükler. Bulut tarafı
+  (`/api/pos/backups/*`) ve saklama/kota: `CLOUD_BACKUP.md`. _(2026-10)_
 - `GET /storage` · `POST /storage/cleanup` — veritabanı/yedek/görsel/log boyutu, boş disk, son
   temizlik; elle temizlik (`backup.manage`, temizlik **audit**). _(2026-10)_
 - `GET /health` — canlılık: yalnız veritabanına bakar, disk dolu olsa da 200 döner (masaüstü

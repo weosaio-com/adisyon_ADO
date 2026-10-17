@@ -26,12 +26,17 @@ export function formatQty(milis: number): string {
   return Number.isInteger(q) ? String(q) : q.toFixed(3);
 }
 
-// Bayt -> insan-okur boyut (yedek, veritabani, disk). 1024 tabanli; KB yukari yuvarlanir.
+// Bayt -> insan-okur boyut (yedek, veritabani, disk). 1024 tabanli; KB yukari yuvarlanir; Turkce
+// ondalik virgul ("12,3 MB").
+const oneDecimal = new Intl.NumberFormat('tr-TR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 export function formatBytes(bytes: number): string {
   const GB = 1024 * 1024 * 1024;
   const MB = 1024 * 1024;
-  if (bytes >= GB) return `${(bytes / GB).toFixed(1)} GB`;
-  if (bytes >= MB) return `${(bytes / MB).toFixed(1)} MB`;
+  if (bytes >= GB) return `${oneDecimal.format(bytes / GB)} GB`;
+  if (bytes >= MB) return `${oneDecimal.format(bytes / MB)} MB`;
   return `${Math.ceil(bytes / 1024)} KB`;
 }
 

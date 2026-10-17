@@ -20,11 +20,12 @@ assert.ok(Number.isNaN(parseTlToKurus('abc')));
 assert.ok(Number.isNaN(parseTlToKurus('1.5000')));
 assert.ok(Number.isNaN(parseTlToKurus('12,345')));
 
-// Boyut: KB yukari yuvarlanir, MB/GB tek ondalik.
+// Boyut: KB yukari yuvarlanir, MB/GB tek ondalik (Turkce virgul).
 assert.equal(formatBytes(0), '0 KB');
 assert.equal(formatBytes(1), '1 KB');
 assert.equal(formatBytes(1536), '2 KB');
-assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
-assert.equal(formatBytes(3 * 1024 * 1024 * 1024 + 1), '3.0 GB');
+assert.equal(formatBytes(5 * 1024 * 1024), '5,0 MB');
+assert.equal(formatBytes(3 * 1024 * 1024 * 1024 + 1), '3,0 GB');
+assert.equal(formatBytes(12.3 * 1024 * 1024), '12,3 MB');
 
 console.log('✓ format.selfcheck OK');
