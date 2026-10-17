@@ -10,18 +10,29 @@ import { applyMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
 import updaterPackage from 'electron-updater';
 import { createUpdater } from './updater.mjs';
+import {
+  BACKEND_START_TIMEOUT_MS,
+  outputTail,
+  startupFailureDialog,
+  waitForBackend,
+  watchExit,
+} from './startup.mjs';
 
 // Paketli uygulama dev sunucusuna (3001) yanlislikla baglanmasin.
 const PORT = process.env.API_PORT || (app.isPackaged ? '43127' : '3001');
 const BASE = `http://127.0.0.1:${PORT}`;
 let backend = null;
+let backendExit = null;
 let writeLog = () => {};
 let mainWindow = null;
 let appConfig = null;
 let updater = null;
+// Acilis basarisiz olursa hata penceresinde gosterilecek son backend ciktisi.
+const recentOutput = outputTail();
 
+// /health yalniz veritabanini denetler (disk dolu olsa da 200). Asili istek beklemeyi uzatmasin.
 const isUp = () =>
-  fetch(`${BASE}/api/v1/health`)
+  fetch(`${BASE}/api/v1/health`, { signal: AbortSignal.timeout(3000) })
     .then((r) => r.ok)
     .catch(() => false);
 
@@ -77,8 +88,13 @@ function startBackend() {
     execPath: process.execPath,
     entry: join(base, 'dist', 'main.js'),
     env: { ...process.env, ...(app.isPackaged ? packagedEnv() : {}), ELECTRON_RUN_AS_NODE: '1' },
-    onOutput: writeLog,
+    onOutput: (chunk) => {
+      writeLog(chunk);
+      recentOutput.push(chunk);
+    },
   });
+  // Acilis beklemesi bununla yarisir: backend coker ya da baslatilamazsa hemen anlasilir.
+  backendExit = watchExit(backend);
   backend.once('exit', (code, signal) => log(`backend kapandi (kod ${code}, sinyal ${signal})`));
   backend.on('message', onBackendMessage);
 }
@@ -127,15 +143,6 @@ function startUpdater() {
   updater.start();
 }
 
-async function waitUp(timeoutMs) {
-  const end = Date.now() + timeoutMs;
-  while (Date.now() < end) {
-    if (await isUp()) return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-}
-
 async function openWindow() {
   mainWindow = new BrowserWindow({ width: 1280, height: 800 });
   mainWindow.removeMenu();
@@ -163,16 +170,27 @@ async function openWindow() {
 
 async function start() {
   // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin.
-  writeLog = rotatingLog(join(app.getPath('userData'), 'backend-error.log'));
+  const logPath = join(app.getPath('userData'), 'backend-error.log');
+  writeLog = rotatingLog(logPath);
   try {
     if (app.isPackaged || !(await isUp())) {
       // Dev'de backend'i kendin calistiriyorsan buraya dusmez.
       startBackend();
-      if (!(await waitUp(30000))) {
-        dialog.showErrorBox(
-          'Backend başlatılamadı',
-          'Sunucu 30 saniye içinde hazır olmadı. Dev ise: backend build edildi mi? (apps/backend/dist)',
-        );
+      const result = await waitForBackend({
+        isUp,
+        exited: backendExit,
+        timeoutMs: BACKEND_START_TIMEOUT_MS,
+      });
+      if (!result.ok) {
+        log(`backend acilamadi: ${JSON.stringify(result)}`);
+        // Gercek sebep (cikis kodu / zaman asimi), son kayitlar ve gunluk dosyasinin yolu.
+        const { title, message } = startupFailureDialog(result, {
+          timeoutMs: BACKEND_START_TIMEOUT_MS,
+          logPath,
+          packaged: app.isPackaged,
+          recentOutput: recentOutput.text(),
+        });
+        dialog.showErrorBox(title, message);
         app.quit();
         return;
       }
