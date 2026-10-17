@@ -240,6 +240,19 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
   assert(udel < 400, `USER sil (${udel})`);
 
   // --- CLOUD YEDEK: cloudDir doluysa sifreli dosya kopyalanir, bossa kopya yok ---
+  // Disk azaldiysa (bos < %10 / 2 GB) saklama her turden yalniz en yenisini tutar; buna bagli
+  // kontroller yalniz normal kipte yapilir. Dosya adi yoldan: Windows/Linux ayiraci.
+  const fileName = (path) => path.split(/[\\/]/).pop();
+  const { data: disk0 } = await call('GET', '/storage');
+  const lowDisk = disk0?.lowDisk === true;
+  if (lowDisk) console.log('  (disk azaldi kipi: saklama kontrolleri buna gore)');
+  const health = await call('GET', '/health');
+  assert(
+    health.status === 200 &&
+      health.data?.details?.database?.status === 'up' &&
+      !('storage' in (health.data?.details ?? {})),
+    `SAGLIK yalniz veritabani; disk denetimi /storage'da (${health.status})`,
+  );
   const cloudDir = join(tmpdir(), 'ado-cloud-' + Date.now());
   await call('PUT', '/settings/' + encodeURIComponent('backup.cloudDir'), { value: cloudDir });
   const { data: bk } = await call('POST', '/backups');
@@ -248,6 +261,33 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
     existsSync(cloudDir) && readdirSync(cloudDir).length === 1,
     'cloud klasorunde 1 dosya var',
   );
+  // Yeni bicim (v2): sikistirilmis akis, boyut JSON'da sayi, checksum = dosyanin sha256'si.
+  const bkBytes = readFileSync(bk.path);
+  assert(
+    bk.format === 2 && typeof bk.sizeBytes === 'number' && bk.sizeBytes === bkBytes.length,
+    `YEDEK yeni bicim 2 + boyut sayi (${bk.format}, ${typeof bk.sizeBytes})`,
+  );
+  assert(bkBytes.subarray(0, 7).toString('latin1') === 'ADOBAK2', 'YEDEK dosya basligi v2');
+  assert(
+    createHash('sha256').update(bkBytes).digest('hex') === bk.checksum,
+    'YEDEK checksum = diskteki dosyanin sha256si',
+  );
+  assert(/^[0-9a-f]{64}$/.test(bk.fingerprint ?? ''), 'YEDEK veri parmak izi kaydedildi');
+  // Elle silme: yerel dosya + bulut klasorundeki kopyasi; digerlerine dokunulmaz.
+  const { data: bkDel } = await call('POST', '/backups');
+  const delCopy = join(cloudDir, fileName(bkDel.path));
+  assert(bkDel.cloudCopied === true && existsSync(delCopy), 'YEDEK ikinci bulut kopyasi var');
+  const delRes = await call('DELETE', `/backups/${bkDel.id}`);
+  assert(
+    delRes.status === 200 &&
+      delRes.data.cloudCopyRemoved === true &&
+      !existsSync(delCopy) &&
+      !existsSync(bkDel.path),
+    `YEDEK elle silme yerel dosyayi ve bulut kopyasini siler (${delRes.status})`,
+  );
+  if (!lowDisk) {
+    assert(existsSync(join(cloudDir, fileName(bk.path))), 'YEDEK diger bulut kopyasi duruyor');
+  }
   await call('PUT', '/settings/' + encodeURIComponent('backup.cloudDir'), { value: '' });
   const { data: bk2 } = await call('POST', '/backups');
   assert(bk2.cloudCopied === false, `cloudDir bos -> kopya yok (${bk2.cloudCopied})`);
@@ -263,10 +303,10 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
     `KURTARMA anahtar gosterildi (${rkStatus})`,
   );
 
-  const own = await upload('/backups/import', readFileSync(bk.path));
+  const own = await upload('/backups/import', bkBytes);
   assert(
-    own.status === 201 && own.data.type === 'imported',
-    `IMPORT yedek yuklendi (${own.status})`,
+    own.status === 201 && own.data.type === 'imported' && own.data.format === 2,
+    `IMPORT yedek yuklendi, bicim 2 taninir (${own.status})`,
   );
   const ownRestore = await call('POST', `/backups/${own.data.id}/restore`, {});
   assert(
@@ -276,6 +316,10 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
 
   const foreignKey = randomBytes(32).toString('hex');
   const foreign = await upload('/backups/import', foreignBackup(foreignKey));
+  assert(
+    foreign.status === 201 && foreign.data.format === 1,
+    `IMPORT eski bicim (v1) taninir (${foreign.status})`,
+  );
   const needKey = await call('POST', `/backups/${foreign.data.id}/restore`, {});
   assert(
     needKey.status === 409 && needKey.data?.error?.code === 'BACKUP_KEY_REQUIRED',
@@ -304,10 +348,51 @@ async function openOrderWithItem(tableId, prodId, qty = 1000) {
   }
   const tiny = await upload('/backups/import', Buffer.from('kisa'));
   assert(tiny.status === 400, `IMPORT gecersiz dosya reddedildi (${tiny.status})`);
+  // Daha yeni bir surumun yedegi eski bicim sanilmaz: anlasilir hata.
+  const future = Buffer.concat([Buffer.from('ADOBAK3\0', 'latin1'), randomBytes(80)]);
+  const futureImport = await upload('/backups/import', future);
+  assert(
+    futureImport.status === 400 && futureImport.data?.error?.code === 'BACKUP_UNSUPPORTED',
+    `IMPORT daha yeni surumun yedegi: BACKUP_UNSUPPORTED (${futureImport.status})`,
+  );
   const setupImport = await upload('/backups/setup/import', Buffer.alloc(64), false);
   assert(
     setupImport.status === 403,
     `SETUP geri yukleme kullanici varken kapali (${setupImport.status})`,
+  );
+
+  // --- DEPOLAMA: /storage ozeti + elle temizlik (saklama + teknik kayit/dosya temizligi) ---
+  const st = await call('GET', '/storage');
+  assert(
+    st.status === 200 &&
+      typeof st.data.dbBytes === 'number' &&
+      st.data.dbBytes > 0 &&
+      typeof st.data.backups?.count === 'number' &&
+      st.data.backups.count >= 2 &&
+      typeof st.data.backups.totalBytes === 'number' &&
+      typeof st.data.imagesBytes === 'number' &&
+      typeof st.data.logsBytes === 'number' &&
+      typeof st.data.lowDisk === 'boolean' &&
+      'freeDiskBytes' in st.data &&
+      'totalDiskBytes' in st.data &&
+      'lastCleanup' in st.data,
+    `DEPOLAMA /storage ozeti (${st.status})`,
+  );
+  const cleanup = await call('POST', '/storage/cleanup');
+  assert(
+    cleanup.status === 201 &&
+      typeof cleanup.data.at === 'string' &&
+      cleanup.data.trigger === 'manual' &&
+      typeof cleanup.data.deleted?.backups === 'number' &&
+      typeof cleanup.data.freedBytes === 'number',
+    `DEPOLAMA elle temizlik ozet doner (${cleanup.status})`,
+  );
+  const st2 = await call('GET', '/storage');
+  assert(st2.data.lastCleanup?.at === cleanup.data.at, 'DEPOLAMA son temizlik kaydedildi');
+  const { data: afterCleanup } = await call('GET', '/backups');
+  assert(
+    Array.isArray(afterCleanup) && afterCleanup.some((b) => b.id === bk2.id),
+    'DEPOLAMA temizlik en yeni yedegi silmez',
   );
 
   // --- SSE: canli sinyal akisi (200 + order.* olayi + tokensiz 401) ---
