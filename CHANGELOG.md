@@ -5,6 +5,24 @@ Sürümleme: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sessiz oturum kapanması ("donmuş" ekran):** veritabanı birkaç saniye meşgulken (yedek alınırken
+  SQLite kilidi, ağır rapor) kimlik denetimi 401 veriyor, arayüz oturumu silip ekranı eski hâlinde
+  bırakıyordu. Artık yalnız geçersiz token ve kapanmış oturum 401; veritabanı hatası `503 DB_BUSY`
+  (oturum kapanmaz, tekrar denenir). Rotalardaki kilit ve zaman aşımı hataları da 500 yerine 503.
+- **Takılan yazıcı:** Windows yazdırması 30 sn içinde bitmezse PowerShell kapatılır ve iş başarısız
+  olur; arka plan kuyruğu (mutfak fişi, kasa toplamı, stok) beklemez. PowerShell erken kapanınca
+  oluşan EPIPE hatası backend'i çökertmiyor.
+- **Kendini toparlama (masaüstü):** backend beklenmedik kapanırsa 1, 5, 15 sn sonra, sonra dakikada
+  bir yeniden başlatılır (10 dakikada 5 denemeden sonra kayıt dosyasının yolu gösterilir). Pencere
+  süreci çökerse sayfa yeniden yüklenir; pencere 30 sn yanıt vermezse "Yeniden yükle / Bekle"
+  sorulur. Çökme ve kilitlenmeler kayıt dosyasına yazılır.
+
+### Changed
+
+- Electron 43.1.1 → 43.7.7.
+
 ## [0.4.0] - 2026-10-19
 
 ### Yükseltme notları
