@@ -5,6 +5,19 @@ Sürümleme: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
+### Yükseltme notları
+
+- **0.3.0 kurulu bilgisayar 0.4.0'ı kendiliğinden almaz** (0.3.0'daki güncelleme anahtarı hatası,
+  aşağıda Fixed). 0.4.0 bir kez elle kurulur; sonraki sürümler kendiliğinden gelir.
+- Deneme profilinde lisans zorunludur: lisans girilmemiş kurulumda güncellemeden sonra yeni adisyon
+  açılmaz (menü, masa, kullanıcı ve rapor açık kalır). Önce lisansı girin.
+- İlk açılışta veritabanı geçişleri çalışır (yedek boyutu, rapor indeksleri, bulut yedeği kaydı);
+  öncesinde `pre-migrate` kopyası alınır. Eski yedekler (v1) açılmaya devam eder.
+- Akıllı saklama, güncellemeden sonraki ilk yedekte ya da günlük temizlikte kurala uymayan eski
+  yedekleri siler (sahibin onayıyla "yedekler asla silinmez" kuralının yerini aldı).
+
 ### Added
 
 - **Akıllı yedek saklama:** yedekler sıkıştırılmış akış biçiminde (v2: gzip + AES-256-GCM, etiket
