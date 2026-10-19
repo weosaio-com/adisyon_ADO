@@ -75,7 +75,7 @@ node scripts/license.mjs public-key --key ~/ado-lisans/ado-license-private.pem
 
 | Profil | Bulut adresi | Lisans açık anahtarı | Güncelleme |
 |---|---|---|---|
-| `test` | `https://ado-qr-test.weosaio.workers.dev` | deneme anahtarı (2026-10-11; test bulutunda da `env.test` › `LICENSE_PUBLIC_KEY`) | `channel`, `updatePublicKey`: deneme güncelleme anahtarı (2026-10-11) |
+| `test` | `https://ado-qr-test.weosaio.workers.dev` | deneme anahtarı (2026-10-11; test bulutunda da `env.test` › `LICENSE_PUBLIC_KEY`) | `channel`, `updatePublicKey`: deneme güncelleme anahtarı (2026-10-19; satıcının tarayıcısında üretildi, özel yarısı sohbete ve depoya girmedi) |
 | `prod` | henüz yok | henüz yok — dolmadan derlenemez | güncelleme anahtarı dolmadan derlenemez |
 
 Güncelleme anahtarı lisans anahtarından ayrıdır; ayrıntı `UPDATE_SYSTEM.md`. Deneme anahtarlarının
