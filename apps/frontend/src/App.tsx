@@ -1,7 +1,8 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
-import { isAuthed } from './lib/api';
+import { useEffect } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { isAuthed, SESSION_EXPIRED_EVENT } from './lib/api';
 import AppLayout from './components/AppLayout';
-import LoginScreen from './screens/LoginScreen';
+import LoginScreen, { type LoginRouteState } from './screens/LoginScreen';
 import TablesScreen from './screens/TablesScreen';
 import OrderScreen from './screens/OrderScreen';
 import ReportScreen from './screens/ReportScreen';
@@ -19,7 +20,22 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return isAuthed() ? <AppLayout>{children}</AppLayout> : <Navigate to="/login" replace />;
 }
 
+// Oturum gercekten bittiginde (lib/api.ts: /auth/refresh 401/403) kullanici hangi ekrandaysa
+// hemen giris ekranina gecer; bayat ekran "donmus" gibi kalmaz.
+function useSessionExpiryRedirect(): void {
+  const nav = useNavigate();
+  useEffect(() => {
+    const onExpired = () => {
+      const state: LoginRouteState = { sessionExpired: true };
+      nav('/login', { replace: true, state });
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, [nav]);
+}
+
 export default function App() {
+  useSessionExpiryRedirect();
   return (
     <Routes>
       <Route path="/login" element={<LoginScreen />} />

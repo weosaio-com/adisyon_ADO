@@ -204,9 +204,11 @@ test.describe('POS’lu işletme', () => {
       .toBe(1);
 
     // QR menu kapatilir: masadaki kod artik menu acmaz (yeniden acinca ayni kodlar calisir);
-    // bulut baglantisi kalir.
-    page.once('dialog', (dialog) => void dialog.accept());
+    // bulut baglantisi kalir. Onay uygulama ici penceredir (yerel confirm degil).
     await cloudCard.getByTestId('qr-disable').click();
+    const confirmClose = page.getByRole('dialog', { name: 'QR menü kapatılsın mı?' });
+    await confirmClose.getByRole('button', { name: 'QR menüyü kapat' }).click();
+    await expect(confirmClose).toBeHidden();
     await expect(cloudCard.getByTestId('qr-enable')).toBeVisible();
     await expect(cloudLink).toHaveAttribute('data-mode', 'linked');
     await customer.reload();

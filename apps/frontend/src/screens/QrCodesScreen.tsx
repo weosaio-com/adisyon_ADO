@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api, ApiError } from '../lib/api';
 import type { CloudStatus, Hall, Table } from '../lib/types';
+import { useDialogs } from '../components/DialogProvider';
 
 /** Masadaki QR'in actigi adres (bulut + masa kodu). */
 export function tableMenuUrl(cloudUrl: string, code: string): string {
@@ -15,6 +16,7 @@ export function tableMenuUrl(cloudUrl: string, code: string): string {
 export default function QrCodesScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
   const [error, setError] = useState('');
   const status = useQuery({
     queryKey: ['cloud', 'status'],
@@ -159,14 +161,14 @@ export default function QrCodesScreen() {
                 <p className="text-xs text-slate-500">{hallOrder.get(table.hallId)?.hall.name}</p>
                 <p className="mt-1 text-[11px] text-slate-600">Menü için telefonunuzla okutun</p>
                 <button
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `${table.name} için yeni kod oluşturulsun mu? Eski QR çalışmaz.`,
-                      )
-                    ) {
-                      rotate.mutate(table.id);
-                    }
+                  onClick={async () => {
+                    const ok = await confirmDialog({
+                      title: `${table.name} için yeni kod oluşturulsun mu?`,
+                      message: 'Eski QR çalışmaz.',
+                      confirmLabel: 'Kodu yenile',
+                      danger: true,
+                    });
+                    if (ok) rotate.mutate(table.id);
                   }}
                   disabled={rotate.isPending}
                   className="mt-2 text-xs text-red-600 hover:text-red-800 disabled:opacity-40 print:hidden"

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { readCategories } from '../offline/read';
+import { useDialogs } from '../components/DialogProvider';
 import type { DiscoveredPrinter, Printer, PrintJobRow, PrintRoute } from '../lib/types';
 
 const DOC_LABELS: Record<string, string> = {
@@ -31,6 +32,7 @@ export default function PrinterSettingsCard({
   onInfo: (message: string) => void;
 }) {
   const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
   const [adding, setAdding] = useState(false);
   const printers = useQuery({ queryKey: ['printers'], queryFn: () => api<Printer[]>('/printers') });
   const routes = useQuery({
@@ -123,8 +125,13 @@ export default function PrinterSettingsCard({
               )}
               <SmallButton
                 danger
-                onClick={() => {
-                  if (confirm(`"${p.name}" yazıcısı silinsin mi?`)) remove.mutate(p.id);
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: `"${p.name}" yazıcısı silinsin mi?`,
+                    confirmLabel: 'Sil',
+                    danger: true,
+                  });
+                  if (ok) remove.mutate(p.id);
                 }}
                 disabled={remove.isPending}
               >

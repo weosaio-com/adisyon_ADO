@@ -1,16 +1,31 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { api, apiUpload, login, loginPin, ApiError } from '../lib/api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  api,
+  apiUpload,
+  login,
+  loginPin,
+  ApiError,
+  LONG_REQUEST_TIMEOUT_MS,
+  SESSION_EXPIRED_MESSAGE,
+} from '../lib/api';
 import { pullSnapshot } from '../offline/engine';
 import { InstallButton, useInstallPrompt } from '../lib/install';
 import CloudRestoreForm from './CloudRestoreForm';
 
 type Mode = 'owner' | 'waiter';
 
+/** Giris ekrani oturum bittigi icin acildiysa (App: useSessionExpiryRedirect) neden gosterilir. */
+export interface LoginRouteState {
+  sessionExpired?: boolean;
+}
+
 export default function LoginScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const location = useLocation();
+  const sessionExpired = (location.state as LoginRouteState | null)?.sessionExpired === true;
   const setup = useQuery({
     queryKey: ['auth', 'setup-status'],
     queryFn: () => api<{ required: boolean }>('/auth/setup-status'),
@@ -61,6 +76,15 @@ export default function LoginScreen() {
         <p className="mt-2 text-sm leading-6 text-stone-500">
           Vardiyanıza devam etmek için hesabınızla giriş yapın.
         </p>
+        {sessionExpired && (
+          <p
+            role="status"
+            data-testid="session-expired"
+            className="mt-4 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-900"
+          >
+            {SESSION_EXPIRED_MESSAGE}
+          </p>
+        )}
         {!window.isSecureContext && (
           <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-5 font-medium text-amber-800">
             Bu bağlantı güvenli değil (HTTP): bağlantı koptuğunda uygulama yeniden açılamaz.
@@ -442,6 +466,7 @@ function SetupRestoreForm({ onBack }: { onBack: () => void }) {
       await api(`/backups/setup/${id}/restore`, {
         method: 'POST',
         body: recoveryKey.trim() ? { recoveryKey: recoveryKey.trim() } : {},
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       });
       setDone(true);
     } catch (value) {

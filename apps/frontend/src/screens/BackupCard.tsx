@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, apiUpload, ApiError, hasPerm } from '../lib/api';
+import { api, apiUpload, ApiError, hasPerm, LONG_REQUEST_TIMEOUT_MS } from '../lib/api';
+import { useDialogs } from '../components/DialogProvider';
 import { downloadText } from '../lib/export';
 import { formatBytes, formatDateTime } from '../lib/format';
 import type { AppSetting, Backup } from '../lib/types';
@@ -24,6 +25,7 @@ export default function BackupCard({
   onInfo: (m: string) => void;
 }) {
   const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
 
   const backups = useQuery({
     queryKey: ['backups'],
@@ -56,8 +58,13 @@ export default function BackupCard({
     onError,
   });
 
+  // Yedek alma / geri yukleme buyuk veritabaninda uzun surebilir: normal istek suresi uygulanmaz.
   const create = useMutation({
-    mutationFn: () => api<{ cloudCopied?: boolean }>('/backups', { method: 'POST' }),
+    mutationFn: () =>
+      api<{ cloudCopied?: boolean }>('/backups', {
+        method: 'POST',
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      }),
     onSuccess: (r) => {
       if (cloudDirSaved && !r.cloudCopied)
         onError(new ApiError(0, 'CLOUD_COPY', 'Yedek alındı ama bulut klasörüne kopyalanamadı.'));
@@ -74,6 +81,7 @@ export default function BackupCard({
       api<{ message: string }>(`/backups/${id}/restore`, {
         method: 'POST',
         body: recoveryKey ? { recoveryKey } : {},
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       }),
     onSuccess: (r) => {
       setKeyPrompt(null);
@@ -99,12 +107,14 @@ export default function BackupCard({
     mutationFn: (file: File) => apiUpload<Backup>('/backups/import', file),
     onSuccess: (b) => {
       refresh();
-      if (
-        window.confirm(
-          'Yedek dosyası yüklendi. Şimdi geri yüklensin mi? Uygulanması için yeniden başlatma gerekir.',
-        )
-      )
-        restore.mutate({ id: b.id });
+      // Beklenmez: yukleme biter, soru acik kalsa da "Dosyadan Geri Yükle" dugmesi serbest kalir.
+      void confirmDialog({
+        title: 'Yedek dosyası yüklendi.',
+        message: 'Şimdi geri yüklensin mi? Uygulanması için yeniden başlatma gerekir.',
+        confirmLabel: 'Geri Yükle',
+      }).then((ok) => {
+        if (ok) restore.mutate({ id: b.id });
+      });
     },
     onError,
   });
@@ -238,13 +248,13 @@ export default function BackupCard({
               </span>
             </span>
             <button
-              onClick={() => {
-                if (
-                  window.confirm(
-                    'Bu yedek geri yüklensin mi? Uygulanması için yeniden başlatma gerekir.',
-                  )
-                )
-                  restore.mutate({ id: b.id });
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: 'Bu yedek geri yüklensin mi?',
+                  message: 'Uygulanması için yeniden başlatma gerekir.',
+                  confirmLabel: 'Geri Yükle',
+                });
+                if (ok) restore.mutate({ id: b.id });
               }}
               disabled={restore.isPending}
               className="rounded-lg bg-amber-500 px-2 py-1 font-medium text-white disabled:opacity-40"
@@ -252,9 +262,14 @@ export default function BackupCard({
               Geri Yükle
             </button>
             <button
-              onClick={() => {
-                if (window.confirm('Bu yedek silinsin mi? Bulut klasöründeki kopyası da silinir.'))
-                  remove.mutate(b.id);
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: 'Bu yedek silinsin mi?',
+                  message: 'Bulut klasöründeki kopyası da silinir.',
+                  confirmLabel: 'Sil',
+                  danger: true,
+                });
+                if (ok) remove.mutate(b.id);
               }}
               disabled={remove.isPending}
               className="rounded-lg bg-red-600 px-2 py-1 font-medium text-white disabled:opacity-40"

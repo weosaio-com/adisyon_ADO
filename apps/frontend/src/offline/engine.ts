@@ -5,6 +5,9 @@ import { deviceId, outboxAll, outboxDelete, draftGet, draftPut, metaGet, metaSet
 import { applyResults, type MutationResult } from './sync-core';
 
 const BASE = '/api/v1';
+// Saglik yoklamasi hafiftir; cevap gelmeyen sunucu bu surede "kopuk" sayilir (tik 8 sn).
+const PING_TIMEOUT_MS = 5_000;
+const TICK_MS = 8_000;
 
 export type SyncMode = 'online' | 'offline' | 'syncing' | 'degraded';
 export interface SyncState {
@@ -45,11 +48,15 @@ export async function refreshPending(): Promise<void> {
 }
 
 async function ping(): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
   try {
-    const r = await fetch(`${BASE}/sync/health`, { cache: 'no-store' });
+    const r = await fetch(`${BASE}/sync/health`, { cache: 'no-store', signal: controller.signal });
     return r.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -126,7 +133,7 @@ export function startEngine(client: QueryClient): () => void {
   qc = client;
   void refreshPending();
 
-  const tick = async () => {
+  const runTick = async () => {
     const online = await ping();
     if (!online) {
       set({ mode: 'offline' });
@@ -145,9 +152,22 @@ export function startEngine(client: QueryClient): () => void {
       await pullSnapshot();
     }
   };
+  // Onceki tik bitmeden yenisi baslamaz: yavas istekler ust uste binip birikmez.
+  let ticking = false;
+  const tick = async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await runTick();
+    } catch {
+      // IndexedDB vb. hatasi: bir sonraki tik yeniden dener.
+    } finally {
+      ticking = false;
+    }
+  };
 
   void tick();
-  const iv = window.setInterval(() => void tick(), 8000);
+  const iv = window.setInterval(() => void tick(), TICK_MS);
   const onOnline = () => void tick();
   const onOffline = () => set({ mode: 'offline' }); // navigator.onLine=false kesindir
   window.addEventListener('online', onOnline);

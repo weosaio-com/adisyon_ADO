@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, hasPerm } from '../lib/api';
 import type { CloudLinkMode, CloudStatus } from '../lib/types';
+import { useDialogs } from '../components/DialogProvider';
 
 function when(iso: string | null): string {
   return iso
@@ -23,6 +24,7 @@ const BUTTON =
 // onayini ister ("Bu bilgisayara al"). Bulut tanimli degilse ya da lisans yoksa gorunmez.
 export default function CloudLinkStatus({ onError }: { onError: (e: unknown) => void }) {
   const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
   const allowed = hasPerm('settings.manage');
   const status = useQuery({
     queryKey: ['cloud', 'status'],
@@ -46,12 +48,15 @@ export default function CloudLinkStatus({ onError }: { onError: (e: unknown) => 
 
   const button = (label: string, takeover: boolean, testId: string) => (
     <button
-      onClick={() => {
+      onClick={async () => {
         if (
           takeover &&
-          !window.confirm(
-            'Bu lisans başka bir bilgisayarda buluta bağlı. Bu bilgisayara alırsanız diğer bilgisayarın bulut bağlantısı kesilir (QR menüyü artık o güncelleyemez). Devam edilsin mi?',
-          )
+          !(await confirmDialog({
+            title: 'Bu bilgisayara al',
+            message:
+              'Bu lisans başka bir bilgisayarda buluta bağlı. Bu bilgisayara alırsanız diğer bilgisayarın bulut bağlantısı kesilir (QR menüyü artık o güncelleyemez). Devam edilsin mi?',
+            confirmLabel: 'Bu bilgisayara al',
+          }))
         ) {
           return;
         }

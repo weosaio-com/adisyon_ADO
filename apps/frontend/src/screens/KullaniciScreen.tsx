@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, getUser } from '../lib/api';
 import TextPromptModal from '../components/TextPromptModal';
+import { useDialogs } from '../components/DialogProvider';
 
 interface UserRow {
   id: string;
@@ -17,6 +18,7 @@ const ROLE_LABELS: Record<string, string> = { owner: 'Yönetici', waiter: 'Garso
 export default function KullaniciScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
   const meId = getUser()?.id;
   const [error, setError] = useState('');
   const [resetFor, setResetFor] = useState<UserRow | null>(null);
@@ -89,8 +91,13 @@ export default function KullaniciScreen() {
                       {u.isActive ? 'Pasif' : 'Aktif'}
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm(`${u.displayName} silinsin mi?`)) remove.mutate(u.id);
+                      onClick={async () => {
+                        const ok = await confirmDialog({
+                          title: `${u.displayName} silinsin mi?`,
+                          confirmLabel: 'Sil',
+                          danger: true,
+                        });
+                        if (ok) remove.mutate(u.id);
                       }}
                       disabled={remove.isPending}
                       className="rounded-lg bg-red-600 px-2 py-1 font-medium text-white disabled:opacity-40"
