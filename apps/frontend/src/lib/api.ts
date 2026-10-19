@@ -11,6 +11,11 @@ const USER_KEY = 'ado.user';
 export const REQUEST_TIMEOUT_MS = 30_000;
 /** Dosya yukleme, yedek alma / geri yukleme / ice aktarma ve bulut yedegi: uzun surebilir. */
 export const LONG_REQUEST_TIMEOUT_MS = 30 * 60_000;
+/**
+ * Programin buluta istek zinciri yaptigi islemler (baglanma, QR menuyu yayinlama: etkinlestirme +
+ * menu ve gorsellerin yuklenmesi, her bulut cagrisi 20 sn'ye kadar): 30 sn yetmeyebilir.
+ */
+export const CLOUD_REQUEST_TIMEOUT_MS = 2 * 60_000;
 
 export const TIMEOUT_CODE = 'TIMEOUT';
 export const NETWORK_ERROR_CODE = 'NETWORK_ERROR';

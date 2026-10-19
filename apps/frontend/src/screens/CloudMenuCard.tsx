@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, CLOUD_REQUEST_TIMEOUT_MS } from '../lib/api';
 import type { CloudLinkMode, CloudStatus } from '../lib/types';
 import { useDialogs } from '../components/DialogProvider';
 
@@ -63,7 +63,11 @@ export default function CloudMenuCard({
 
   const setQr = useMutation({
     mutationFn: (enabled: boolean) =>
-      api<CloudStatus>('/cloud/qr', { method: 'PUT', body: { enabled } }),
+      api<CloudStatus>('/cloud/qr', {
+        method: 'PUT',
+        body: { enabled },
+        timeoutMs: CLOUD_REQUEST_TIMEOUT_MS,
+      }),
     onSuccess: (next, enabled) => {
       apply(next);
       if (!enabled) {

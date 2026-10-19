@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, hasPerm } from '../lib/api';
+import { api, CLOUD_REQUEST_TIMEOUT_MS, hasPerm } from '../lib/api';
 import type { CloudLinkMode, CloudStatus } from '../lib/types';
 import { useDialogs } from '../components/DialogProvider';
 
@@ -38,7 +38,11 @@ export default function CloudLinkStatus({ onError }: { onError: (e: unknown) => 
   });
   const link = useMutation({
     mutationFn: (takeover: boolean) =>
-      api<CloudStatus>('/cloud/activate', { method: 'POST', body: takeover ? { takeover } : {} }),
+      api<CloudStatus>('/cloud/activate', {
+        method: 'POST',
+        body: takeover ? { takeover } : {},
+        timeoutMs: CLOUD_REQUEST_TIMEOUT_MS,
+      }),
     onSuccess: (next) => qc.setQueryData(['cloud', 'status'], next),
     onError,
   });
