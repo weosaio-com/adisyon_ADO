@@ -5,7 +5,7 @@ Sürümleme: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-10-17
+## [0.4.0] - 2026-10-19
 
 ### Yükseltme notları
 
@@ -70,6 +70,12 @@ Sürümleme: [SemVer](https://semver.org/).
 
 - Paketli sürüm, kurulum dosyasındaki `app-config.json`'dan güncelleme açık anahtarlarını okuyamıyor
   ve otomatik güncelleme kapalı kalıyordu (0.3.0 paketinde); artık iki biçim de okunur.
+
+### Security
+
+- Deneme (`test`) profilinin güncelleme imza anahtarı yenilendi (2026-10-19). Yeni anahtar satıcının
+  tarayıcısında üretildi; özel yarısı sohbete ve depoya girmedi. Eski anahtarla imzalanan güncelleme
+  kabul edilmez.
 
 ## [0.3.0] - 2026-10-11
 

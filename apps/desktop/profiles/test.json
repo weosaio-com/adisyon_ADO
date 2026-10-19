@@ -3,7 +3,7 @@
   "cloudUrl": "https://ado-qr-test.weosaio.workers.dev",
   "licensePublicKey": "MCowBQYDK2VwAyEA5fXSEb/+WD7PDwKzqFkKm5L6Ecv/tG/Vw9sPRoCui9E=",
   "channel": "stable",
-  "updatePublicKey": "MCowBQYDK2VwAyEAD3OAF11Sc5U6qVNJt5xvL585rtQzzvucsPVbt4gwj4o=",
+  "updatePublicKey": "MCowBQYDK2VwAyEAS3DhhfmMqjHKRN8Kh1vMlmKVAHYV4efYYLQeZ5DQp4o=",
   "licenseEnforce": true,
   "trialDays": 0,
   "graceDays": 7,
