@@ -1,14 +1,33 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
+import { DatabaseBusyException } from '../../common/http/db-busy';
 import { TokenService } from '../token.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
-/** Bearer access token dogrular; req.user'i doldurur. @Public() ile atlanir. */
+const invalidToken = () =>
+  new UnauthorizedException({
+    code: 'INVALID_TOKEN',
+    message: 'Gecersiz veya suresi dolmus oturum.',
+  });
+
+/**
+ * Bearer access token dogrular; req.user'i doldurur. @Public() ile atlanir.
+ * Yalniz gecersiz/suresi dolmus token ve kapanmis oturum 401 verir. Oturum kaydi okunamazsa
+ * (veritabani mesgul: yedek, agir rapor) 503 DB_BUSY: istemci oturumu kapatmadan tekrar dener.
+ */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly tokens: TokenService,
@@ -32,9 +51,16 @@ export class JwtAuthGuard implements CanActivate {
       });
     }
 
+    let payload: Awaited<ReturnType<TokenService['verifyAccess']>>;
     try {
-      const payload = await this.tokens.verifyAccess(token);
-      const session = await this.prisma.session.findFirst({
+      payload = await this.tokens.verifyAccess(token);
+    } catch {
+      throw invalidToken();
+    }
+
+    let session: { id: string } | null;
+    try {
+      session = await this.prisma.session.findFirst({
         where: {
           id: payload.sid,
           userId: payload.sub,
@@ -48,23 +74,24 @@ export class JwtAuthGuard implements CanActivate {
         },
         select: { id: true },
       });
-      if (!session) throw new Error('revoked session');
-      const user: AuthUser = {
-        userId: payload.sub,
-        sessionId: payload.sid,
-        username: payload.username,
-        role: payload.role,
-        branchId: payload.branchId,
-        permissions: payload.perms ?? [],
-        ...(payload.deviceId ? { deviceId: payload.deviceId } : {}),
-      };
-      req.user = user;
-      return true;
-    } catch {
-      throw new UnauthorizedException({
-        code: 'INVALID_TOKEN',
-        message: 'Gecersiz veya suresi dolmus oturum.',
-      });
+    } catch (err) {
+      this.logger.warn(
+        `Oturum denetimi yapilamadi (veritabani): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new DatabaseBusyException();
     }
+    if (!session) throw invalidToken();
+
+    const user: AuthUser = {
+      userId: payload.sub,
+      sessionId: payload.sid,
+      username: payload.username,
+      role: payload.role,
+      branchId: payload.branchId,
+      permissions: payload.perms ?? [],
+      ...(payload.deviceId ? { deviceId: payload.deviceId } : {}),
+    };
+    req.user = user;
+    return true;
   }
 }

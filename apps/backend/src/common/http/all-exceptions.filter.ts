@@ -9,6 +9,7 @@ import {
 import type { Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { Prisma } from '@prisma/client';
+import { DB_BUSY, DB_BUSY_MESSAGE, isDatabaseBusyError } from './db-busy';
 
 interface ErrorBody {
   code: string;
@@ -65,6 +66,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       status = HttpStatus.CONFLICT;
       body.code = 'DATA_CONFLICT';
       body.message = 'Kayit baska bir islemle cakisti. Veriyi yenileyip tekrar deneyin.';
+    } else if (isDatabaseBusyError(exception)) {
+      // Gecici: istemci oturumu kapatmadan tekrar dener (yedek alinirken SQLite kilidi gibi).
+      status = HttpStatus.SERVICE_UNAVAILABLE;
+      body.code = DB_BUSY;
+      body.message = DB_BUSY_MESSAGE;
     } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const resp = exception.getResponse();
@@ -77,7 +83,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
     }
 
-    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+    if (body.code === DB_BUSY) {
+      // Beklenen gecici durum: kayit dosyasinda izi kalsin ama yigin dokumu gerekmez.
+      this.logger.warn(
+        `DB_BUSY ${req.method} ${req.url}: ${exception instanceof Error ? exception.message : String(exception)}`,
+      );
+    } else if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(exception instanceof Error ? exception.stack : String(exception));
     }
 
