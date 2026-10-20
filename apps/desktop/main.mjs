@@ -17,6 +17,13 @@ import {
   waitForBackend,
   watchExit,
 } from './startup.mjs';
+import {
+  allowReload,
+  planRestart,
+  restartGiveUpDialog,
+  UNRESPONSIVE_PROMPT_MS,
+  unresponsiveDialog,
+} from './recovery.mjs';
 
 // Paketli uygulama dev sunucusuna (3001) yanlislikla baglanmasin.
 const PORT = process.env.API_PORT || (app.isPackaged ? '43127' : '3001');
@@ -27,6 +34,15 @@ let writeLog = () => {};
 let mainWindow = null;
 let appConfig = null;
 let updater = null;
+let logPath = null;
+// Ilk acilis tamamlandi mi: oncesinde backend'in kapanmasini acilis akisi ele alir (hata penceresi).
+let backendReady = false;
+// Kapanis ya da guncelleme kurulumu: backend'in kapanmasi beklenen, yeniden baslatilmaz.
+let shuttingDown = false;
+const restartHistory = [];
+let restartTimer = null;
+const reloadHistory = [];
+let unresponsiveTimer = null;
 // Acilis basarisiz olursa hata penceresinde gosterilecek son backend ciktisi.
 const recentOutput = outputTail();
 
@@ -95,8 +111,107 @@ function startBackend() {
   });
   // Acilis beklemesi bununla yarisir: backend coker ya da baslatilamazsa hemen anlasilir.
   backendExit = watchExit(backend);
-  backend.once('exit', (code, signal) => log(`backend kapandi (kod ${code}, sinyal ${signal})`));
-  backend.on('message', onBackendMessage);
+  const child = backend;
+  child.once('exit', (code, signal) => {
+    log(`backend kapandi (kod ${code}, sinyal ${signal})`);
+    onBackendExit(child);
+  });
+  child.on('message', onBackendMessage);
+}
+
+// Backend beklenmedik kapanirsa (cokme) pencere "Cevrimdisi"da kalmasin: artan beklemeyle yeniden
+// baslatilir; arayuz baglanti gelince kendiliginden toparlanir.
+function onBackendExit(child) {
+  if (child !== backend) return; // yerine yenisi baslatilmis eski surec
+  backend = null;
+  if (shuttingDown || !backendReady) return;
+  scheduleBackendRestart();
+}
+
+function scheduleBackendRestart() {
+  if (restartTimer || shuttingDown) return;
+  const plan = planRestart(restartHistory);
+  restartHistory.splice(0, restartHistory.length, ...plan.recent);
+  if (plan.giveUp) {
+    log('backend kisa surede tekrar tekrar kapandi; yeniden baslatma durduruldu');
+    const { title, message } = restartGiveUpDialog(logPath);
+    void showMessage({ type: 'error', title, message, buttons: ['Tamam'] });
+    return;
+  }
+  log(
+    `backend ${Math.round(plan.delayMs / 1000)} sn sonra yeniden baslatilacak ` +
+      `(son 10 dk: ${plan.recent.length} deneme)`,
+  );
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    void restartBackend();
+  }, plan.delayMs);
+}
+
+async function restartBackend() {
+  if (shuttingDown) return;
+  restartHistory.push(Date.now());
+  try {
+    startBackend();
+  } catch (err) {
+    log(`backend yeniden baslatilamadi: ${err && err.stack ? err.stack : err}`);
+    scheduleBackendRestart();
+    return;
+  }
+  const child = backend;
+  const result = await waitForBackend({
+    isUp,
+    exited: backendExit,
+    timeoutMs: BACKEND_START_TIMEOUT_MS,
+  });
+  if (result.ok) {
+    log('backend yeniden acildi');
+    return;
+  }
+  log(`backend yeniden acilamadi: ${JSON.stringify(result)}`);
+  // Asili kaldiysa kapat: cikis dinleyicisi sonraki denemeyi planlar.
+  if (child && child === backend && child.exitCode === null) child.kill();
+}
+
+// Ana surecten acilan pencereden sonra klavye odagi pencereye donsun (Windows'ta kaybolabiliyor).
+async function showMessage(options) {
+  const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const result = target
+    ? await dialog.showMessageBox(target, options)
+    : await dialog.showMessageBox(options);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+    mainWindow.webContents.focus();
+  }
+  return result;
+}
+
+// Pencere sureci cokerse ya da kilitlenirse sayfa yeniden yuklenir (kisa surede en fazla 3 kez).
+function reloadWindow(reason) {
+  if (!mainWindow || mainWindow.isDestroyed() || shuttingDown) return;
+  const guard = allowReload(reloadHistory);
+  reloadHistory.splice(0, reloadHistory.length, ...guard.recent);
+  if (!guard.allowed) {
+    log(`pencere yeniden yuklenmedi (${reason}): kisa surede cok fazla deneme`);
+    return;
+  }
+  reloadHistory.push(Date.now());
+  log(`pencere yeniden yukleniyor (${reason})`);
+  mainWindow.loadURL(BASE).catch((err) => log(`pencere yuklenemedi: ${err}`));
+}
+
+async function askReloadUnresponsive() {
+  if (!mainWindow || mainWindow.isDestroyed() || shuttingDown) return;
+  const { title, message, buttons } = unresponsiveDialog();
+  const { response } = await showMessage({
+    type: 'warning',
+    title,
+    message,
+    buttons,
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response === 0) reloadWindow('pencere yanit vermiyordu');
 }
 
 const sendToBackend = (message) => {
@@ -120,6 +235,8 @@ const UPDATING_PAGE = `<!doctype html><html lang="tr"><head><meta charset="utf-8
 // Kurulumdan once: pencerede bilgi sayfasi, backend duzgun kapanir (veritabani kapali olmali).
 async function prepareInstall() {
   log('guncelleme kuruluyor');
+  shuttingDown = true;
+  clearTimeout(restartTimer);
   await mainWindow
     ?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(UPDATING_PAGE)}`)
     .catch(() => {});
@@ -149,6 +266,25 @@ async function openWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  // Cokme ve kilitlenme: kayda yazilir; cokmede sayfa yeniden yuklenir, 30 sn yanit vermezse sorulur.
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log(`pencere sureci kapandi (${details.reason}, kod ${details.exitCode})`);
+    if (details.reason !== 'clean-exit') reloadWindow('pencere sureci kapandi');
+  });
+  mainWindow.on('unresponsive', () => {
+    log('pencere yanit vermiyor');
+    if (unresponsiveTimer) return;
+    unresponsiveTimer = setTimeout(() => {
+      unresponsiveTimer = null;
+      void askReloadUnresponsive();
+    }, UNRESPONSIVE_PROMPT_MS);
+  });
+  mainWindow.on('responsive', () => {
+    if (!unresponsiveTimer) return;
+    clearTimeout(unresponsiveTimer);
+    unresponsiveTimer = null;
+    log('pencere yeniden yanit veriyor');
+  });
   // Disari giden baglantilar sistem tarayicisinda acilir; programin icinde menusuz, adres
   // cubugusuz bir pencere olarak kalmaz. Pencerenin kendisi de yerel arayuzden ayrilamaz.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -170,7 +306,7 @@ async function openWindow() {
 
 async function start() {
   // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin.
-  const logPath = join(app.getPath('userData'), 'backend-error.log');
+  logPath = join(app.getPath('userData'), 'backend-error.log');
   writeLog = rotatingLog(logPath);
   try {
     if (app.isPackaged || !(await isUp())) {
@@ -195,6 +331,7 @@ async function start() {
         return;
       }
     }
+    backendReady = true;
     await openWindow();
     startUpdater();
   } catch (err) {
@@ -216,11 +353,18 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(start);
   app.on('window-all-closed', () => app.quit());
+  // GPU ve yardimci surec cokmeleri sessiz kalmasin (beyaz/donuk pencerenin izi).
+  app.on('child-process-gone', (_event, details) => {
+    log(`alt surec kapandi: ${details.type} (${details.reason}, kod ${details.exitCode})`);
+  });
   // Kapanista backend'e duzgun kapanma firsati (en fazla 10 sn): acik istekler biter, veritabani
   // kapanir. Sonra cikis tamamlanir.
   let stopping = false;
   app.on('before-quit', (event) => {
     updater?.stop();
+    shuttingDown = true;
+    clearTimeout(restartTimer);
+    clearTimeout(unresponsiveTimer);
     if (!backend || stopping) return;
     event.preventDefault();
     stopping = true;

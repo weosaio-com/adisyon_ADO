@@ -24,7 +24,8 @@
       "backend-process.mjs",
       "update-manifest.mjs",
       "updater.mjs",
-      "startup.mjs"
+      "startup.mjs",
+      "recovery.mjs"
     ],
     "extraResources": [
       {
@@ -64,7 +65,7 @@
     ]
   },
   "devDependencies": {
-    "electron": "^43.1.1",
+    "electron": "^43.7.7",
     "electron-builder": "^26.15.3"
   },
   "dependencies": {

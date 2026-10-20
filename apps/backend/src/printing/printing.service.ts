@@ -68,14 +68,31 @@ class MockPrinterDriver implements PrinterDriver {
   }
 }
 
-class WindowsSpoolerDriver implements PrinterDriver {
+/**
+ * Bir fisin yazdirilmasi icin en uzun bekleme. Takilan yazici (gizli "Farkli kaydet" penceresi
+ * bekleyen PDF/XPS yazicisi, kilitlenen biriktirici) arka plan kuyrugunu (mutfak fisi, kasa
+ * toplami, stok) sonsuza dek durdurmasin: sure dolunca PowerShell kapatilir, is basarisiz olur.
+ */
+export const PRINT_TIMEOUT_MS = 30_000;
+
+type SpawnFn = typeof spawn;
+
+export class WindowsSpoolerDriver implements PrinterDriver {
+  private readonly logger = new Logger(WindowsSpoolerDriver.name);
+
+  constructor(
+    private readonly spawnFn: SpawnFn = spawn,
+    private readonly timeoutMs = PRINT_TIMEOUT_MS,
+    private readonly platform: NodeJS.Platform = process.platform,
+  ) {}
+
   async print(payload: PrintPayload, connection: string, address: string | null): Promise<void> {
-    if (process.platform !== 'win32' || connection !== 'windows_spooler' || !address) {
+    if (this.platform !== 'win32' || connection !== 'windows_spooler' || !address) {
       throw new Error('Windows spooler yazici adi tanimli degil.');
     }
     await new Promise<void>((resolve, reject) => {
       // Yazici adi env ile (bosluk/Turkce karakter guvenli); metin stdin'den base64.
-      const child = spawn(
+      const child = this.spawnFn(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_PRINT_SCRIPT],
         {
@@ -85,19 +102,36 @@ class WindowsSpoolerDriver implements PrinterDriver {
         },
       );
       let error = '';
-      child.stderr.setEncoding('utf8');
-      child.stderr.on('data', (chunk) => (error += chunk));
-      child.on('error', reject);
+      let settled = false;
+      const finish = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (err) reject(err);
+        else resolve();
+      };
+      const timer = setTimeout(() => {
+        child.kill();
+        finish(new Error(`Yazici ${Math.round(this.timeoutMs / 1000)} sn icinde yanit vermedi.`));
+      }, this.timeoutMs);
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (chunk) => (error += chunk));
+      child.on('error', (err) => finish(err));
       child.on('close', (code) =>
-        code === 0 ? resolve() : reject(new Error(error.trim() || `Print exit ${code}`)),
+        code === 0 ? finish() : finish(new Error(error.trim() || `Print exit ${code}`)),
+      );
+      // PowerShell erken kapanirsa stdin'e yazmak EPIPE verir; dinleyici olmazsa surec coker.
+      // Sonucu 'close' bildirir; burada yalniz kayda yazilir.
+      child.stdin?.on('error', (err) =>
+        this.logger.warn(`Yazdirma girdisi yazilamadi: ${err.message}`),
       );
       // Base64: PowerShell stdin'i OEM kod sayfasiyla okur; Turkce karakterler bozulmasin.
-      child.stdin.end(encodeForPowerShell(printText(payload)), 'ascii');
+      child.stdin?.end(encodeForPowerShell(printText(payload)), 'ascii');
     });
   }
 
   async discover(): Promise<DiscoveredPrinter[]> {
-    if (process.platform !== 'win32') return [];
+    if (this.platform !== 'win32') return [];
     const { stdout } = await execFileAsync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_LIST_PRINTERS_SCRIPT],

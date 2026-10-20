@@ -309,6 +309,8 @@
 |---|---|
 | `VALIDATION_FAILED` | Zod şema hatası (422) |
 | `UNAUTHORIZED` / `FORBIDDEN` | kimlik / yetki |
+| `INVALID_TOKEN` / `SESSION_EXPIRED` | access token geçersiz ya da oturum kapanmış (401): istemci `/auth/refresh` dener; yalnız refresh de 401/403 verirse oturum kapanır ve giriş ekranına gidilir |
+| `DB_BUSY` | veritabanı geçici olarak meşgul (503; örn. yedek alınırken SQLite kilidi, Prisma zaman aşımı): oturum kapanmaz, istemci birkaç saniye sonra tekrar dener |
 | `DISCOUNT_APPROVAL_REQUIRED` | Waiter %10 üstü indirim → Owner onayı |
 | `PAYMENT_EXCEEDS_TOTAL` | ödeme adisyon kalanını aşıyor |
 | `ORDER_ALREADY_CLOSED` | kapalı adisyona işlem |
