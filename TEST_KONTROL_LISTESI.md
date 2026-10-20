@@ -278,5 +278,29 @@ açık adisyon ödenip kapatılır; raporlar ve gün sonu çalışır.
 
 **Yap:** 0.4.0 kurulu bilgisayarda 17. adımı yapın.
 
-**Beklenen:** 17. adımdaki gibi. Ek olarak güncellemeden sonra Lisans kartında "Bulut: bağlı" ve
-Bulut Yedeği kartında son bulut yedeği görünür.
+**Beklenen:** 17. adımdaki gibi. Ek olarak güncellemeden sonra **Ayarlar › Güncelleme** "Sürüm 0.4.1"
+der, Lisans kartında "Bulut: bağlı" ve Bulut Yedeği kartında son bulut yedeği görünür.
+
+## 23. (0.4.1) Donma düzeltmeleri
+
+**Yap:**
+
+1. Kasa kapalıyken Masalar ekranında boş bir masaya dokunun; çıkan uyarıda **Kasa ekranını aç**'a
+   basın ve açılış bakiyesini yazın.
+2. Soldaki menüden **Ekip**'e girin, bir kullanıcının **Sil** düğmesine basın, onay penceresinde
+   **Vazgeç** deyin (ya da Esc). Hemen ardından bir yazı kutusuna tıklayıp yazın.
+3. Yazıcıyı kapatın, bir fiş yazdırın; beklemeden masa açıp sipariş girmeye devam edin.
+4. Programı gün boyu kapatmadan kullanın.
+
+**Beklenen:**
+
+1. Uyarı ekranın içinde çıkar ("Yeni adisyon açmak için önce kasa oturumunu açın."); bakiye kutusuna
+   yazı gider.
+2. Onay penceresi programın içinde açılır; kapandıktan sonra yazı kutuya gider, programı kapatıp
+   açmak gerekmez. Kullanıcı silinmez.
+3. Program donmaz, sipariş girişi sürer; en geç 30 sn içinde 9. adımdaki "fiş yazdırılamadı" uyarısı
+   çıkar.
+4. Donma olmaz. Olursa programı kapatmayın: pencere 30 sn yanıt vermezse program **Yeniden yükle /
+   Bekle** diye sorar; **Yeniden yükle** kayıtlı adisyonları silmez. Arka plan kapanırsa program
+   birkaç saniye içinde kendisi yeniden başlatır. Saati not edin ve
+   `%APPDATA%\@ado\desktop\backend-error.log` dosyasını gönderin.

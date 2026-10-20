@@ -5,12 +5,33 @@ Sürümleme: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-20
+
+Kararlılık sürümü: sahadaki "program bazen donuyor, kapatıp açmak gerekiyor" sorununun doğrulanmış
+nedenleri giderildi (#34, #35).
+
+### Yükseltme notları
+
+- 0.4.0 kurulu bilgisayar bu sürümü kendiliğinden alır (**Ayarlar › Güncelleme**; açık adisyon ve
+  kasa yokken, yönetici onayıyla, önce yedek alınır). Veritabanı şeması değişmedi.
+
 ### Fixed
 
+- **Klavye donması (Windows):** yerel `alert()`/`confirm()` pencereleri kapandıktan sonra Electron
+  metin kutularına yazı göndermiyordu (ör. kasa kapalıyken masaya dokununca çıkan uyarıdan sonra
+  açılış bakiyesi yazılamıyordu). Tüm onay ve uyarılar uygulama içi pencereye çevrildi (Esc ile
+  kapanır, odak geri döner); Masalar ekranı hataları ve "önce kasayı açın" uyarısını ekranın içinde
+  gösterir (**Kasa ekranını aç** düğmesi).
 - **Sessiz oturum kapanması ("donmuş" ekran):** veritabanı birkaç saniye meşgulken (yedek alınırken
   SQLite kilidi, ağır rapor) kimlik denetimi 401 veriyor, arayüz oturumu silip ekranı eski hâlinde
   bırakıyordu. Artık yalnız geçersiz token ve kapanmış oturum 401; veritabanı hatası `503 DB_BUSY`
   (oturum kapanmaz, tekrar denenir). Rotalardaki kilit ve zaman aşımı hataları da 500 yerine 503.
+  Arayüz oturumu yalnız token yenileme reddedilirse kapatır ve "Oturumunuz sona erdi" diyerek giriş
+  ekranına döner; ağ hatası, zaman aşımı ve 5xx oturumu korur.
+- **Bitmeyen istekler:** arayüz istekleri artık süresiz beklemez: normal istekler 30 sn, bulut
+  bağlantısı ve QR menü yayını 2 dk; yükleme, yedek, geri yükleme, içe aktarma, bulut yedeği ve
+  güncelleme 30 dk sonra "tekrar deneyin" hatası verir. Çevrimdışı motorun sağlık yoklaması 5 sn ile
+  sınırlı, üst üste binmez.
 - **Takılan yazıcı:** Windows yazdırması 30 sn içinde bitmezse PowerShell kapatılır ve iş başarısız
   olur; arka plan kuyruğu (mutfak fişi, kasa toplamı, stok) beklemez. PowerShell erken kapanınca
   oluşan EPIPE hatası backend'i çökertmiyor.
@@ -18,6 +39,8 @@ Sürümleme: [SemVer](https://semver.org/).
   bir yeniden başlatılır (10 dakikada 5 denemeden sonra kayıt dosyasının yolu gösterilir). Pencere
   süreci çökerse sayfa yeniden yüklenir; pencere 30 sn yanıt vermezse "Yeniden yükle / Bekle"
   sorulur. Çökme ve kilitlenmeler kayıt dosyasına yazılır.
+- Ekranlar gerçek hataları eski verinin arkasına saklamıyor (**Tekrar dene**); canlı güncellemeler
+  token süresi dolunca yenileyip yeniden bağlanır.
 
 ### Changed
 
