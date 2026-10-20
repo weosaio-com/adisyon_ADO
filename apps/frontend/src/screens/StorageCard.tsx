@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, LONG_REQUEST_TIMEOUT_MS } from '../lib/api';
 import { formatBytes, formatDateTime } from '../lib/format';
 
 // GET /storage ve POST /storage/cleanup yanitlari (backend: maintenance/maintenance.service.ts).
@@ -56,8 +56,13 @@ export default function StorageCard({
     queryKey: ['storage'],
     queryFn: () => api<StorageInfo>('/storage'),
   });
+  // Temizlik eski yedekleri de siler (bulut klasoru dahil); uzun surebilir.
   const cleanup = useMutation({
-    mutationFn: () => api<CleanupSummary>('/storage/cleanup', { method: 'POST' }),
+    mutationFn: () =>
+      api<CleanupSummary>('/storage/cleanup', {
+        method: 'POST',
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      }),
     onSuccess: (summary) => {
       onInfo(`Temizlik tamamlandı: ${cleanupText(summary)}.`);
       void qc.invalidateQueries({ queryKey: ['storage'] });

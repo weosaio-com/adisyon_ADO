@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, LONG_REQUEST_TIMEOUT_MS } from '../lib/api';
 import { formatBytes, formatDateTime } from '../lib/format';
 
 // Backend: POST /cloud-backups/setup/list yanıtındaki yedek (indirme adresi ekrana gelmez).
@@ -49,6 +49,7 @@ export default function CloudRestoreForm({ onBack }: { onBack: () => void }) {
       const result = await api<{ backups: CloudBackupItem[] }>('/cloud-backups/setup/list', {
         method: 'POST',
         body: { licenseKey: licenseKey.trim() },
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       });
       setBackups(result.backups);
       setSelected(result.backups[0]?.id ?? '');
@@ -65,6 +66,7 @@ export default function CloudRestoreForm({ onBack }: { onBack: () => void }) {
     setBusy(true);
     setError('');
     try {
+      // Buluttan indirme + geri yukleme dakikalar surebilir: normal istek suresi uygulanmaz.
       await api('/cloud-backups/setup/restore', {
         method: 'POST',
         body: {
@@ -72,6 +74,7 @@ export default function CloudRestoreForm({ onBack }: { onBack: () => void }) {
           cloudBackupId: selected,
           recoveryKey: recoveryKey.trim(),
         },
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       });
       setDone(true);
     } catch (value) {

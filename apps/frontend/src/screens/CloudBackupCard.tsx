@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, LONG_REQUEST_TIMEOUT_MS } from '../lib/api';
 import { formatBytes, formatDateTime } from '../lib/format';
 
 // Backend: apps/backend/src/cloud-backup/cloud-backup.service.ts (CloudBackupStatus).
@@ -60,10 +60,14 @@ export default function CloudBackupCard({
   const apply = (next: CloudBackupStatus) => qc.setQueryData(['cloud-backups', 'status'], next);
 
   // Önce yeni bir yerel yedek alınır (en güncel veri), sonra beklemeden buluta yüklenir.
+  // Yedek alma uzun sürebilir: normal istek süresi uygulanmaz.
   const backupNow = useMutation({
     mutationFn: async () => {
-      await api('/backups', { method: 'POST' });
-      return api<CloudBackupStatus>('/cloud-backups/upload-now', { method: 'POST' });
+      await api('/backups', { method: 'POST', timeoutMs: LONG_REQUEST_TIMEOUT_MS });
+      return api<CloudBackupStatus>('/cloud-backups/upload-now', {
+        method: 'POST',
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      });
     },
     onSuccess: (next) => {
       apply(next);

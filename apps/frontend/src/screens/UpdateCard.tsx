@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, LONG_REQUEST_TIMEOUT_MS } from '../lib/api';
 import type { UpdateStatusView } from '../lib/types';
+import { useDialogs } from '../components/DialogProvider';
 
 const NOTE = 'rounded-lg p-2 text-sm';
 
@@ -21,6 +22,7 @@ export default function UpdateCard({
   onInfo: (message: string) => void;
 }) {
   const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
   const status = useQuery({
     queryKey: ['updates', 'status'],
     queryFn: () => api<UpdateStatusView>('/updates/status'),
@@ -36,8 +38,13 @@ export default function UpdateCard({
     onError,
   });
   const install = useMutation({
+    // Kurulumdan once yedek alinir: normal istek suresine sigmayabilir.
     mutationFn: (version: string) =>
-      api<UpdateStatusView>('/updates/approve', { method: 'POST', body: { version } }),
+      api<UpdateStatusView>('/updates/approve', {
+        method: 'POST',
+        body: { version },
+        timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      }),
     onSuccess: (next) => {
       apply(next);
       onInfo('Güncelleme kuruluyor. Program birkaç dakika içinde yeniden açılacak.');
@@ -89,15 +96,16 @@ export default function UpdateCard({
             </ul>
           )}
           <button
-            onClick={() => {
-              if (
-                s.version &&
-                window.confirm(
+            onClick={async () => {
+              const version = s.version;
+              if (!version) return;
+              const ok = await confirmDialog({
+                title: 'Güncellemeyi kur',
+                message:
                   'Program kapanıp yeniden açılacak; kurulumdan önce yedek alınır. Devam edilsin mi?',
-                )
-              ) {
-                install.mutate(s.version);
-              }
+                confirmLabel: 'Güncellemeyi kur',
+              });
+              if (ok) install.mutate(version);
             }}
             disabled={!s.canInstall || install.isPending}
             className="w-full rounded-lg bg-blue-600 py-2 font-semibold text-white disabled:opacity-40"

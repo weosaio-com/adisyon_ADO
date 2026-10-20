@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, CLOUD_REQUEST_TIMEOUT_MS } from '../lib/api';
 import type { CloudLinkMode, CloudStatus } from '../lib/types';
+import { useDialogs } from '../components/DialogProvider';
 
 const PRIMARY =
   'w-full rounded-lg bg-blue-600 py-2 font-semibold text-white disabled:opacity-40 hover:bg-blue-700';
@@ -44,6 +45,7 @@ export default function CloudMenuCard({
 }) {
   const qc = useQueryClient();
   const nav = useNavigate();
+  const { confirmDialog } = useDialogs();
   const status = useQuery({
     queryKey: ['cloud', 'status'],
     queryFn: () => api<CloudStatus>('/cloud/status'),
@@ -61,7 +63,11 @@ export default function CloudMenuCard({
 
   const setQr = useMutation({
     mutationFn: (enabled: boolean) =>
-      api<CloudStatus>('/cloud/qr', { method: 'PUT', body: { enabled } }),
+      api<CloudStatus>('/cloud/qr', {
+        method: 'PUT',
+        body: { enabled },
+        timeoutMs: CLOUD_REQUEST_TIMEOUT_MS,
+      }),
     onSuccess: (next, enabled) => {
       apply(next);
       if (!enabled) {
@@ -88,14 +94,14 @@ export default function CloudMenuCard({
 
   const closeButton = (
     <button
-      onClick={() => {
-        if (
-          window.confirm(
-            'QR menü kapatılsın mı? Masalardaki QR kodlar menü açmaz (yeniden açınca aynı kodlar çalışır).',
-          )
-        ) {
-          setQr.mutate(false);
-        }
+      onClick={async () => {
+        const ok = await confirmDialog({
+          title: 'QR menü kapatılsın mı?',
+          message: 'Masalardaki QR kodlar menü açmaz (yeniden açınca aynı kodlar çalışır).',
+          confirmLabel: 'QR menüyü kapat',
+          danger: true,
+        });
+        if (ok) setQr.mutate(false);
       }}
       disabled={setQr.isPending}
       className="text-sm text-red-600 hover:text-red-800 disabled:opacity-40"

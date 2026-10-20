@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getAccess } from './api';
+import { getAccess, renewAccess } from './api';
+
+const RECONNECT_MS = 5000;
 
 // Olay adi oneki -> tazelenecek sorgu anahtarlari (kismi eslesme: ['order'] -> ['order', id]).
 const KEYS: Record<string, string[][]> = {
@@ -30,14 +32,25 @@ export function useLiveEvents(): void {
       for (const key of KEYS[prefix] ?? []) qc.invalidateQueries({ queryKey: key });
     };
     const connect = async () => {
+      // Belirtec yoksa da deneme surer: yeniden giriste canli baglanti kendiliginden kurulur.
       const token = getAccess();
-      if (!token) return;
+      const delay = token ? await stream(token) : RECONNECT_MS;
+      if (!stopped) timer = window.setTimeout(() => void connect(), delay);
+    };
+    // Akisi okur; bitince ya da koparsa bir sonraki denemeye kadar beklenecek sureyi dondurur.
+    const stream = async (token: string): Promise<number> => {
       abort = new AbortController();
       try {
         const response = await fetch('/api/v1/events/stream', {
           headers: { Authorization: `Bearer ${token}` },
           signal: abort.signal,
         });
+        if (response.status === 401) {
+          // Erisim belirtecinin suresi doldu: api.ts'in paylasilan yenilemesi (oturum gercekten
+          // bittiyse uygulama giris ekranina gecer); yeni belirtecle hemen yeniden baglanilir.
+          await renewAccess(token);
+          return 1000;
+        }
         if (!response.ok || !response.body) throw new Error(`SSE ${response.status}`);
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -58,9 +71,9 @@ export function useLiveEvents(): void {
           }
         }
       } catch {
-        // Yeniden baglanma asagida.
+        // Yeniden baglanma connect() icinde.
       }
-      if (!stopped) timer = window.setTimeout(() => void connect(), 5000);
+      return RECONNECT_MS;
     };
     void connect();
     return () => {
