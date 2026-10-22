@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { OrderStatus, OrderType } from '@ado/shared';
+import { MAX_MONEY_KURUS, quantityMilli } from '../../payments/money-limits';
 
 /** Query string 'true'/'false' -> boolean. */
 const boolQuery = z
@@ -14,7 +15,12 @@ const clientOpId = z.string().min(1).optional();
 export const openOrderSchema = z.object({
   tableId: z.string().nullish(),
   type: z.nativeEnum(OrderType).optional(), // varsayilan: dine_in
-  guestCount: z.number().int().positive().optional(),
+  guestCount: z
+    .number()
+    .int()
+    .positive()
+    .max(1000, 'Kişi sayısı en fazla 1000 olabilir.')
+    .optional(),
   note: z.string().nullish(),
   clientOpId,
 });
@@ -23,7 +29,7 @@ export type OpenOrderDto = z.infer<typeof openOrderSchema>;
 // --- Kalem ekle (fiyat/vergi/ad SUNUCUDA snapshot alinir; istemci gondermez) ---
 export const addItemSchema = z.object({
   productId: z.string().min(1),
-  quantity: z.number().int().positive(), // milis (x1000)
+  quantity: quantityMilli(), // milis (x1000)
   note: z.string().nullish(),
   clientOpId,
 });
@@ -31,7 +37,7 @@ export type AddItemDto = z.infer<typeof addItemSchema>;
 
 // --- Kalem miktar guncelle ---
 export const updateItemSchema = z.object({
-  quantity: z.number().int().positive(),
+  quantity: quantityMilli(),
 });
 export type UpdateItemDto = z.infer<typeof updateItemSchema>;
 
@@ -73,11 +79,20 @@ export type SplitOrderDto = z.infer<typeof splitOrderSchema>;
 
 // --- Adisyon-seviyesi indirim ---
 // percent: value = yuzde (1-100). amount: value = kurus.
-export const applyDiscountSchema = z.object({
-  type: z.enum(['percent', 'amount']),
-  value: z.number().int().positive(),
-  reason: z.string().nullish(),
-});
+export const applyDiscountSchema = z
+  .object({
+    type: z.enum(['percent', 'amount']),
+    value: z
+      .number()
+      .int()
+      .positive('İndirim sıfırdan büyük olmalıdır.')
+      .max(MAX_MONEY_KURUS, 'İndirim en fazla 10.000.000 TL olabilir.'),
+    reason: z.string().nullish(),
+  })
+  .refine((d) => d.type !== 'percent' || d.value <= 100, {
+    message: 'Yüzde indirim en fazla 100 olabilir.',
+    path: ['value'],
+  });
 export type ApplyDiscountDto = z.infer<typeof applyDiscountSchema>;
 
 // --- Sorgu ---

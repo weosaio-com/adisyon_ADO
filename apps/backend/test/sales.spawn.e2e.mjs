@@ -123,6 +123,63 @@ try {
       'SAT-4 kapanmis adisyonun toplami degismez',
     );
   }
+
+  // --- SAT-12/13: buyuk tutar/miktar 422/400 alir, kaydedilmez, listeler bozulmaz ---
+  {
+    const big = await call('POST', '/products', {
+      name: 'Dev fiyat',
+      categoryId: cat.id,
+      unitId: unit.id,
+      taxId: tax.id,
+      salePrice: 3_000_000_000,
+    });
+    t.check(big.status === 422, `SAT-13 21 milyon TL ustu fiyat reddedilir (${big.status})`);
+    t.check((await call('GET', '/products')).status === 200, 'SAT-13 urun listesi okunur');
+    const cashBig = await call('POST', '/cash/transactions', {
+      type: 'income',
+      amount: 3_000_000_000,
+      method: 'cash',
+      note: 'dev tutar',
+    });
+    t.check(cashBig.status === 422, `SAT-13 dev kasa hareketi reddedilir (${cashBig.status})`);
+    t.check(
+      (await call('GET', '/cash/sessions/active')).status === 200,
+      'SAT-13 kasa ekrani okunur',
+    );
+    const order = await takeaway(p50);
+    const qty = await call('POST', `/orders/${order.id}/items`, {
+      productId: p10.id,
+      quantity: 3_000_000_000,
+    });
+    t.check(qty.status === 422, `SAT-12 3 milyon adet reddedilir (${qty.status})`);
+    const received = await call('POST', `/orders/${order.id}/payments`, {
+      method: 'cash',
+      amount: 5000,
+      received: 9_999_999_999,
+      idempotencyKey: key('big'),
+    });
+    t.check(received.status === 422, `SAT-12 dev alinan nakit reddedilir (${received.status})`);
+    // Tek tek gecerli fiyat x miktar ya da kalemler toplami siniri asarsa yazilmaz.
+    const pricey = await product('Pahali', 1_000_000_000);
+    const line = await call('POST', `/orders/${order.id}/items`, {
+      productId: pricey.id,
+      quantity: 2000,
+    });
+    t.check(
+      line.status === 400 && code(line) === 'AMOUNT_LIMIT_EXCEEDED',
+      `SAT-12 kalem tutari siniri (${line.status} ${code(line)})`,
+    );
+    const total = await call('POST', `/orders/${order.id}/items`, {
+      productId: pricey.id,
+      quantity: 1000,
+    });
+    t.check(
+      total.status === 400 && code(total) === 'AMOUNT_LIMIT_EXCEEDED',
+      `SAT-12 adisyon toplami siniri (${total.status} ${code(total)})`,
+    );
+    t.check((await getOrder(order.id)).grandTotal === 5000, 'SAT-12 adisyon toplami bozulmaz');
+    must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
+  }
 } finally {
   await backend.stop(child);
 }

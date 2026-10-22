@@ -22,6 +22,7 @@ import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { LicenseService } from '../license/license.service';
 import { computeItemTotals, applyOrderDiscounts } from './orders.calc';
+import { assertMoneyWithinLimit } from '../payments/money-limits';
 import {
   ACTIVE_ORDER_STATUSES,
   activeOrderOnTableTx,
@@ -216,6 +217,7 @@ export class OrdersService {
         const product = await this.productForOrder(user.branchId, dto.productId, tx);
         const gross = Math.round((product.salePrice * dto.quantity) / 1000);
         const lineTotal = gross; // lineDiscount 0 (satir indirimi PR2)
+        assertMoneyWithinLimit(lineTotal, 'Kalem tutarı');
         const item = await tx.orderItem.create({
           data: {
             id: itemId,
@@ -283,6 +285,7 @@ export class OrdersService {
       const item = await this.itemOrThrow(orderId, itemId, tx);
       this.assertItemEditable(item);
       const gross = Math.round((item.unitPrice * dto.quantity) / 1000);
+      assertMoneyWithinLimit(gross, 'Kalem tutarı');
       await this.writeItem(tx, item, {
         quantity: dto.quantity,
         lineTotal: gross - item.lineDiscount,
@@ -951,6 +954,8 @@ export class OrdersService {
         message: 'Toplam indirim ara toplami asamaz.',
       });
     }
+    // Toplamlar 32-bit alana yazilir: ara toplam (en buyuk deger) sinirda tutulur.
+    assertMoneyWithinLimit(totals.subtotal, 'Adisyon toplamı');
     return totals;
   }
 
