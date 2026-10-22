@@ -6,6 +6,8 @@ import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus, formatQty } from '../lib/format';
 import type { Hall, Order, OrderItem, Product, Table } from '../lib/types';
 import TextPromptModal from '../components/TextPromptModal';
+import ReasonModal from './ReasonModal';
+import { CANCEL_REASONS, VOID_REASONS } from './reason';
 import PaymentModal from './PaymentModal';
 import DiscountModal from './DiscountModal';
 import TableTransferModal from './TableTransferModal';
@@ -24,6 +26,8 @@ import {
 import { readCategories, readHalls, readProducts, readTables } from '../offline/read';
 
 type PhoneView = 'products' | 'order';
+// Sunucu kaleminin arayuzde kullanilan ek alanlari (lib/types OrderItem'da yok).
+type ServerItem = OrderItem & { voidReason?: string | null };
 
 export default function OrderScreen() {
   const { id = '' } = useParams();
@@ -38,6 +42,10 @@ export default function OrderScreen() {
   const [splitOpen, setSplitOpen] = useState(false);
   const [noteItem, setNoteItem] = useState<OrderItem | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState('');
+  // Mutfaga gitmis kalemin iptali: onay + gerekce penceresi (URN-3). Tek dokunusla iptal olmaz.
+  const [voidFor, setVoidFor] = useState<OrderItem | null>(null);
+  const [voidError, setVoidError] = useState('');
   // Telefonda (md alti) urunler ve adisyon ayni ekrana sigmaz: ikisi arasinda gecilir. Cevrimdisi
   // taslak sunucuya gecince yeni adrese yonlendirilir (ekran yeniden kurulur); gorunum korunur.
   const location = useLocation();
@@ -114,13 +122,16 @@ export default function OrderScreen() {
     onError: fail,
   });
   const voidItem = useMutation({
-    mutationFn: (itemId: string) =>
-      api(`/orders/${id}/items/${itemId}/void`, {
-        method: 'POST',
-        body: { reason: 'düzeltme' },
-      }),
-    onSuccess: refresh,
-    onError: fail,
+    mutationFn: ({ itemId, reason }: { itemId: string; reason: string }) =>
+      api(`/orders/${id}/items/${itemId}/void`, { method: 'POST', body: { reason } }),
+    onSuccess: () => {
+      setVoidFor(null);
+      refresh();
+    },
+    onError: (value) => {
+      refresh();
+      setVoidError(value instanceof ApiError ? value.message : 'Kalem iptal edilemedi.');
+    },
   });
   const hold = useMutation({
     mutationFn: () => api(`/orders/${id}/hold`, { method: 'POST' }),
@@ -158,8 +169,8 @@ export default function OrderScreen() {
       api(`/orders/${id}/cancel`, { method: 'POST', body: { reason } }),
     onSuccess: leave,
     onError: (value) => {
-      setCancelOpen(false);
-      fail(value);
+      refresh();
+      setCancelError(value instanceof ApiError ? value.message : 'Adisyon iptal edilemedi.');
     },
   });
 
@@ -419,8 +430,9 @@ export default function OrderScreen() {
               <span className="mt-1 text-xs text-stone-500">Soldan bir ürün seçerek başlayın.</span>
             </li>
           )}
-          {(currentOrder?.items ?? []).map((item) => {
+          {(currentOrder?.items ?? []).map((item: ServerItem) => {
             const pending = item.status === 'pending';
+            const cancelled = item.status === 'cancelled';
             return (
               <li
                 key={item.id}
@@ -429,7 +441,11 @@ export default function OrderScreen() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="block truncate text-sm font-bold text-ink-900">
+                    <span
+                      className={`block truncate text-sm font-bold ${
+                        cancelled ? 'text-stone-400 line-through' : 'text-ink-900'
+                      }`}
+                    >
                       {item.productNameSnapshot}
                     </span>
                     {(item.notes ?? []).length > 0 && (
@@ -440,13 +456,23 @@ export default function OrderScreen() {
                         Not: {(item.notes ?? []).map((n) => n.note).join('; ')}
                       </span>
                     )}
-                    {!pending && (
-                      <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-brand-700 uppercase">
-                        Mutfağa gönderildi
+                    {cancelled ? (
+                      <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-red-600 uppercase">
+                        İptal edildi{item.voidReason ? ` · ${item.voidReason}` : ''}
                       </span>
+                    ) : (
+                      !pending && (
+                        <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-brand-700 uppercase">
+                          Mutfağa gönderildi
+                        </span>
+                      )
                     )}
                   </div>
-                  <span className="shrink-0 text-sm font-black text-ink-900">
+                  <span
+                    className={`shrink-0 text-sm font-black ${
+                      cancelled ? 'text-stone-400 line-through' : 'text-ink-900'
+                    }`}
+                  >
                     {formatKurus(item.lineTotal)}
                   </span>
                 </div>
@@ -505,11 +531,14 @@ export default function OrderScreen() {
                       <span className="text-xs font-semibold text-stone-500">
                         {formatQty(item.quantity)} adet
                       </span>
-                      {canVoid && (
+                      {canVoid && !cancelled && (
                         <button
-                          onClick={() => voidItem.mutate(item.id)}
+                          onClick={() => {
+                            setVoidError('');
+                            setVoidFor(item);
+                          }}
                           disabled={busy}
-                          className="ml-auto min-h-10 rounded-xl px-3 text-xs font-bold text-red-600 hover:bg-red-50"
+                          className="ml-auto min-h-11 rounded-xl px-4 text-xs font-bold text-red-600 hover:bg-red-50"
                         >
                           İptal
                         </button>
@@ -579,7 +608,10 @@ export default function OrderScreen() {
             </SmallAction>
             {canVoid && (
               <SmallAction
-                onClick={() => setCancelOpen(true)}
+                onClick={() => {
+                  setCancelError('');
+                  setCancelOpen(true);
+                }}
                 disabled={!isOpen || activeItems.length === 0 || cancelOrder.isPending}
               >
                 İptal et
@@ -660,16 +692,29 @@ export default function OrderScreen() {
         />
       )}
       {cancelOpen && (
-        <TextPromptModal
+        <ReasonModal
           title="Adisyonu iptal et"
           description="Adisyon kapatılır ve masa boşalır. Ödeme alınmışsa önce Kasa ekranından iade edin."
-          label="İptal nedeni"
-          suggestions={['Müşteri vazgeçti', 'Yanlış sipariş', 'Ürün kalmadı']}
-          confirmLabel="İptal et"
-          danger
+          reasons={CANCEL_REASONS}
+          confirmLabel="Adisyonu iptal et"
           busy={cancelOrder.isPending}
+          error={cancelError}
           onConfirm={(reason) => cancelOrder.mutate(reason)}
           onClose={() => setCancelOpen(false)}
+        />
+      )}
+      {voidFor && (
+        <ReasonModal
+          title="Kalemi iptal et"
+          description={`${formatQty(voidFor.quantity)} × ${voidFor.productNameSnapshot} · ${formatKurus(
+            voidFor.lineTotal,
+          )} — mutfağa gönderilmiş kalem iptal edilir ve adisyondan düşülür.`}
+          reasons={VOID_REASONS}
+          confirmLabel="Kalemi iptal et"
+          busy={voidItem.isPending}
+          error={voidError}
+          onConfirm={(reason) => voidItem.mutate({ itemId: voidFor.id, reason })}
+          onClose={() => setVoidFor(null)}
         />
       )}
       {splitOpen && currentOrder && (

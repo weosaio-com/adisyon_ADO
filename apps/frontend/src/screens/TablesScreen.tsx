@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, getUser, hasPerm, LICENSE_LOCKED_CODE } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
-import { useDialogs } from '../components/DialogProvider';
+import ReasonModal from './ReasonModal';
+import { CANCEL_REASONS } from './reason';
 import { formatKurus } from '../lib/format';
 import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
@@ -24,8 +25,10 @@ interface Notice {
 export default function TablesScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const { confirmDialog } = useDialogs();
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Paket / gel-al iptali: gerekce secilmeden iptal edilmez (sunucu da gerekce ister).
+  const [cancelFor, setCancelFor] = useState<Order | null>(null);
+  const [cancelError, setCancelError] = useState('');
   const user = getUser();
   const halls = useQuery({ queryKey: ['halls'], queryFn: readHalls });
   const tables = useQuery({ queryKey: ['tables', 'active'], queryFn: readTables });
@@ -99,10 +102,16 @@ export default function TablesScreen() {
     onError: orderOpenError,
   });
   const cancelOrder = useMutation({
-    mutationFn: (orderId: string) =>
-      api(`/orders/${orderId}/cancel`, { method: 'POST', body: { reason: 'İptal' } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['orders', 'open'] }),
-    onError: (error) => showError(error, 'İptal edilemedi.'),
+    mutationFn: ({ orderId, reason }: { orderId: string; reason: string }) =>
+      api(`/orders/${orderId}/cancel`, { method: 'POST', body: { reason } }),
+    onSuccess: () => {
+      setCancelFor(null);
+      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+    },
+    onError: (error) => {
+      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+      setCancelError(error instanceof ApiError ? error.message : 'İptal edilemedi.');
+    },
   });
   const resumeOrder = useMutation({
     mutationFn: (orderId: string) => api<Order>(`/orders/${orderId}/resume`, { method: 'POST' }),
@@ -114,15 +123,10 @@ export default function TablesScreen() {
   });
 
   const canCancel = hasPerm('order.cancel');
-  const askCancel = async (order: Order) => {
+  const askCancel = (order: Order) => {
     setNotice(null);
-    const type = order.type === 'delivery' ? 'paket' : 'gel-al';
-    const ok = await confirmDialog({
-      title: `Bu ${type} adisyonunu iptal etmek istiyor musunuz?`,
-      confirmLabel: 'Adisyonu iptal et',
-      danger: true,
-    });
-    if (ok) cancelOrder.mutate(order.id);
+    setCancelError('');
+    setCancelFor(order);
   };
 
   async function onTable(table: Table) {
@@ -332,10 +336,12 @@ export default function TablesScreen() {
                   {/* Iptal yalniz yetkiliye (sunucu da order.cancel ister); bos adisyonu garson icinden kapatir. */}
                   {canCancel && (
                     <button
-                      onClick={() => void askCancel(order)}
+                      data-testid={`takeaway-cancel-${order.id}`}
+                      onClick={() => askCancel(order)}
                       disabled={busy || cancelOrder.isPending}
                       title="İptal et"
-                      className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
+                      aria-label="Siparişi iptal et"
+                      className="absolute top-1 right-1 flex h-11 w-11 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
                     >
                       ×
                     </button>
@@ -440,6 +446,20 @@ export default function TablesScreen() {
           );
         })}
       </main>
+      {cancelFor && (
+        <ReasonModal
+          title={`${cancelFor.type === 'delivery' ? 'Paket' : 'Gel-al'} siparişini iptal et`}
+          description={`#${cancelFor.orderNo.split('-')[1] ?? cancelFor.orderNo} · ${formatKurus(
+            cancelFor.grandTotal,
+          )} — sipariş iptal edilir. Ödeme alınmışsa önce Kasa ekranından iade edin.`}
+          reasons={CANCEL_REASONS}
+          confirmLabel="Siparişi iptal et"
+          busy={cancelOrder.isPending}
+          error={cancelError}
+          onConfirm={(reason) => cancelOrder.mutate({ orderId: cancelFor.id, reason })}
+          onClose={() => setCancelFor(null)}
+        />
+      )}
     </div>
   );
 }

@@ -38,3 +38,14 @@ export function keyReuser(generate: () => string): (signature: string) => string
     return last.key;
   };
 }
+
+/** Sunucu ust sinirlari: tek tutar en cok 10.000.000 TL, miktar en cok 10.000 adet. */
+export const MAX_MONEY_KURUS = 1_000_000_000;
+export const MAX_QUANTITY_MILLI = 10_000_000;
+
+/** Para girisi alaninin hata metni; gecerliyse bos. Bos/gecersiz giris ayri denetlenir. */
+export function moneyLimitError(kurus: number): string {
+  return Number.isFinite(kurus) && Math.abs(kurus) > MAX_MONEY_KURUS
+    ? 'Tutar en fazla 10.000.000 TL olabilir.'
+    : '';
+}

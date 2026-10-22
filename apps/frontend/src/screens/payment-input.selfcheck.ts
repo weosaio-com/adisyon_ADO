@@ -1,7 +1,14 @@
 // Odeme ekrani hesaplarinin runnable self-check'i.
 // Calistir: node --experimental-strip-types src/screens/payment-input.selfcheck.ts
 import assert from 'node:assert';
-import { cashChange, keyReuser, kurusToInput, netPaid } from './payment-input.ts';
+import {
+  MAX_MONEY_KURUS,
+  cashChange,
+  keyReuser,
+  kurusToInput,
+  moneyLimitError,
+  netPaid,
+} from './payment-input.ts';
 
 // Iade satiri pozitif tutarla gelir: toplanirsa iadeden sonra "kalan" 0 gorunur, odeme alinamaz.
 assert.equal(netPaid([]), 0);
@@ -32,5 +39,11 @@ assert.equal(keyFor('["cash",14500,20000,"",0]'), first, 'tekrar denemede ayni a
 const other = keyFor('["card",14500,null,"",0]');
 assert.notEqual(other, first, 'yontem degisince yeni anahtar');
 assert.notEqual(keyFor('["card",14500,null,"",1]'), other, 'basarili odemeden sonra yeni anahtar');
+
+// Sunucu siniri (10.000.000 TL): asan giris sunucuya gitmeden anlasilir hata verir.
+assert.equal(moneyLimitError(MAX_MONEY_KURUS), '');
+assert.equal(moneyLimitError(0), '');
+assert.match(moneyLimitError(MAX_MONEY_KURUS + 1), /10\.000\.000 TL/);
+assert.equal(moneyLimitError(Number.NaN), '');
 
 console.log('✓ payment-input self-check OK');
