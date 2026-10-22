@@ -488,6 +488,34 @@ try {
     );
   }
 
+  // --- SAT-16: elle kasa hareketi yalniz nakit giris/cikis, isaret turden, aciklama zorunlu ---
+  {
+    const txn = (body) => call('POST', '/cash/transactions', { method: 'cash', ...body });
+    const payout = await txn({ type: 'payout', amount: 2500, note: 'Pazar alışverişi' });
+    t.check(
+      payout.status === 201 && payout.data.amount === -2500,
+      `SAT-16 pozitif para cikisi kasadan duser (${payout.data.amount})`,
+    );
+    const rejected = {
+      satis: await txn({ type: 'sale', amount: 7000, note: 'x' }),
+      acilis: await txn({ type: 'opening', amount: 7000, note: 'x' }),
+      kart: await txn({ type: 'income', amount: 3000, method: 'card', note: 'x' }),
+      sifir: await txn({ type: 'income', amount: 0, note: 'x' }),
+      eksiGiris: await txn({ type: 'income', amount: -100, note: 'x' }),
+    };
+    t.check(
+      Object.values(rejected).every((r) => r.status === 422),
+      `SAT-16 satis/acilis/kart/0/eksi giris reddedilir (${Object.entries(rejected)
+        .map(([k, r]) => `${k}:${r.status}`)
+        .join(' ')})`,
+    );
+    const noNote = await txn({ type: 'income', amount: 1000 });
+    t.check(
+      noNote.status === 400 && code(noNote) === 'CASH_NOTE_REQUIRED',
+      `SAT-16 aciklamasiz para girisi reddedilir (${noNote.status} ${code(noNote)})`,
+    );
+  }
+
   // --- SAT-11: kasa acilis/kapanis ve para giris/cikisi denetim kaydinda (en sonda: kasa kapanir) ---
   {
     const audit = async (action) => must(await call('GET', `/audit?action=${action}`), 'denetim');

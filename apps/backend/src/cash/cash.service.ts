@@ -8,7 +8,7 @@ import {
 import { OnEvent } from '@nestjs/event-emitter';
 import { DURABLE_LISTENER } from '../common/events/durable-listener';
 import { Prisma } from '@prisma/client';
-import { newId, CashTxnType, OrderStatus, type DomainEvent } from '@ado/shared';
+import { newId, CashTxnType, OrderStatus, PaymentMethod, type DomainEvent } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -209,13 +209,18 @@ export class CashService {
   // ===========================================================================
   async createTransaction(user: AuthUser, dto: CreateCashTransactionDto) {
     const note = dto.note?.trim() ?? '';
-    // Para cikisinda aciklama zorunlu: kim neden para cekti kayitta kalsin.
-    if (dto.type === CashTxnType.Payout && !note) {
+    // Aciklama zorunlu: kim neden para koydu/cekti kayitta kalsin.
+    if (!note) {
       throw new BadRequestException({
         code: 'CASH_NOTE_REQUIRED',
-        message: 'Para çıkışı için açıklama yazın.',
+        message:
+          dto.type === CashTxnType.Payout
+            ? 'Para çıkışı için açıklama yazın.'
+            : 'Para girişi için açıklama yazın.',
       });
     }
+    // Isaret turden: giris +, cikis - (kapanis beklenen tutari buna gore hesaplanir).
+    const amount = dto.type === CashTxnType.Payout ? -Math.abs(dto.amount) : Math.abs(dto.amount);
     // Tekrar korumasi: zaman asimi/cift dokunusla gelen ikinci istek ilk kaydi doner.
     if (dto.idempotencyKey) {
       const replay = await this.existingTxnByKey(user, dto.idempotencyKey);
@@ -240,10 +245,10 @@ export class CashService {
             id: newId(),
             cashSessionId: session.id,
             type: dto.type,
-            amount: dto.amount,
-            method: dto.method,
+            amount,
+            method: PaymentMethod.Cash,
             createdBy: user.userId,
-            note: note || null,
+            note,
             ...(dto.idempotencyKey ? { idempotencyKey: dto.idempotencyKey } : {}),
           },
         });
@@ -254,7 +259,7 @@ export class CashService {
           entityId: created.id,
           userId: user.userId,
           newValue: created,
-          ...(note ? { reason: note } : {}),
+          reason: note,
           ...this.provenance(user),
         });
         return created;
