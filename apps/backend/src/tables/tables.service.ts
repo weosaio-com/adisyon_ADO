@@ -11,8 +11,10 @@ import {
   createDomainEvent,
   DomainEventName,
   encodeTableCode,
+  OrderStatus,
   TABLE_CODE_BYTES,
 } from '@ado/shared';
+import type { Prisma } from '@prisma/client';
 import { sortNatural } from './natural-order';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
@@ -141,6 +143,10 @@ export class TablesService implements OnModuleInit {
 
   async updateHall(user: AuthUser, id: string, dto: UpdateHallDto) {
     const before = await this.hallOrThrow(user.branchId, id);
+    // Pasife alinan salonun masalari masa planindan kalkar: uzerinde acik adisyon kalmasin.
+    if (dto.isActive === false && before.isActive) {
+      await this.assertNoActiveOrder(user.branchId, { table: { hallId: id } }, 'Salondaki');
+    }
     const after = await this.prisma.hall.update({
       where: { id },
       data: {
@@ -247,6 +253,11 @@ export class TablesService implements OnModuleInit {
   async updateTable(user: AuthUser, id: string, dto: UpdateTableDto) {
     const before = await this.tableOrThrow(user.branchId, id);
     if (dto.hallId !== undefined) await this.hallOrThrow(user.branchId, dto.hallId);
+    // Pasif masa masa planinda gorunmez: acik adisyonu varken pasife alinirsa adisyon
+    // plandan kaybolur, garson masayi bulamaz (SAT-26).
+    if (dto.isActive === false && before.isActive) {
+      await this.assertNoActiveOrder(user.branchId, { tableId: id }, 'Masada');
+    }
 
     const after = await this.prisma.table.update({
       where: { id },
@@ -277,15 +288,20 @@ export class TablesService implements OnModuleInit {
 
   async deleteTable(user: AuthUser, id: string) {
     const before = await this.tableOrThrow(user.branchId, id);
-    // Canli siparisi olan masa silinemez (siparisi oksuz birakmamak icin).
-    // Not: Siparis modulu gelince "yalnizca acik siparis" olarak daraltilacak.
+    // Yalniz acik/bekleyen adisyonu olan masa silinemez. Kapanmis adisyonlar engel degil:
+    // silme yumusak (deletedAt), gecmis adisyonlar masa adini korur.
     const orderCount = await this.prisma.order.count({
-      where: { branchId: user.branchId, tableId: id, deletedAt: null },
+      where: {
+        branchId: user.branchId,
+        tableId: id,
+        status: { in: [OrderStatus.Open, OrderStatus.Held] },
+        deletedAt: null,
+      },
     });
     if (orderCount > 0) {
       throw new ConflictException({
         code: 'TABLE_HAS_ORDERS',
-        message: 'Siparisi olan masa silinemez.',
+        message: 'Açık adisyonu olan masa silinemez; önce adisyonu kapatın ya da taşıyın.',
       });
     }
     const after = await this.prisma.table.update({
@@ -329,6 +345,31 @@ export class TablesService implements OnModuleInit {
   // ===========================================================================
   // Yardimcilar
   // ===========================================================================
+  // Masa/salonda acik ya da bekleyen adisyon varsa 409 TABLE_HAS_OPEN_ORDER.
+  private async assertNoActiveOrder(
+    branchId: string,
+    where: Prisma.OrderWhereInput,
+    subject: 'Masada' | 'Salondaki',
+  ): Promise<void> {
+    const count = await this.prisma.order.count({
+      where: {
+        ...where,
+        branchId,
+        status: { in: [OrderStatus.Open, OrderStatus.Held] },
+        deletedAt: null,
+      },
+    });
+    if (count > 0) {
+      throw new ConflictException({
+        code: 'TABLE_HAS_OPEN_ORDER',
+        message:
+          subject === 'Masada'
+            ? 'Masada açık adisyon var; pasife almadan önce adisyonu kapatın ya da taşıyın.'
+            : 'Salondaki masalarda açık adisyon var; pasife almadan önce adisyonları kapatın.',
+      });
+    }
+  }
+
   private async hallOrThrow(branchId: string, id: string) {
     const row = await this.prisma.hall.findFirst({
       where: { id, branchId, deletedAt: null },

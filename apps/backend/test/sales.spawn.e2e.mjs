@@ -553,6 +553,39 @@ try {
     );
   }
 
+  // --- SAT-26: acik adisyonlu masa pasife alinamaz; kapanmis adisyonu olan masa silinebilir ---
+  {
+    const table = tables[3];
+    const order = must(await call('POST', '/orders', { tableId: table.id }), 'masa ac');
+    must(
+      await call('POST', `/orders/${order.id}/items`, { productId: p50.id, quantity: 1000 }),
+      'kalem',
+    );
+    const deactivate = await call('PATCH', `/tables/${table.id}`, { isActive: false });
+    t.check(
+      deactivate.status === 409 && code(deactivate) === 'TABLE_HAS_OPEN_ORDER',
+      `SAT-26 acik adisyonlu masa pasife alinamaz (${deactivate.status} ${code(deactivate)})`,
+    );
+    const hallOff = await call('PATCH', `/halls/${hall.id}`, { isActive: false });
+    t.check(
+      hallOff.status === 409 && code(hallOff) === 'TABLE_HAS_OPEN_ORDER',
+      `SAT-26 acik adisyonlu salon pasife alinamaz (${hallOff.status})`,
+    );
+    must(
+      await call('POST', `/orders/${order.id}/payments`, {
+        method: 'card',
+        amount: 5000,
+        idempotencyKey: key('pay'),
+      }),
+      'odeme',
+    );
+    const removed = await call('DELETE', `/tables/${table.id}`);
+    t.check(
+      removed.status === 200,
+      `SAT-26 kapanmis adisyonu olan masa silinebilir (${removed.status})`,
+    );
+  }
+
   // --- SAT-16: elle kasa hareketi yalniz nakit giris/cikis, isaret turden, aciklama zorunlu ---
   {
     const txn = (body) => call('POST', '/cash/transactions', { method: 'cash', ...body });
