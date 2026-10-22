@@ -1,0 +1,52 @@
+import { test, expect } from '@playwright/test';
+import { call, ensureCashOpen, ownerLogin } from './api-helpers';
+
+// Kasa ekrani: elle kasa hareketi (aciklama zorunlu, tekrar korumasi).
+interface ActiveSession {
+  id: string;
+  transactions: { type: string; amount: number; note?: string | null }[];
+}
+
+let token = '';
+
+test.describe.configure({ mode: 'serial' });
+
+test.beforeAll(async () => {
+  token = (await ownerLogin()).accessToken;
+  await ensureCashOpen(token);
+});
+
+// Kapanis testi kasayi kapatir: sonraki spec'ler acik kasa bekler.
+test.afterAll(async () => {
+  await ensureCashOpen(token);
+});
+
+test('kasa hareketi açıklama ister; yanıtı kaybolan istek tekrar basılınca çiftlenmez', async ({
+  page,
+}) => {
+  await page.goto('/cash');
+  const note = `E2E bozuk para ${Date.now()}`;
+  await page.getByRole('button', { name: 'Para Çıkışı' }).click();
+  await page.getByTestId('cash-move-amount').fill('50');
+  await expect(page.getByTestId('cash-move-submit')).toBeDisabled();
+  await page.getByTestId('cash-move-note').fill(note);
+
+  // Ilk istek sunucuya ulasir ve islenir, yanit tablete donmez (Wi-Fi kopmasi).
+  let first = true;
+  await page.route('**/api/v1/cash/transactions', async (route) => {
+    if (first && route.request().method() === 'POST') {
+      first = false;
+      await route.fetch();
+      return route.abort('connectionreset');
+    }
+    return route.continue();
+  });
+  await page.getByTestId('cash-move-submit').click();
+  await expect(page.getByText('kaydedilmiş olabilir')).toBeVisible();
+  await page.getByTestId('cash-move-submit').click();
+  await expect(page.getByTestId('cash-move-note')).toHaveValue('');
+
+  const active = await call<ActiveSession>('GET', '/cash/sessions/active', undefined, token);
+  const mine = active.transactions.filter((t) => t.note === note);
+  expect(mine.map((t) => [t.type, t.amount])).toEqual([['payout', -5000]]);
+});

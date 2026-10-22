@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError, hasPerm } from '../lib/api';
+import { api, ApiError, hasPerm, isConnectivityError } from '../lib/api';
 import TextPromptModal from '../components/TextPromptModal';
 import { ulid } from '../offline/ids';
 import { formatKurus, parseTlToKurus as toKurus } from '../lib/format';
 import type { CashSession, Order } from '../lib/types';
 import { readOpenOrders, readTables } from '../offline/read';
 import { pickKasaPanel } from './kasa-panel';
+import { keyReuser, moneyLimitError } from './payment-input';
 
 // TL metnini kurusa cevir (PaymentModal ile ayni kalip). Gecersizse NaN.
 
@@ -161,6 +162,11 @@ function ActiveSession({
   const [amountTl, setAmountTl] = useState('');
   const [note, setNote] = useState('');
   const [countTl, setCountTl] = useState('');
+  const [moveError, setMoveError] = useState('');
+  // Ayni hareket girisi tekrar gonderilirse ayni anahtar gider: yaniti kaybolan istek tekrar
+  // basilinca kasaya ikinci hareket yazilmaz. Basarili hareketten sonra yeni anahtar.
+  const [keyFor] = useState(() => keyReuser(ulid));
+  const [moves, setMoves] = useState(0);
 
   // Beklenen tutar = acilis + acilis/kapanis disi tum hareketler (backend ile ayni).
   const expected =
@@ -170,14 +176,30 @@ function ActiveSession({
       .reduce((s, t) => s + t.amount, 0);
 
   const txn = useMutation({
-    mutationFn: (body: { type: string; amount: number; method: string; note?: string }) =>
-      api('/cash/transactions', { method: 'POST', body }),
+    mutationFn: (body: {
+      type: string;
+      amount: number;
+      method: string;
+      note: string;
+      idempotencyKey: string;
+    }) => api('/cash/transactions', { method: 'POST', body }),
     onSuccess: () => {
+      setMoves((n) => n + 1);
       setAmountTl('');
       setNote('');
+      setMoveError('');
       onDone();
     },
-    onError,
+    onError: (e) => {
+      onDone();
+      setMoveError(
+        isConnectivityError(e)
+          ? 'Bağlantı koptu; hareket kaydedilmiş olabilir. Aşağıdaki listeyi kontrol edip gerekirse tekrar deneyin.'
+          : e instanceof ApiError
+            ? e.message
+            : 'Kasa hareketi kaydedilemedi.',
+      );
+    },
   });
 
   const close = useMutation({
@@ -188,15 +210,25 @@ function ActiveSession({
   });
 
   const moveKurus = toKurus(amountTl);
-  const moveValid = amountTl.trim() !== '' && Number.isFinite(moveKurus) && moveKurus > 0;
-  const submitMove = () =>
-    // payout cekmeceden cikis -> negatif; income giris -> pozitif.
+  const moveLimit = moneyLimitError(moveKurus);
+  const moveNote = note.trim();
+  const moveValid =
+    amountTl.trim() !== '' &&
+    Number.isFinite(moveKurus) &&
+    moveKurus > 0 &&
+    !moveLimit &&
+    moveNote !== '';
+  const submitMove = () => {
+    setMoveError('');
+    // Tutar her zaman pozitif: isaret turden (para cikisi kasadan duser) sunucuda belirlenir.
     txn.mutate({
       type: dir,
-      amount: dir === 'payout' ? -moveKurus : moveKurus,
+      amount: moveKurus,
       method: 'cash',
-      ...(note.trim() ? { note: note.trim() } : {}),
+      note: moveNote,
+      idempotencyKey: keyFor(JSON.stringify([dir, moveKurus, moveNote, moves])),
     });
+  };
 
   const countKurus = toKurus(countTl);
   const closeValid = countTl.trim() !== '' && Number.isFinite(countKurus) && countKurus >= 0;
@@ -220,36 +252,46 @@ function ActiveSession({
         <div className="mb-3 grid grid-cols-2 gap-2">
           <button
             onClick={() => setDir('income')}
-            className={`rounded-lg py-2 font-semibold ${dir === 'income' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+            className={`min-h-11 rounded-lg font-semibold ${dir === 'income' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600'}`}
           >
             Para Girişi
           </button>
           <button
             onClick={() => setDir('payout')}
-            className={`rounded-lg py-2 font-semibold ${dir === 'payout' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+            className={`min-h-11 rounded-lg font-semibold ${dir === 'payout' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600'}`}
           >
             Para Çıkışı
           </button>
         </div>
         <input
+          data-testid="cash-move-amount"
           value={amountTl}
           onChange={(e) => setAmountTl(e.target.value)}
           inputMode="decimal"
           placeholder="Tutar (TL)"
-          className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2"
+          className="mb-2 min-h-11 w-full rounded-lg border border-slate-300 px-3"
         />
+        {moveLimit && <p className="mb-2 text-sm text-red-600">{moveLimit}</p>}
         <input
+          data-testid="cash-move-note"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Açıklama (isteğe bağlı)"
-          className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2"
+          maxLength={200}
+          placeholder="Açıklama (zorunlu): ör. bozuk para, tedarikçi ödemesi"
+          className="mb-3 min-h-11 w-full rounded-lg border border-slate-300 px-3"
         />
+        {moveError && (
+          <p role="alert" className="mb-3 rounded-lg bg-red-50 p-2 text-sm text-red-700">
+            {moveError}
+          </p>
+        )}
         <button
+          data-testid="cash-move-submit"
           onClick={submitMove}
           disabled={txn.isPending || !moveValid}
-          className="w-full rounded-lg bg-slate-700 py-2 font-semibold text-white disabled:opacity-40"
+          className="min-h-12 w-full rounded-lg bg-slate-700 font-semibold text-white disabled:opacity-40"
         >
-          Ekle
+          {amountTl.trim() && !moveNote ? 'Açıklama yazın' : 'Ekle'}
         </button>
       </div>
 
