@@ -1,7 +1,9 @@
 // Kendini toparlama kurallarinin self-check'i (Electron'suz): `node selfcheck.recovery.mjs`
 import assert from 'node:assert';
 import {
+  HEALTH_MAX_FAILURES,
   installFailedDialog,
+  livenessProbe,
   allowReload,
   planRestart,
   RELOAD_MAX_IN_WINDOW,
@@ -56,5 +58,54 @@ const installFailed = installFailedDialog('C:/kayit.log');
 assert.strictEqual(installFailed.title, 'Güncelleme kurulamadı');
 assert.match(installFailed.message, /eski sürümle çalışmaya devam/);
 assert.match(installFailed.message, /C:\/kayit\.log/);
+
+// --- Askida kalan backend bekcisi (PLT-12) ---
+{
+  let alive = true;
+  let allowed = true;
+  const events = [];
+  const probe = livenessProbe({
+    isAlive: async () => alive,
+    canProbe: () => allowed,
+    onFailing: (count) => events.push(`failing ${count}`),
+    onRecovered: () => events.push('recovered'),
+    onHung: async () => events.push('hung'),
+  });
+  assert.strictEqual(await probe.probe(), 'ok');
+  alive = false;
+  for (let i = 1; i < HEALTH_MAX_FAILURES; i++) assert.strictEqual(await probe.probe(), 'failing');
+  // Kisa takilma (or. 7-8 sn'lik rapor) yeniden baslatmaz: arada yanit gelirse sayac sifirlanir.
+  alive = true;
+  assert.strictEqual(await probe.probe(), 'recovered');
+  alive = false;
+  // Kapanis/acilis sirasinda yoklanmaz, sayilmaz.
+  allowed = false;
+  assert.strictEqual(await probe.probe(), 'skipped');
+  allowed = true;
+  for (let i = 1; i < HEALTH_MAX_FAILURES; i++) await probe.probe();
+  assert.strictEqual(await probe.probe(), 'hung', 'art arda yanitsizlikta askida sayilir');
+  assert.strictEqual(events.filter((e) => e === 'hung').length, 1, 'bir kez yeniden baslatilir');
+  assert.strictEqual(probe.failures, 0, 'yeniden baslatmadan sonra sayac sifir');
+  // Yoklama surerken ikinci yoklama baslamaz (3 sn zaman asimi 15 sn araliktan kisa olsa da).
+  let release;
+  const slow = livenessProbe({
+    isAlive: () => new Promise((resolve) => (release = resolve)),
+  });
+  const first = slow.probe();
+  assert.strictEqual(await slow.probe(), 'skipped');
+  release(true);
+  assert.strictEqual(await first, 'ok');
+  // Yoklama bitince durum degistiyse (kapanis basladi) sonuc sayilmaz.
+  let closing = false;
+  const late = livenessProbe({
+    isAlive: async () => {
+      closing = true;
+      return false;
+    },
+    canProbe: () => !closing,
+  });
+  assert.strictEqual(await late.probe(), 'skipped');
+  assert.strictEqual(late.failures, 0);
+}
 
 console.log('✓ desktop recovery self-check OK');

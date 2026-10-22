@@ -552,6 +552,17 @@ assert.match(restoreSkippedDialog({ retry: false }, 'C:/k.log').message, /C:\/k\
   );
   assert.strictEqual(await stopBackendProcess(stubborn, 300), 'killed', 'sure dolunca zorla');
 
+  // Askida kalan surec (PLT-12): mesaji da SIGTERM'i de islemez; kesin sonlandirilir.
+  if (process.platform !== 'win32') {
+    const frozen = start(
+      script('frozen.cjs', "process.on('message', () => {});\nsetInterval(() => {}, 1000);\n"),
+    );
+    await new Promise((resolve) => frozen.once('spawn', resolve));
+    process.kill(frozen.pid, 'SIGSTOP');
+    assert.strictEqual(await stopBackendProcess(frozen, 200, 200), 'killed', 'donmus surec biter');
+    assert.strictEqual(frozen.signalCode, 'SIGKILL');
+  }
+
   const gone = start(script('gone.cjs', 'process.exit(0);\n'));
   await new Promise((resolve) => gone.once('exit', resolve));
   assert.strictEqual(await stopBackendProcess(gone), 'exited');

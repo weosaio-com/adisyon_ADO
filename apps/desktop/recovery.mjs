@@ -17,6 +17,65 @@ export const RELOAD_MAX_IN_WINDOW = 3;
 export const UNRESPONSIVE_PROMPT_MS = 30_000;
 
 /**
+ * Askida kalan backend bekcisi (PLT-12): surec ayakta ama yanit vermiyorsa (olay dongusu kilitli)
+ * cokme gibi yeniden baslatilir. Hazir olduktan sonra bu aralikla canlilik ucu yoklanir; uc
+ * veritabanina dokunmaz (uzun yedek/rapor sirasinda da yanit verir).
+ */
+export const HEALTH_CHECK_INTERVAL_MS = 15_000;
+export const HEALTH_CHECK_TIMEOUT_MS = 3_000;
+/** Art arda bu kadar yanitsiz yoklamada (yaklasik 1 dk) backend askida sayilir. */
+export const HEALTH_MAX_FAILURES = 4;
+
+/**
+ * Canlilik yoklayicisi. `canProbe()` false iken (kapanis, acilis, planli yeniden baslatma) yoklama
+ * yapilmaz ve sayilmaz. Art arda `maxFailures` yanitsizlikta bir kez `onHung` cagrilir.
+ * Sonuc: 'skipped' | 'ok' | 'failing' | 'recovered' | 'hung'.
+ */
+export function livenessProbe({
+  isAlive,
+  canProbe = () => true,
+  onFailing = () => {},
+  onRecovered = () => {},
+  onHung = async () => {},
+  maxFailures = HEALTH_MAX_FAILURES,
+}) {
+  let failures = 0;
+  let probing = false;
+  return {
+    get failures() {
+      return failures;
+    },
+    reset() {
+      failures = 0;
+    },
+    async probe() {
+      if (probing || !canProbe()) return 'skipped';
+      probing = true;
+      try {
+        const alive = await isAlive();
+        if (!canProbe()) return 'skipped';
+        if (alive) {
+          const recovered = failures > 0;
+          failures = 0;
+          if (recovered) onRecovered();
+          return recovered ? 'recovered' : 'ok';
+        }
+        failures += 1;
+        if (failures < maxFailures) {
+          onFailing(failures);
+          return 'failing';
+        }
+        failures = 0;
+        await onHung();
+        return 'hung';
+      } finally {
+        probing = false;
+      }
+    },
+  };
+}
+
+/**
  * Sonraki yeniden baslatma: `history` onceki denemelerin zamanlari (ms). Pencere disina dusenler
  * atilir (`recent`); uzun sure sorunsuz calisan backend yeniden kisa beklemeyle baslar.
  */

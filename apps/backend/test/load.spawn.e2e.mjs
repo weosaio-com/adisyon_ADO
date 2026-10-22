@@ -123,8 +123,21 @@ try {
   t.check(locked.maxMs < LOCK_MS + 5_000, 'kilit kalkinca hemen tamamlanir');
 
   // 3. Uzun kilit: beklenebilecek sureyi asan istekler gecici hata (503 DB_BUSY) alir, 500 degil.
+  //    Bu sirada canlilik ucu (masaustu bekcisi, PLT-12) veritabanini beklemeden yanit verir.
+  let live = { status: 0, ms: 0 };
   const long = summary(
-    await withExternalLock(dbPath, LONG_LOCK_MS, () => burst(orderIds.slice(0, 4), product.id)),
+    await withExternalLock(dbPath, LONG_LOCK_MS, async () => {
+      const writes = burst(orderIds.slice(0, 4), product.id);
+      await new Promise((resolve) => setTimeout(resolve, 500)); // yazmalar kuyrukta beklerken
+      const started = Date.now();
+      const res = await fetch(`${backend.base}/health/live`);
+      live = { status: res.status, ms: Date.now() - started };
+      return writes;
+    }),
+  );
+  t.check(
+    live.status === 200 && live.ms < 1_000,
+    `kilitliyken canlilik ucu hemen yanit verir (${live.ms} ms)`,
   );
   console.log(`  ${LONG_LOCK_MS} ms kilit altinda 4 yazar: ${JSON.stringify(long)}`);
   const busyOnly = Object.keys(long.codes).every((code) => code === '503:DB_BUSY');

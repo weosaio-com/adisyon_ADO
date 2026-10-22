@@ -19,7 +19,11 @@ import {
 } from './startup.mjs';
 import {
   allowReload,
+  HEALTH_CHECK_INTERVAL_MS,
+  HEALTH_CHECK_TIMEOUT_MS,
+  HEALTH_MAX_FAILURES,
   installFailedDialog,
+  livenessProbe,
   planRestart,
   restartGiveUpDialog,
   UNRESPONSIVE_PROMPT_MS,
@@ -42,6 +46,9 @@ let backendReady = false;
 let shuttingDown = false;
 const restartHistory = [];
 let restartTimer = null;
+// Yeniden baslatilan backend acilirken bekci yoklamaz (acilis beklemesi kendi suresini uygular).
+let backendStarting = false;
+let livenessTimer = null;
 const reloadHistory = [];
 let unresponsiveTimer = null;
 // Acilis basarisiz olursa hata penceresinde gosterilecek son backend ciktisi.
@@ -52,6 +59,12 @@ let restoreProblem = null;
 // /health yalniz veritabanini denetler (disk dolu olsa da 200). Asili istek beklemeyi uzatmasin.
 const isUp = () =>
   fetch(`${BASE}/api/v1/health`, { signal: AbortSignal.timeout(3000) })
+    .then((r) => r.ok)
+    .catch(() => false);
+
+// Askida kalma bekcisi icin: yalniz olay dongusunu yoklar, veritabanina dokunmaz (PLT-12).
+const isAlive = () =>
+  fetch(`${BASE}/api/v1/health/live`, { signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS) })
     .then((r) => r.ok)
     .catch(() => false);
 
@@ -175,10 +188,14 @@ async function restartBackend() {
     return;
   }
   const child = backend;
+  backendStarting = true;
+  liveness.reset();
   const result = await waitForBackend({
     isUp,
     exited: backendExit,
     timeoutMs: BACKEND_START_TIMEOUT_MS,
+  }).finally(() => {
+    backendStarting = false;
   });
   if (result.ok) {
     log('backend yeniden acildi');
@@ -197,6 +214,28 @@ function showRestoreProblem() {
   const { title, message } = restoreSkippedDialog(restoreProblem, logPath);
   restoreProblem = null;
   void showMessage({ type: 'warning', title, message, buttons: ['Tamam'] });
+}
+
+// Askida kalan backend (surec ayakta, olay dongusu kilitli): cokme yalniz `exit` ile anlasiliyordu,
+// boylece pencere ve tabletler programi kapatip acana kadar "cevrimdisi" kaliyordu. Art arda
+// HEALTH_MAX_FAILURES yanitsiz yoklamada (~1 dk) kayda yazilip durdurulur; cikis dinleyicisi
+// cokmedeki gibi planRestart sinirlariyla yeniden baslatir (PLT-12).
+const liveness = livenessProbe({
+  isAlive,
+  canProbe: () => Boolean(backend) && !shuttingDown && !backendStarting && !restartTimer,
+  onFailing: (count) => log(`backend yanit vermiyor (${count}/${HEALTH_MAX_FAILURES})`),
+  onRecovered: () => log('backend yeniden yanit veriyor'),
+  onHung: async () => {
+    const child = backend;
+    log(`backend ${HEALTH_MAX_FAILURES} denetimdir yanit vermiyor (askida); yeniden baslatilacak`);
+    log(`askidaki backend durduruldu: ${await stopBackendProcess(child)}`);
+  },
+});
+
+function startLivenessWatch() {
+  // Dev'de backend'i kabuk baslatmadiysa (elle calisiyor) yeniden de baslatamaz: bekci yok.
+  if (livenessTimer || !backend) return;
+  livenessTimer = setInterval(() => void liveness.probe(), HEALTH_CHECK_INTERVAL_MS);
 }
 
 // Ana surecten acilan pencereden sonra klavye odagi pencereye donsun (Windows'ta kaybolabiliyor).
@@ -374,6 +413,7 @@ async function start() {
     await openWindow();
     showRestoreProblem();
     startUpdater();
+    startLivenessWatch();
   } catch (err) {
     // Sessiz cikis olmasin: hatayi goster, sonra kapan.
     dialog.showErrorBox('Uygulama başlatılamadı', String(err && err.stack ? err.stack : err));
@@ -416,6 +456,7 @@ if (!app.requestSingleInstanceLock()) {
     updater?.quitting();
     updater?.stop();
     shuttingDown = true;
+    clearInterval(livenessTimer);
     clearTimeout(restartTimer);
     clearTimeout(unresponsiveTimer);
     if (!backend || stopping) return;

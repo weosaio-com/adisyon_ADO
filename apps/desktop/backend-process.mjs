@@ -5,6 +5,8 @@ import { spawn } from 'node:child_process';
 
 /** Kapanis mesajindan sonra zorla sonlandirmadan once beklenecek sure. */
 export const STOP_TIMEOUT_MS = 10_000;
+/** Zorla sonlandirma (SIGTERM) islenmezse (askida/durdurulmus surec) kesin sonlandirmaya kadar. */
+export const KILL_WAIT_MS = 5_000;
 
 export function startBackendProcess({ execPath, entry, env, onOutput }) {
   const child = spawn(execPath, [entry], { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
@@ -20,20 +22,27 @@ const hasExited = (child) => child.exitCode !== null || child.signalCode !== nul
  * sonlandirilir. Windows'ta kill() sinyal degil dogrudan sonlandirmadir; bu yuzden once mesaj.
  * Sonuc: 'exited' (zaten kapaliydi) | 'graceful' | 'killed'.
  */
-export function stopBackendProcess(child, timeoutMs = STOP_TIMEOUT_MS) {
+export function stopBackendProcess(child, timeoutMs = STOP_TIMEOUT_MS, killWaitMs = KILL_WAIT_MS) {
   return new Promise((resolve) => {
     if (!child || hasExited(child)) {
       resolve('exited');
       return;
     }
     let result = 'graceful';
+    let escalate = null;
     const kill = () => {
+      if (result === 'killed') return;
       result = 'killed';
       child.kill();
+      // Askida kalan surec SIGTERM'i isleyemeyebilir: sure dolunca kesin sonlandirma (PLT-12).
+      escalate = setTimeout(() => {
+        if (!hasExited(child)) child.kill('SIGKILL');
+      }, killWaitMs);
     };
     const timer = setTimeout(kill, timeoutMs);
     child.once('exit', () => {
       clearTimeout(timer);
+      clearTimeout(escalate);
       resolve(result);
     });
     if (!child.connected) {

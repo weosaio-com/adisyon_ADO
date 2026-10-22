@@ -94,6 +94,19 @@ async function bootstrap(): Promise<void> {
     next();
   });
 
+  // Canlilik (masaustu bekcisi, PLT-12): veritabanina dokunmaz, yalniz surecin ve olay dongusunun
+  // yanit verdigini gosterir. Uzun yedek/rapor sirasinda veritabani mesgul olsa da hemen 200 doner;
+  // bekci yalniz gercekten askida kalan backend'i yeniden baslatir. Nest yonlendiricisinden once:
+  // kimlik denetimi ve istek kaydi yok.
+  app.use(
+    `/${API_PREFIX}/health/live`,
+    (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ success: true, data: { status: 'ok', uptimeSec: Math.round(process.uptime()) } });
+    },
+  );
+
   // LAN tarayicilari icin build edilmis frontend'i ayni porttan sun (varsa).
   // Hem src/ (ts-node) hem dist/ (build) ayni derinlikte -> ../../frontend/dist.
   const webDist = join(__dirname, '..', '..', 'frontend', 'dist');
