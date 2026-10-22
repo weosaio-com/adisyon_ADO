@@ -11,9 +11,53 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 import { Writable } from 'node:stream';
 
 export const LOG_MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * Olaylar kaydi (ado-olaylar.log, PLT-14): yalniz uyari/hata ve kabuk satirlari; kucuk ama uzun
+ * omurlu. Ana kayit (backend-error.log) her seyi tuttugu icin birkac saatte donuyordu.
+ */
+export const EVENTS_LOG_MAX_BYTES = 2 * 1024 * 1024;
+/** pino seviyesi: 40 uyari, 50 hata, 60 olumcul. */
+export const EVENT_MIN_LEVEL = 40;
+
+/**
+ * Olaylar kaydina girecek satir mi: stderr'in her satiri (yakalanmamis hata yigini, Node
+ * uyarisi), stdout'ta seviyesi uyari ve ustu olan pino JSON satirlari.
+ */
+export function isEventLine(line, stream) {
+  if (!line.trim()) return false;
+  if (stream === 'stderr') return true;
+  if (!line.startsWith('{')) return false;
+  try {
+    const { level } = JSON.parse(line);
+    return typeof level === 'number' && level >= EVENT_MIN_LEVEL;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parca parca gelen akistan tam satirlar uretir: yarim satir sonraki parcayi bekler, cok baytli
+ * karakter (Turkce) parca sinirinda bolunmez. Asiri uzun satir sinirda kesilip verilir.
+ */
+export function lineSplitter(onLine, maxCarry = 64 * 1024) {
+  const decoder = new StringDecoder('utf8');
+  let carry = '';
+  return (chunk) => {
+    const lines = (
+      carry + decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    ).split('\n');
+    carry = lines.pop() ?? '';
+    for (const line of lines) onLine(line);
+    if (carry.length > maxCarry) {
+      onLine(carry);
+      carry = '';
+    }
+  };
+}
 
 // Eski surumler logu sinirsiz buyutuyordu: acilista sinir asilmissa yalniz son
 // maxBytes'i `.1`'e al, buyuk dosyayi sil (disk hemen bosalir, son kayitlar kalir).

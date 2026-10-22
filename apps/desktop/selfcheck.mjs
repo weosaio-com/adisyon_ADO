@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { rotatingLog } from './rotating-log.mjs';
+import { isEventLine, lineSplitter, rotatingLog } from './rotating-log.mjs';
 import { applyPendingRestore, ensureSecrets, restoreSkippedDialog } from './restore.mjs';
 import { spawnSync } from 'node:child_process';
 import {
@@ -58,6 +58,32 @@ const tempDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
   assert.ok(tail.endsWith('SON-KAYIT'), 'en yeni kayitlar korunur');
   assert.ok(!existsSync(path) || readFileSync(path).length === 0, 'dev dosya silinir');
   rmSync(dir, { recursive: true, force: true });
+}
+
+// --- Olaylar kaydi (PLT-14): yalniz uyari/hata satirlari, parca sinirlarinda satir bozulmaz ---
+{
+  const warn = JSON.stringify({ level: 40, time: 1, msg: 'DB_BUSY POST /api/v1/orders' });
+  const info = JSON.stringify({ level: 30, time: 1, msg: 'request completed' });
+  assert.strictEqual(isEventLine(warn, 'stdout'), true);
+  assert.strictEqual(isEventLine(JSON.stringify({ level: 50, msg: 'x' }), 'stdout'), true);
+  assert.strictEqual(isEventLine(info, 'stdout'), false, 'basarili istek olaylara girmez');
+  assert.strictEqual(isEventLine('[Nest] duz metin', 'stdout'), false);
+  assert.strictEqual(isEventLine('{bozuk', 'stdout'), false);
+  assert.strictEqual(isEventLine('TypeError: x\n    at y', 'stderr'), true, 'stderr (yigin) girer');
+  assert.strictEqual(isEventLine('   ', 'stderr'), false);
+
+  const lines = [];
+  const split = lineSplitter((line) => lines.push(line));
+  const turkish = Buffer.from(`${warn.replace('DB_BUSY', 'Sistem meşgul')}\n${info}\nyar`);
+  const cut = turkish.indexOf(Buffer.from('ş')) + 1; // cok baytli karakterin ortasindan bol
+  split(turkish.subarray(0, cut));
+  split(turkish.subarray(cut));
+  assert.deepStrictEqual(lines, [warn.replace('DB_BUSY', 'Sistem meşgul'), info]);
+  split('im satir\n');
+  assert.strictEqual(lines[2], 'yarim satir', 'yarim satir sonraki parcayla birlesir');
+  const long = [];
+  lineSplitter((line) => long.push(line), 32)('x'.repeat(40));
+  assert.deepStrictEqual(long, ['x'.repeat(40)], 'asiri uzun satir sinirda verilir');
 }
 
 // --- ensureSecrets: eksikler uretilir, mevcutlar korunur ---
@@ -539,6 +565,17 @@ assert.match(restoreSkippedDialog({ retry: false }, 'C:/k.log').message, /C:\/k\
       env: process.env,
       onOutput: () => {},
     });
+  // Cikti akis adiyla gelir (olaylar kaydi stderr'i ayri suzer).
+  const streams = new Set();
+  const noisy = startBackendProcess({
+    execPath: process.execPath,
+    entry: script('noisy.cjs', "console.log('o'); console.error('e');\n"),
+    env: process.env,
+    onOutput: (_chunk, stream) => streams.add(stream),
+  });
+  await new Promise((resolve) => noisy.once('exit', resolve));
+  assert.deepStrictEqual([...streams].sort(), ['stderr', 'stdout']);
+
   const polite = start(
     script(
       'polite.cjs',

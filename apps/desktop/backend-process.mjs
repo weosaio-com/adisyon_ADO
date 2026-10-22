@@ -10,8 +10,9 @@ export const KILL_WAIT_MS = 5_000;
 
 export function startBackendProcess({ execPath, entry, env, onOutput }) {
   const child = spawn(execPath, [entry], { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
-  child.stdout.on('data', onOutput);
-  child.stderr.on('data', onOutput);
+  // Akis adi ikinci arguman: olaylar kaydi stderr'i ve stdout'u ayri suzer (PLT-14).
+  child.stdout.on('data', (chunk) => onOutput(chunk, 'stdout'));
+  child.stderr.on('data', (chunk) => onOutput(chunk, 'stderr'));
   return child;
 }
 

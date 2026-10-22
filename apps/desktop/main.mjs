@@ -3,7 +3,7 @@
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import { join } from 'node:path';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { rotatingLog } from './rotating-log.mjs';
+import { EVENTS_LOG_MAX_BYTES, isEventLine, lineSplitter, rotatingLog } from './rotating-log.mjs';
 import { applyPendingRestore, ensureSecrets, restoreSkippedDialog } from './restore.mjs';
 import { appConfigEnv, loadAppConfig } from './app-config.mjs';
 import { applyMigrations } from './migrations.mjs';
@@ -36,6 +36,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let backend = null;
 let backendExit = null;
 let writeLog = () => {};
+// Uzun omurlu olaylar kaydi (ado-olaylar.log): kabuk satirlari + backend uyari/hata satirlari.
+let writeEvents = () => {};
 let mainWindow = null;
 let appConfig = null;
 let updater = null;
@@ -69,7 +71,12 @@ const isAlive = () =>
     .catch(() => false);
 
 const isLocal = (url) => url === BASE || url.startsWith(`${BASE}/`);
-const log = (line) => writeLog(Buffer.from(`[desktop] ${line}\n`));
+// Kabuk satirlari zaman damgali: donma aninin izi backend satirlariyla eslestirilebilsin.
+const log = (line) => {
+  const text = `${new Date().toISOString()} [desktop] ${line}\n`;
+  writeLog(Buffer.from(text));
+  writeEvents(text);
+};
 
 // Paketli surumde: DB userData'da yasar (kurulum dizini yazilabilir degil),
 // gizli anahtarlar ilk aciliste uretilip userData/secrets.json'da saklanir.
@@ -129,13 +136,18 @@ function startBackend() {
     : join(import.meta.dirname, '..', 'backend');
   // ELECTRON_RUN_AS_NODE: electron.exe'yi duz node olarak kullan (sistemde node gerekmez).
   // IPC kanali: kapanista duzgun durdurma; kabuk cokerse backend kendini kapatir.
+  const events = {
+    stdout: lineSplitter((line) => isEventLine(line, 'stdout') && writeEvents(`${line}\n`)),
+    stderr: lineSplitter((line) => isEventLine(line, 'stderr') && writeEvents(`${line}\n`)),
+  };
   backend = startBackendProcess({
     execPath: process.execPath,
     entry: join(base, 'dist', 'main.js'),
     env: { ...process.env, ...(app.isPackaged ? packagedEnv() : {}), ELECTRON_RUN_AS_NODE: '1' },
-    onOutput: (chunk) => {
+    onOutput: (chunk, stream) => {
       writeLog(chunk);
       recentOutput.push(chunk);
+      (stream === 'stderr' ? events.stderr : events.stdout)(chunk);
     },
   });
   // Acilis beklemesi bununla yarisir: backend coker ya da baslatilamazsa hemen anlasilir.
@@ -383,9 +395,11 @@ async function openWindow() {
 }
 
 async function start() {
-  // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin.
+  // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin. Olaylar kaydi kucuk
+  // (2 MB x 2) ama yalniz uyari/hata ve kabuk satirlarini tuttugu icin haftalarca geriye gider.
   logPath = join(app.getPath('userData'), 'backend-error.log');
   writeLog = rotatingLog(logPath);
+  writeEvents = rotatingLog(join(app.getPath('userData'), 'ado-olaylar.log'), EVENTS_LOG_MAX_BYTES);
   try {
     if (app.isPackaged || !(await isUp())) {
       // Dev'de backend'i kendin calistiriyorsan buraya dusmez.
