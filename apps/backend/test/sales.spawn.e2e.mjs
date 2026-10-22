@@ -180,6 +180,90 @@ try {
     t.check((await getOrder(order.id)).grandTotal === 5000, 'SAT-12 adisyon toplami bozulmaz');
     must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
   }
+
+  // --- SAT-1/7: toplami 0 olan ya da kalani 0'a dusen adisyon kapanir ---
+  {
+    const tableStatus = async (id) => must(await call('GET', `/tables/${id}`), 'masa').status;
+    // SAT-1: tam indirim (ikram) -> 0 TL; odeme ucu reddeder, "kapat" ucu kapatir.
+    const comp = must(await call('POST', '/orders', { tableId: tables[0].id }), 'masa ac');
+    must(
+      await call('POST', `/orders/${comp.id}/items`, { productId: p50.id, quantity: 1000 }),
+      'kalem',
+    );
+    must(
+      await call('POST', `/orders/${comp.id}/discounts`, {
+        type: 'percent',
+        value: 100,
+        reason: 'İkram',
+      }),
+      'tam indirim',
+    );
+    const closed = await call('POST', `/orders/${comp.id}/close`);
+    t.check(
+      closed.status === 201 && closed.data.status === 'completed' && closed.data.isPaid,
+      `SAT-1 0 TL adisyon kapanir (${closed.status} ${closed.data.status})`,
+    );
+    t.check(!!closed.data.completedAt, 'SAT-1 kapanis zamani yazilir');
+    t.check((await tableStatus(tables[0].id)) === 'empty', 'SAT-1 masa bosalir');
+    const again = await call('POST', `/orders/${comp.id}/close`);
+    t.check(
+      code(again) === 'ORDER_NOT_OPEN',
+      `SAT-1 kapali adisyon tekrar kapanmaz (${code(again)})`,
+    );
+
+    const free = await product('Su (ikram)', 0);
+    const water = await takeaway(free);
+    const waterClosed = await call('POST', `/orders/${water.id}/close`);
+    t.check(
+      waterClosed.data.status === 'completed',
+      `SAT-1 sifir fiyatli urun adisyonu kapanir (${waterClosed.status})`,
+    );
+
+    const unpaid = await takeaway(p50);
+    const balance = await call('POST', `/orders/${unpaid.id}/close`);
+    t.check(
+      balance.status === 409 && code(balance) === 'ORDER_HAS_BALANCE',
+      `SAT-1 kalan tutarli adisyon kapatilamaz (${balance.status} ${code(balance)})`,
+    );
+    must(await call('POST', `/orders/${unpaid.id}/cancel`, { reason: 'test' }), 'iptal');
+    const empty = must(await call('POST', '/orders', { type: 'takeaway' }), 'bos adisyon');
+    const emptyClose = await call('POST', `/orders/${empty.id}/close`);
+    t.check(
+      code(emptyClose) === 'ORDER_EMPTY',
+      `SAT-1 bos adisyon kapat yerine iptal (${code(emptyClose)})`,
+    );
+    must(await call('POST', `/orders/${empty.id}/discard`), 'bos adisyon kapat');
+
+    // SAT-7: 60 TL, 50 TL kart, 10 TL'lik kalem iptal -> kalan 0, adisyon kendiliginden kapanir.
+    const part = must(await call('POST', '/orders', { tableId: tables[1].id }), 'masa ac');
+    must(
+      await call('POST', `/orders/${part.id}/items`, { productId: p50.id, quantity: 1000 }),
+      'kebap',
+    );
+    const withBread = must(
+      await call('POST', `/orders/${part.id}/items`, { productId: p10.id, quantity: 1000 }),
+      'ekmek',
+    );
+    const bread = withBread.items.find((i) => i.productId === p10.id);
+    must(await call('POST', `/orders/${part.id}/send-kitchen`), 'mutfaga');
+    must(
+      await call('POST', `/orders/${part.id}/payments`, {
+        method: 'card',
+        amount: 5000,
+        idempotencyKey: key('part'),
+      }),
+      'kismi odeme',
+    );
+    const voided = await call('POST', `/orders/${part.id}/items/${bread.id}/void`, {
+      reason: 'Müşteri vazgeçti',
+    });
+    const afterVoid = await getOrder(part.id);
+    t.check(
+      voided.status === 201 && afterVoid.status === 'completed' && afterVoid.isPaid,
+      `SAT-7 kalan 0 olunca adisyon kapanir (${voided.status} ${afterVoid.status})`,
+    );
+    t.check((await tableStatus(tables[1].id)) === 'empty', 'SAT-7 masa bosalir');
+  }
 } finally {
   await backend.stop(child);
 }

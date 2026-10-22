@@ -43,6 +43,13 @@ export const smallInt = (label: string) =>
     .min(-MAX_SMALL_INT, `${label} çok küçük.`)
     .max(MAX_SMALL_INT, `${label} çok büyük.`);
 
+const TL = new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Kurus -> "1.234,50 TL" (hata mesajlari icin). */
+export function formatTl(kurus: number): string {
+  return `${TL.format(kurus / 100)} TL`;
+}
+
 /**
  * Hesaplanan tutar (kalem tutari = fiyat x miktar, adisyon toplami) siniri asarsa
  * yazmadan once 400 AMOUNT_LIMIT_EXCEEDED: tek tek gecerli girdiler carpimda tasmasin.

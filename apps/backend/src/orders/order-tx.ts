@@ -58,6 +58,31 @@ export async function netPaidTx(tx: Tx, orderId: string): Promise<number> {
   );
 }
 
+/**
+ * Adisyonu tamamlar (odeme yolu ve odemesiz kapanis ortak): completed + isPaid,
+ * kapanis ve completedAt = simdi, masasi baska aktif adisyon yoksa bosalir.
+ * Kosullu yazim: adisyon okundugu surumde ve acik olmali (yoksa ORDER_CHANGED).
+ * order.paid olayini cagiran yayinlar (odeme bilgisi cagirana ait).
+ */
+export async function completeOrderTx(
+  tx: Tx,
+  order: { id: string; version: number; branchId: string; tableId: string | null },
+  closedBy: string,
+  data: Prisma.OrderUncheckedUpdateManyInput = {},
+) {
+  const now = new Date();
+  const updated = await writeOrderTx(tx, order, {
+    ...data,
+    isPaid: true,
+    status: OrderStatus.Completed,
+    closedBy,
+    closedAt: now,
+    completedAt: now,
+  });
+  if (order.tableId) await freeTableIfIdleTx(tx, order.branchId, order.tableId);
+  return updated;
+}
+
 /** Masada baska aktif (acik/bekleyen) adisyon kalmadiysa masayi bosaltir. */
 export async function freeTableIfIdleTx(tx: Tx, branchId: string, tableId: string) {
   const stillActive = await tx.order.count({

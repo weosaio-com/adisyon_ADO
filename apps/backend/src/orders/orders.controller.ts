@@ -122,6 +122,13 @@ export class OrdersController {
     return this.orders.discardEmptyOrder(user, id);
   }
 
+  // Toplami karsilanmis (0 TL ya da tamami odenmis) acik adisyonu kapatir.
+  @Post(':id/close')
+  @RequirePermissions(Permission.PaymentTake)
+  close(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.orders.closeOrder(user, id);
+  }
+
   @Post(':id/cancel')
   @RequirePermissions(Permission.OrderCancel)
   cancel(

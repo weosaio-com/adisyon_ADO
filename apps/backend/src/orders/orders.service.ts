@@ -22,10 +22,11 @@ import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { LicenseService } from '../license/license.service';
 import { computeItemTotals, applyOrderDiscounts } from './orders.calc';
-import { assertMoneyWithinLimit } from '../payments/money-limits';
+import { assertMoneyWithinLimit, formatTl } from '../payments/money-limits';
 import {
   ACTIVE_ORDER_STATUSES,
   activeOrderOnTableTx,
+  completeOrderTx,
   freeTableIfIdleTx,
   isUniqueViolation,
   netPaidTx,
@@ -173,6 +174,43 @@ export class OrdersService {
     return this.orderWithItemsOrThrow(user.branchId, id);
   }
 
+  // Odemesi tamamlanmis acik adisyonu kapatir: toplami 0 olan (tam indirim/ikram, sifir
+  // fiyatli urun) ya da kalani 0'a dusmus adisyon. Para hareketi yazilmaz.
+  async closeOrder(user: AuthUser, id: string) {
+    const { before, updated } = await this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOpenOrder(tx, user.branchId, id);
+      const activeItems = await tx.orderItem.count({
+        where: { orderId: id, deletedAt: null, status: { not: OrderItemStatus.Cancelled } },
+      });
+      if (activeItems === 0) {
+        throw new ConflictException({
+          code: 'ORDER_EMPTY',
+          message: 'Adisyonda ürün yok; boş adisyonu kapatmak için iptal edin.',
+        });
+      }
+      const paid = await netPaidTx(tx, id);
+      if (paid < order.grandTotal) {
+        throw new ConflictException({
+          code: 'ORDER_HAS_BALANCE',
+          message: `Adisyonda ödenmemiş ${formatTl(order.grandTotal - paid)} var; kapatmak için ödeme alın.`,
+        });
+      }
+      return { before: order, updated: await this.settleInTx(tx, user, order) };
+    });
+    await this.audit.record({
+      branchId: user.branchId,
+      action: 'order.close',
+      entityType: 'order',
+      entityId: id,
+      userId: user.userId,
+      oldValue: before,
+      newValue: updated,
+      ...this.provenance(user),
+    });
+    await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
+    return this.orderWithItems(id);
+  }
+
   async cancelOrder(user: AuthUser, id: string, dto: CancelOrderDto) {
     const { before, updated } = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.branchId, id);
@@ -247,7 +285,7 @@ export class OrdersService {
             },
           });
         }
-        return { item, product, lineTotal, updated: await this.recompute(tx, order) };
+        return { item, product, lineTotal, updated: await this.recompute(tx, user, order) };
       });
     } catch (e) {
       if (dto.clientOpId && isUniqueViolation(e)) {
@@ -291,7 +329,7 @@ export class OrdersService {
         lineTotal: gross - item.lineDiscount,
       });
       // Toplam alinan odemenin altina inerse recompute ORDER_PAID_EXCEEDS_TOTAL atar (geri alinir).
-      return { item, updated: await this.recompute(tx, order) };
+      return { item, updated: await this.recompute(tx, user, order) };
     });
     await this.audit.record({
       branchId: user.branchId,
@@ -312,7 +350,7 @@ export class OrdersService {
       const item = await this.itemOrThrow(orderId, itemId, tx);
       this.assertItemEditable(item);
       await this.writeItem(tx, item, { deletedAt: new Date() });
-      return { item, updated: await this.recompute(tx, order) };
+      return { item, updated: await this.recompute(tx, user, order) };
     });
     await this.audit.record({
       branchId: user.branchId,
@@ -423,7 +461,7 @@ export class OrdersService {
         voidedBy: user.userId,
         voidReason: dto.reason ?? null,
       });
-      const updated = await this.recompute(tx, order);
+      const updated = await this.recompute(tx, user, order);
       await this.events.publishDurable(
         tx,
         createDomainEvent(
@@ -600,7 +638,7 @@ export class OrdersService {
           completedAt: null,
           note: `Birlestirildi -> ${target.orderNo}`,
         });
-        const updatedTarget = await this.recompute(tx, target);
+        const updatedTarget = await this.recompute(tx, user, target);
         if (source.tableId) await freeTableIfIdleTx(tx, user.branchId, source.tableId);
         return { target, source, updatedTarget, cancelledSource };
       },
@@ -687,8 +725,8 @@ export class OrdersService {
       // altina dusuremez (recompute ORDER_PAID_EXCEEDS_TOTAL atar, islem geri alinir).
       return {
         source,
-        updatedSource: await this.recompute(tx, source),
-        newOrder: await this.recompute(tx, created),
+        updatedSource: await this.recompute(tx, user, source),
+        newOrder: await this.recompute(tx, user, created),
       };
     });
 
@@ -841,7 +879,7 @@ export class OrdersService {
         },
       });
       // Toplam alinan odemenin altina inerse recompute ORDER_PAID_EXCEEDS_TOTAL atar.
-      return { discount, updated: await this.recompute(tx, order) };
+      return { discount, updated: await this.recompute(tx, user, order) };
     });
     await this.audit.record({
       branchId: user.branchId,
@@ -871,7 +909,7 @@ export class OrdersService {
         data: { deletedAt: new Date(), version: { increment: 1 }, syncState: 'pending' },
       });
       if (removed.count !== 1) throw orderChangedError();
-      return { discount, updated: await this.recompute(tx, order) };
+      return { discount, updated: await this.recompute(tx, user, order) };
     });
     await this.audit.record({
       branchId: user.branchId,
@@ -962,17 +1000,46 @@ export class OrdersService {
   // Toplamlari yeniden hesaplar ve adisyona KOSULLU yazar: adisyon islem icinde
   // okundugu surumde ve acik degilse (arada odendi/kapandi) 409 -> islem geri alinir.
   // Kapali adisyonun toplami asla degismez.
-  private async recompute(tx: Tx, order: { id: string; version: number }) {
+  private async recompute(tx: Tx, user: AuthUser, order: Order) {
     const totals = await this.computeTotals(tx, order.id);
+    const paid = await netPaidTx(tx, order.id);
     // Toplami DUSUREN islem (indirim/void/miktar azalt/bolme) alinan odemenin
     // altina inemez: once iade gerekir.
-    if (totals.grandTotal < (await netPaidTx(tx, order.id))) {
+    if (totals.grandTotal < paid) {
       throw new ConflictException({
         code: 'ORDER_PAID_EXCEEDS_TOTAL',
         message: 'Yeni toplam alinan odemenin altina inemez; once odemeyi iade edin.',
       });
     }
+    // Kismi odemeden sonra toplam alinan tutara inerse (void/indirim/bolme) adisyon
+    // odeme yolundaki gibi kapanir; aksi halde kalan 0 olan adisyon sonsuza dek acik kalirdi.
+    if (paid > 0 && paid >= totals.grandTotal) return this.settleInTx(tx, user, order, totals);
     return writeOrderTx(tx, order, totals);
+  }
+
+  // Odemesiz tamamlama (toplam karsilanmis): kapat + masa bosalt + order.paid (tutar 0).
+  // order.paid dinleyicileri: kasa/veresiye yontem 'none' oldugu icin hareket yazmaz,
+  // yazdirma adisyon odendi oldugu icin musteri fisini bir kez basar.
+  private async settleInTx(
+    tx: Tx,
+    user: AuthUser,
+    order: Order,
+    data: Prisma.OrderUncheckedUpdateManyInput = {},
+  ) {
+    const updated = await completeOrderTx(tx, order, user.userId, data);
+    await this.events.publishDurable(
+      tx,
+      createDomainEvent(
+        DomainEventName.OrderPaid,
+        { orderId: order.id, paymentId: null, amount: 0, method: 'none' },
+        {
+          branchId: user.branchId,
+          actorId: user.userId,
+          ...(user.deviceId ? { deviceId: user.deviceId } : {}),
+        },
+      ),
+    );
+    return updated;
   }
 
   // orderNo = YYYYMMDD-#### (is-gunu bazli gunluk sira). Transaction icinde cagrilir
