@@ -23,6 +23,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { RecordPaymentDto, ReversePaymentDto } from './dto/payments.schemas';
 import { allocatePayment, settlePayment } from './payments.calc';
 import { formatTl } from './money-limits';
+import { completeOrderTx, writeOrderTx } from '../orders/order-tx';
 
 /**
  * Odeme modulu (PR3): adisyona odeme al (append-only, cift-cekim idempotent),
@@ -166,29 +167,11 @@ export class PaymentsService {
           },
         });
 
-        const orderUpdate = await tx.order.updateMany({
-          where: { id: orderId, version: order.version, status: OrderStatus.Open },
-          data: fullyPaid
-            ? {
-                isPaid: true,
-                status: OrderStatus.Completed,
-                closedBy: user.userId,
-                closedAt: new Date(),
-                completedAt: order.completedAt ?? new Date(),
-                version: { increment: 1 },
-                syncState: 'pending',
-              }
-            : {
-                version: { increment: 1 },
-                syncState: 'pending',
-              },
-        });
-        if (orderUpdate.count !== 1) {
-          throw new ConflictException({
-            code: 'ORDER_CHANGED',
-            message: 'Adisyon es zamanli olarak degisti. Lutfen tekrar deneyin.',
-          });
-        }
+        // Kosullu yazim (surum + acik): arada adisyon degistiyse 409 ORDER_CHANGED.
+        // Tam odemede ortak tamamlama: completedAt = SON tam odeme ani (iade ile yeniden
+        // acilip tekrar odenen adisyon satisa bugunun tarihiyle girer), masa bosalir.
+        if (fullyPaid) await completeOrderTx(tx, order, user.userId);
+        else await writeOrderTx(tx, order, {});
 
         if (cashSession) {
           await tx.cashTransaction.create({
@@ -227,29 +210,6 @@ export class PaymentsService {
           });
         }
 
-        if (fullyPaid) {
-          // Baska acik adisyon yoksa masayi bosalt (split adisyon guvenligi).
-          if (order.tableId) {
-            const stillOpen = await tx.order.count({
-              where: {
-                branchId: user.branchId,
-                tableId: order.tableId,
-                status: OrderStatus.Open,
-                deletedAt: null,
-              },
-            });
-            if (stillOpen === 0) {
-              await tx.table.update({
-                where: { id: order.tableId },
-                data: {
-                  status: TableStatus.Empty,
-                  version: { increment: 1 },
-                  syncState: 'pending',
-                },
-              });
-            }
-          }
-        }
         await this.events.publishDurable(
           tx,
           createDomainEvent(
@@ -451,23 +411,20 @@ export class PaymentsService {
         const netPaid = (charges._sum.amount ?? 0) - (refunds._sum.amount ?? 0);
 
         if (order.isPaid && netPaid < order.grandTotal) {
-          const reopened = await tx.order.updateMany({
-            where: { id: orderId, version: order.version },
-            data: {
+          // Yeniden acilan adisyon satis degildir: completedAt silinir (tekrar tam
+          // odendiginde o anla yazilir); raporlar onu iade gunune kadar satis saymaz.
+          await writeOrderTx(
+            tx,
+            order,
+            {
               isPaid: false,
               status: OrderStatus.Open,
               closedBy: null,
               closedAt: null,
-              version: { increment: 1 },
-              syncState: 'pending',
+              completedAt: null,
             },
-          });
-          if (reopened.count !== 1) {
-            throw new ConflictException({
-              code: 'ORDER_CHANGED',
-              message: 'Adisyon es zamanli olarak degisti. Lutfen tekrar deneyin.',
-            });
-          }
+            [OrderStatus.Completed],
+          );
           if (order.tableId) {
             await tx.table.update({
               where: { id: order.tableId },

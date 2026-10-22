@@ -20,7 +20,7 @@ model Order {
   openedAt      DateTime        @map("opened_at")
   closedBy      String?         @map("closed_by")
   closedAt      DateTime?       @map("closed_at")
-  completedAt   DateTime?       @map("completed_at") // ilk tam odeme zamani, iade silmez
+  completedAt   DateTime?       @map("completed_at") // son tam odeme zamani; iade ile yeniden acilinca ve iptalde silinir
   guestCount    Int             @default(1) @map("guest_count")
   note          String?
   subtotal      Int             @default(0) // kurus

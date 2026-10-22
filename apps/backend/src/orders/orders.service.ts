@@ -949,6 +949,7 @@ export class OrdersService {
         status: OrderStatus.Cancelled,
         closedBy: user.userId,
         closedAt: new Date(),
+        completedAt: null, // iptal satis degildir (iade + iptal Z raporunda kalmaz)
         note: reason ?? order.note,
       },
       ACTIVE_ORDER_STATUSES,

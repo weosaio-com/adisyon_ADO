@@ -302,6 +302,53 @@ try {
       `SAT-2 kasaya yalniz adisyon tutari girer (${drawer?.amount})`,
     );
   }
+
+  // --- SAT-8: iade + iptal satis sayilmaz; yeniden odemede completedAt son tam odeme ---
+  {
+    const payCash = async (orderId) =>
+      must(
+        await call('POST', `/orders/${orderId}/payments`, {
+          method: 'cash',
+          amount: 5000,
+          idempotencyKey: key('pay'),
+        }),
+        'odeme',
+      );
+    const refund = async (orderId, paymentId) =>
+      must(
+        await call('POST', `/orders/${orderId}/payments/${paymentId}/reverse`, {
+          reason: 'Yanlış ödeme yöntemi',
+          idempotencyKey: key('rev'),
+        }),
+        'iade',
+      );
+    const wine = await takeaway(p50);
+    const paid = await payCash(wine.id);
+    await refund(wine.id, paid.payments[0].id);
+    const reopened = await getOrder(wine.id);
+    t.check(
+      reopened.status === 'open' && reopened.completedAt === null,
+      `SAT-8 iade ile acilan adisyonun kapanis zamani silinir (${reopened.status})`,
+    );
+    must(await call('POST', `/orders/${wine.id}/cancel`, { reason: 'Müşteri iadesi' }), 'iptal');
+    const cancelled = await getOrder(wine.id);
+    t.check(
+      cancelled.status === 'cancelled' && cancelled.completedAt === null,
+      'SAT-8 iptal edilen adisyonun completedAt bos',
+    );
+
+    const again = await takeaway(p50);
+    const firstPay = await payCash(again.id);
+    const firstAt = (await getOrder(again.id)).completedAt;
+    await refund(again.id, firstPay.payments[0].id);
+    await new Promise((r) => setTimeout(r, 20));
+    await payCash(again.id);
+    const repaid = await getOrder(again.id);
+    t.check(
+      repaid.status === 'completed' && new Date(repaid.completedAt) > new Date(firstAt),
+      'SAT-8 yeniden odenen adisyonda completedAt son tam odeme ani',
+    );
+  }
 } finally {
   await backend.stop(child);
 }
