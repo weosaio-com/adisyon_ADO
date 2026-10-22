@@ -264,6 +264,44 @@ try {
     );
     t.check((await tableStatus(tables[1].id)) === 'empty', 'SAT-7 masa bosalir');
   }
+
+  // --- SAT-2: fazla odeme satis gibi kasaya girmez ---
+  {
+    const order = await takeaway(p50);
+    const card = await call('POST', `/orders/${order.id}/payments`, {
+      method: 'card',
+      amount: 7000,
+      allowOverpay: true,
+      idempotencyKey: key('over'),
+    });
+    t.check(
+      card.status === 400 && code(card) === 'BILL_OVERPAY',
+      `SAT-2 kartla kalandan fazla tahsilat reddedilir (${card.status} ${code(card)})`,
+    );
+    const cash = must(
+      await call('POST', `/orders/${order.id}/payments`, {
+        method: 'cash',
+        amount: 7000,
+        allowOverpay: true,
+        idempotencyKey: key('over'),
+      }),
+      'nakit fazla odeme',
+    );
+    const pay = cash.payments[0];
+    t.check(
+      cash.status === 'completed' &&
+        pay.amount === 5000 &&
+        pay.received === 7000 &&
+        pay.change === 2000,
+      `SAT-2 nakitte fazlasi para ustu (${pay.amount}/${pay.received}/${pay.change})`,
+    );
+    const session = must(await call('GET', '/cash/sessions/active'), 'kasa');
+    const drawer = session.transactions.find((tx) => tx.relatedPaymentId === pay.id);
+    t.check(
+      drawer?.amount === 5000,
+      `SAT-2 kasaya yalniz adisyon tutari girer (${drawer?.amount})`,
+    );
+  }
 } finally {
   await backend.stop(child);
 }

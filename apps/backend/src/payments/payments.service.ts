@@ -21,7 +21,8 @@ import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { RecordPaymentDto, ReversePaymentDto } from './dto/payments.schemas';
-import { settlePayment } from './payments.calc';
+import { allocatePayment, settlePayment } from './payments.calc';
+import { formatTl } from './money-limits';
 
 /**
  * Odeme modulu (PR3): adisyona odeme al (append-only, cift-cekim idempotent),
@@ -89,21 +90,29 @@ export class PaymentsService {
             message: 'Adisyon zaten tamamen odendi.',
           });
         }
-        // Kalandan fazla tahsilat: normalde engellenir; kullanici acikca
-        // onayladiginda (allowOverpay) uyari ile devam edilebilir.
-        if (dto.amount > remaining && !dto.allowOverpay) {
+        // Kalandan fazla tutar: nakitte fazlasi para ustu (adisyona ve kasaya yalniz kalan
+        // yazilir); kart/havale/QR/veresiyede fazla tahsilat reddedilir (allowOverpay artik
+        // etkisiz: fazla tutar satis gibi kasaya ve Z raporuna giriyordu).
+        const allocated = allocatePayment({
+          remaining,
+          amount: dto.amount,
+          method: dto.method,
+          ...(dto.received !== undefined ? { received: dto.received } : {}),
+        });
+        if (!allocated) {
           throw new BadRequestException({
             code: 'BILL_OVERPAY',
-            message: `Odeme tutari kalan bakiyeyi (${remaining}) asamaz.`,
+            message: `Kalan tutardan (${formatTl(remaining)}) fazla tahsil edilemez; fazlası yalnız nakitte para üstü olarak verilir.`,
           });
         }
+        const amount = allocated.amount;
 
         const { received, change, fullyPaid } = settlePayment({
           grandTotal: order.grandTotal,
           alreadyPaid,
-          amount: dto.amount,
+          amount,
           method: dto.method,
-          ...(dto.received !== undefined ? { received: dto.received } : {}),
+          ...(allocated.received !== undefined ? { received: allocated.received } : {}),
         });
 
         const debtAccount =
@@ -145,7 +154,7 @@ export class PaymentsService {
             orderId,
             method: dto.method,
             direction: PaymentDirection.Charge,
-            amount: dto.amount,
+            amount,
             received,
             change,
             reference: dto.reference ?? null,
@@ -187,7 +196,7 @@ export class PaymentsService {
               id: newId(),
               cashSessionId: cashSession.id,
               type: CashTxnType.Sale,
-              amount: dto.amount,
+              amount,
               method: dto.method,
               relatedPaymentId: paymentId,
               createdBy: user.userId,
@@ -203,7 +212,7 @@ export class PaymentsService {
               id: newId(),
               debtAccountId: debtAccount.id,
               type: DebtTxnType.DebtAdd,
-              amount: dto.amount,
+              amount,
               relatedOrderId: orderId,
               relatedPaymentId: paymentId,
               createdBy: user.userId,
@@ -214,7 +223,7 @@ export class PaymentsService {
           });
           await tx.debtAccount.update({
             where: { id: debtAccount.id },
-            data: { balance: { increment: dto.amount }, version: { increment: 1 } },
+            data: { balance: { increment: amount }, version: { increment: 1 } },
           });
         }
 
@@ -248,7 +257,7 @@ export class PaymentsService {
             {
               orderId,
               paymentId,
-              amount: dto.amount,
+              amount,
               method: dto.method,
               ...(dto.customerId ? { customerId: dto.customerId } : {}),
             },
