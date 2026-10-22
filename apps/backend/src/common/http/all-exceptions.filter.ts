@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ZodError } from 'zod';
+import { defaultErrorMap, ZodError, type ZodIssue } from 'zod';
 import { Prisma } from '@prisma/client';
 import { DB_BUSY, DB_BUSY_MESSAGE, isDatabaseBusyError } from './db-busy';
 
@@ -15,7 +15,30 @@ interface ErrorBody {
   code: string;
   message: string;
   details?: Array<{ field: string; issue: string }>;
+  /** Hatanin baglami (or. TABLE_HAS_OPEN_ORDER icin `orderId`). API_DESIGN.md §2. */
+  data?: Record<string, unknown>;
 }
+
+const VALIDATION_MESSAGE = 'Doğrulama hatası.';
+
+/**
+ * Dogrulama hatasinin zarf mesaji: ilk sorunun semada verilmis (Turkce) mesaji, boylece sinir
+ * hatalari (or. tutar ust siniri) ekranda anlasilir gorunur. Zod'un varsayilan Ingilizce mesajlari
+ * ("Required", "Expected number...") kullaniciya gosterilmez, genel metin kalir. Tum sorunlar
+ * `details`'te aynen durur.
+ */
+function validationMessage(issues: ZodIssue[]): string {
+  const first = issues[0];
+  if (!first?.message) return VALIDATION_MESSAGE;
+  const standard = defaultErrorMap(first, { data: undefined, defaultError: '' }).message;
+  return first.message === standard ? VALIDATION_MESSAGE : first.message;
+}
+
+/**
+ * HttpException yanitinda zarfin kendi alanlari; geri kalanlar (or. `orderId`) `data` altinda
+ * iletilir (alan adlari zarfla cakismaz). Nest'in `statusCode`/`error` alanlari alinmaz.
+ */
+const ENVELOPE_KEYS = new Set(['code', 'message', 'details', 'data', 'statusCode', 'error']);
 
 function defaultCodeForStatus(status: number): string {
   switch (status) {
@@ -105,7 +128,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof ZodError) {
       status = HttpStatus.UNPROCESSABLE_ENTITY;
       body.code = 'VALIDATION_ERROR';
-      body.message = 'Dogrulama hatasi.';
+      body.message = validationMessage(exception.issues);
       body.details = exception.issues.map((i) => ({
         field: i.path.join('.') || '(root)',
         issue: i.message,
@@ -131,6 +154,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const r = resp as Record<string, unknown>;
         if (typeof r['code'] === 'string') body.code = r['code'];
         if (typeof r['message'] === 'string') body.message = r['message'];
+        if (Array.isArray(r['details'])) {
+          body.details = r['details'] as NonNullable<ErrorBody['details']>;
+        }
+        const extra = Object.entries(r).filter(([key]) => !ENVELOPE_KEYS.has(key));
+        const data =
+          r['data'] && typeof r['data'] === 'object' ? (r['data'] as Record<string, unknown>) : {};
+        if (extra.length || Object.keys(data).length) {
+          body.data = { ...data, ...Object.fromEntries(extra) };
+        }
       }
     }
 

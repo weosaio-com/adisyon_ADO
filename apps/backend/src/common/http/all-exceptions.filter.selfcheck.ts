@@ -4,7 +4,8 @@ import 'reflect-metadata';
 import assert from 'node:assert';
 import { Readable } from 'node:stream';
 import * as express from 'express';
-import { PayloadTooLargeException } from '@nestjs/common';
+import { ConflictException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
+import { z } from 'zod';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
 /** express.json'u sahte bir istek akisiyla calistirir; ayristiricinin verdigi hatayi dondurur. */
@@ -21,7 +22,14 @@ function parse(body: string, { limit = '1kb', type = 'application/json' } = {}) 
 
 function run(exception: unknown) {
   let status = 0;
-  let body: { error?: { code?: string; message?: string } } = {};
+  let body: {
+    error?: {
+      code?: string;
+      message?: string;
+      details?: Array<{ field: string; issue: string }>;
+      data?: Record<string, unknown>;
+    };
+  } = {};
   const res = {
     status(code: number) {
       status = code;
@@ -49,7 +57,13 @@ function run(exception: unknown) {
     error: (m) => logged.push(`error ${m}`),
   };
   filter.catch(exception, host as never);
-  return { status, code: body.error?.code, message: body.error?.message, logged };
+  return {
+    status,
+    code: body.error?.code,
+    message: body.error?.message,
+    error: body.error,
+    logged,
+  };
 }
 
 async function main() {
@@ -88,6 +102,59 @@ async function main() {
   assert.strictEqual(plain.status, 500);
   assert.strictEqual(plain.code, 'INTERNAL_ERROR');
   assert.ok(plain.logged.some((line) => line.startsWith('error ')));
+
+  // Dogrulama: semada verilmis Turkce mesaj zarfa cikar (F2: tutar siniri gibi); ayrintilar aynen.
+  const limit = z.object({ amount: z.number().max(100_000, 'Tutar üst sınırı aşıldı.') });
+  const limited = run(limit.safeParse({ amount: 500_000 }).error);
+  assert.strictEqual(limited.status, 422);
+  assert.strictEqual(limited.code, 'VALIDATION_ERROR');
+  assert.strictEqual(limited.message, 'Tutar üst sınırı aşıldı.');
+  assert.deepStrictEqual(limited.error?.details, [
+    { field: 'amount', issue: 'Tutar üst sınırı aşıldı.' },
+  ]);
+  const custom = z.object({
+    pin: z.string().refine((v) => v.length === 4, 'PIN 4 haneli olmalı.'),
+  });
+  assert.strictEqual(run(custom.safeParse({ pin: '1' }).error).message, 'PIN 4 haneli olmalı.');
+  // Zod'un varsayilan Ingilizce mesaji kullaniciya cikmaz: genel Turkce metin, ayrinti yine var.
+  const plainZod = run(z.object({ name: z.string() }).safeParse({}).error);
+  assert.strictEqual(plainZod.message, 'Doğrulama hatası.');
+  assert.deepStrictEqual(plainZod.error?.details, [{ field: 'name', issue: 'Required' }]);
+  const tooBig = run(z.object({ n: z.number().max(5) }).safeParse({ n: 9 }).error);
+  assert.strictEqual(tooBig.message, 'Doğrulama hatası.');
+
+  // HttpException'daki ek alanlar zarfta `data` altinda (F2: TABLE_HAS_OPEN_ORDER -> orderId).
+  const conflict = run(
+    new ConflictException({
+      code: 'TABLE_HAS_OPEN_ORDER',
+      message: 'Masada başka bir aktif adisyon var.',
+      orderId: '01ORDER',
+    }),
+  );
+  assert.strictEqual(conflict.status, 409);
+  assert.strictEqual(conflict.code, 'TABLE_HAS_OPEN_ORDER');
+  assert.strictEqual(conflict.message, 'Masada başka bir aktif adisyon var.');
+  assert.deepStrictEqual(conflict.error?.data, { orderId: '01ORDER' });
+  // Zaten `data` ile gelen baglam ve `details` dizisi korunur.
+  const nested = run(
+    new ConflictException({
+      code: 'X',
+      message: 'm',
+      data: { orderId: '01A' },
+      details: [{ field: 'amount', issue: 'too_large' }],
+    }),
+  );
+  assert.deepStrictEqual(nested.error?.data, { orderId: '01A' });
+  assert.deepStrictEqual(nested.error?.details, [{ field: 'amount', issue: 'too_large' }]);
+  // Nest'in kendi alanlari (statusCode, error) zarfa sizmaz; ek alan yoksa `data` yok.
+  const notFound = run(new NotFoundException('Adisyon bulunamadı.'));
+  assert.strictEqual(notFound.code, 'NOT_FOUND');
+  assert.strictEqual(notFound.message, 'Adisyon bulunamadı.');
+  assert.strictEqual(notFound.error?.data, undefined);
+  assert.strictEqual(
+    run(new ConflictException({ code: 'C', message: 'm' })).error?.data,
+    undefined,
+  );
 
   console.log('✓ all-exceptions.filter self-check');
 }
