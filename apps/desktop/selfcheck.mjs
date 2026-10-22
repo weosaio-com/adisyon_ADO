@@ -24,7 +24,7 @@ import {
 } from './app-config.mjs';
 import { applyMigrations, backupBeforeMigrate, pendingMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
-import { createUpdater } from './updater.mjs';
+import { createUpdater, INSTALL_FAILED_MESSAGE } from './updater.mjs';
 import { generateUpdateKeyPair, signManifest } from '../../scripts/update-manifest.mjs';
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
@@ -438,12 +438,21 @@ const restoreFixture = (marker) => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const cloudUrl = `http://127.0.0.1:${server.address().port}`;
 
-  // electron-updater sahtesi: latest.yml bilgisi ve indirme ayarlanabilir.
-  const fakeUpdater = (latest = { version: '0.3.1', sha512 }, bytes = installer) => {
+  // electron-updater sahtesi: latest.yml bilgisi, indirme ve kurulum davranisi ayarlanabilir.
+  // installerPath: electron-updater'in kuracagi dosya (null: yolu kaybolmus).
+  const fakeUpdater = (
+    latest = { version: '0.3.1', sha512 },
+    bytes = installer,
+    { installerPath, onQuitAndInstall } = {},
+  ) => {
     const listeners = {};
     const calls = { feed: null, installed: null, downloaded: null };
     return {
       calls,
+      listeners,
+      get installerPath() {
+        return installerPath === undefined ? calls.downloaded : installerPath;
+      },
       on: (event, fn) => (listeners[event] = fn),
       setFeedURL: (options) => (calls.feed = options),
       checkForUpdates: async () => ({
@@ -456,12 +465,16 @@ const restoreFixture = (marker) => {
         calls.downloaded = path;
         return [path];
       },
-      quitAndInstall: (...args) => (calls.installed = args),
+      quitAndInstall: (...args) => {
+        calls.installed = args;
+        onQuitAndInstall?.(listeners);
+      },
     };
   };
   const config = { cloudUrl, channel: 'stable', updatePublicKeys: [key.publicKeyB64] };
   const make = (overrides = {}) => {
     const states = [];
+    const failures = [];
     const autoUpdater = overrides.autoUpdater ?? fakeUpdater();
     const updater = createUpdater({
       currentVersion: overrides.currentVersion ?? '0.3.0',
@@ -469,9 +482,12 @@ const restoreFixture = (marker) => {
       log: () => {},
       onStatus: (status) => states.push(status.state),
       autoUpdater,
+      onInstallFailed: (reason) => failures.push(reason),
+      installTimeoutMs: 30,
     });
-    return { updater, autoUpdater, states };
+    return { updater, autoUpdater, states, failures };
   };
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const disabled = make({ config: { updatePublicKeys: [] } });
   assert.strictEqual((await disabled.updater.check()).state, 'disabled', 'anahtarsiz: kapali');
@@ -494,6 +510,62 @@ const restoreFixture = (marker) => {
   );
   assert.ok(prepared, 'kurulumdan once hazirlik (backend kapanisi) beklenir');
   assert.deepStrictEqual(fresh.autoUpdater.calls.installed, [true, true], 'sessiz kur, yeniden ac');
+  assert.ok(fresh.updater.installing());
+  fresh.updater.quitting(); // before-quit: program kapaniyor, zaman asimi beklenmez
+  await wait(60);
+  assert.deepStrictEqual(fresh.failures, [], 'kapanan kurulum basarisiz sayilmaz');
+
+  // PLT-6: kurulum baslamazsa program "guncelleniyor"da kapali kalmaz.
+  // a) electron-updater dosyanin yolunu kaybetmis: backend durdurulmadan reddedilir.
+  const lost = make({ autoUpdater: fakeUpdater(undefined, installer, { installerPath: null }) });
+  await lost.updater.check();
+  let stopped = false;
+  const stopBackend = async () => {
+    stopped = true;
+  };
+  assert.strictEqual(await lost.updater.install('0.3.1', stopBackend), false);
+  assert.strictEqual(stopped, false, 'kurulum dosyasi hazir degilse backend durdurulmaz');
+  assert.match(lost.updater.status().error, /hazır değil/);
+  assert.strictEqual(lost.autoUpdater.calls.installed, null);
+  // b) Yarim/eksik dosya (boyut imzali bilgiden farkli): backend durdurulmaz.
+  const short = make();
+  await short.updater.check();
+  writeFileSync(short.autoUpdater.calls.downloaded, installer.subarray(0, 1000));
+  assert.strictEqual(await short.updater.install('0.3.1', stopBackend), false);
+  assert.strictEqual(stopped, false);
+  assert.match(short.updater.status().error, /eksik ya da değişmiş/);
+  // c) quitAndInstall kurulumu baslatamadi (electron-updater 'error' olayi, program kapanmaz).
+  const failing = make({
+    autoUpdater: fakeUpdater(undefined, installer, {
+      onQuitAndInstall: (listeners) =>
+        listeners.error?.(new Error("No update filepath provided, can't quit and install")),
+    }),
+  });
+  await failing.updater.check();
+  assert.strictEqual(await failing.updater.install('0.3.1', stopBackend), false);
+  assert.ok(stopped, 'backend durdurulmustu');
+  assert.deepStrictEqual(failing.failures, ["No update filepath provided, can't quit and install"]);
+  assert.strictEqual(failing.updater.status().state, 'error');
+  assert.strictEqual(failing.updater.status().error, INSTALL_FAILED_MESSAGE);
+  assert.strictEqual(failing.updater.installing(), false);
+  await wait(60);
+  assert.strictEqual(failing.failures.length, 1, 'tek kez bildirilir (zaman asimi iptal)');
+  assert.strictEqual(
+    (await failing.updater.check()).state,
+    'ready',
+    'yeniden indirilip denenebilir',
+  );
+  // d) quitAndInstall sessizce dondu, program kapanmadi: zaman asiminda basarisiz sayilir.
+  const silent = make();
+  await silent.updater.check();
+  assert.strictEqual(await silent.updater.install('0.3.1', async () => {}), true);
+  await wait(60);
+  assert.deepStrictEqual(silent.failures, ['program kurulum icin kapanmadi']);
+  assert.strictEqual(silent.updater.status().state, 'error');
+  // e) Kurulum disindaki hata olayi kurulum basarisizligi sayilmaz.
+  const idle = make();
+  idle.autoUpdater.listeners.error?.(new Error('net::ERR_INTERNET_DISCONNECTED'));
+  assert.deepStrictEqual(idle.failures, []);
 
   const current = make({ currentVersion: '0.3.1' });
   assert.strictEqual((await current.updater.check()).state, 'idle', 'ayni surum: guncel');

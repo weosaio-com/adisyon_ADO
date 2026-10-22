@@ -9,7 +9,7 @@ import { appConfigEnv, loadAppConfig } from './app-config.mjs';
 import { applyMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
 import updaterPackage from 'electron-updater';
-import { createUpdater } from './updater.mjs';
+import { createUpdater, INSTALL_ERROR_GRACE_MS } from './updater.mjs';
 import {
   BACKEND_START_TIMEOUT_MS,
   outputTail,
@@ -19,6 +19,7 @@ import {
 } from './startup.mjs';
 import {
   allowReload,
+  installFailedDialog,
   planRestart,
   restartGiveUpDialog,
   UNRESPONSIVE_PROMPT_MS,
@@ -168,6 +169,8 @@ async function restartBackend() {
   });
   if (result.ok) {
     log('backend yeniden acildi');
+    // Yeni backend guncelleme durumunu bilmez (Ayarlar > Guncelleme karti): yeniden bildirilir.
+    if (updater) sendToBackend({ type: 'update-status', ...updater.status() });
     return;
   }
   log(`backend yeniden acilamadi: ${JSON.stringify(result)}`);
@@ -248,6 +251,18 @@ async function prepareInstall() {
   }
 }
 
+// Guncelleme kurulamadi (yukleyici baslamadi ya da program kapanmadi): eskiden pencere "Program
+// guncelleniyor"da, backend kapali kaliyordu. Backend yeniden baslar, pencere arayuze doner ve
+// kullaniciya soylenir; kasa eski surumle calismayi surdurur (PLT-6).
+async function recoverFailedInstall(reason) {
+  log(`guncelleme kurulamadi (${reason}); program eski surumle devam ediyor`);
+  shuttingDown = false;
+  if (!backend) await restartBackend();
+  await mainWindow?.loadURL(BASE).catch((err) => log(`pencere yuklenemedi: ${err}`));
+  const { title, message } = installFailedDialog(logPath);
+  await showMessage({ type: 'error', title, message, buttons: ['Tamam'] });
+}
+
 // Paketli surumde guncelleyici: durum backend'e iletilir (kart), denetim kendiliginden.
 function startUpdater() {
   if (!app.isPackaged || !appConfig) return;
@@ -257,6 +272,7 @@ function startUpdater() {
     log,
     onStatus: (status) => sendToBackend({ type: 'update-status', ...status }),
     autoUpdater: updaterPackage.autoUpdater,
+    onInstallFailed: (reason) => void recoverFailedInstall(reason),
   });
   sendToBackend({ type: 'update-status', ...updater.status() });
   updater.start();
@@ -362,7 +378,20 @@ if (!app.requestSingleInstanceLock()) {
   // Kapanista backend'e duzgun kapanma firsati (en fazla 10 sn): acik istekler biter, veritabani
   // kapanir. Sonra cikis tamamlanir.
   let stopping = false;
+  let installQuitDelayed = false;
   app.on('before-quit', (event) => {
+    // Guncelleme kurulumu: yukleyici baslatilamazsa electron-updater hatayi birkac sn icinde
+    // bildirir. Kapanis o kadar bekletilir; hata gelirse program kapanmaz, geri acilir (PLT-6).
+    if (updater?.installing() && !installQuitDelayed) {
+      event.preventDefault();
+      installQuitDelayed = true;
+      setTimeout(() => {
+        if (updater.installing()) app.quit();
+        else installQuitDelayed = false;
+      }, INSTALL_ERROR_GRACE_MS);
+      return;
+    }
+    updater?.quitting();
     updater?.stop();
     shuttingDown = true;
     clearTimeout(restartTimer);

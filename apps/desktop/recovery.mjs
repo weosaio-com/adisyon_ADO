@@ -57,3 +57,15 @@ export function unresponsiveDialog() {
     buttons: ['Yeniden yükle', 'Bekle'],
   };
 }
+
+/** Guncelleme kurulamayinca (program eski surumle geri acildi) gosterilecek pencere. */
+export function installFailedDialog(logPath) {
+  return {
+    title: 'Güncelleme kurulamadı',
+    message:
+      'Yeni sürüm kurulamadı; program eski sürümle çalışmaya devam ediyor. Kayıtlı adisyonlar ve ' +
+      'ödemeler etkilenmedi.\n\nAyarlar > Güncelleme bölümünden daha sonra yeniden ' +
+      'deneyebilirsiniz. Sorun sürerse şu kayıt dosyasını destek ekibine gönderin:\n' +
+      `${logPath ?? '(bilinmiyor)'}`,
+  };
+}

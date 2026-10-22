@@ -4,6 +4,10 @@
 // ozeti imzali ozetle eslesmeli -> indirilir -> indirilen dosyanin SHA-512'si yeniden hesaplanir ve
 // imzali ozetle eslesirse "hazir". Kurulumdan hemen once ozet bir kez daha denetlenir.
 // electron-updater'in autoUpdater'i disaridan verilir (main.mjs); selfcheck sahtesiyle dener.
+// Kurulum baslamazsa (yukleyici yok/calistirilamadi, program kapanmadi) durum "error" olur ve
+// onInstallFailed cagrilir: kabuk backend'i yeniden baslatip pencereyi geri getirir (PLT-6).
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   compareVersions,
   sha512File,
@@ -15,6 +19,15 @@ import {
 /** Ilk denetim acilistan 2 dk sonra (acilis yukunu artirmasin), sonra 6 saatte bir. */
 export const FIRST_CHECK_MS = 2 * 60_000;
 export const CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+/** quitAndInstall'dan sonra program bu surede kapanmaya baslamazsa kurulum basarisiz sayilir. */
+export const INSTALL_QUIT_TIMEOUT_MS = 30_000;
+/**
+ * Kurulum icin kapanis bu kadar bekletilir (main.mjs before-quit): yukleyici baslatilamazsa
+ * electron-updater hatayi bu surede bildirir ve program kapanmadan geri acilir.
+ */
+export const INSTALL_ERROR_GRACE_MS = 3_000;
+export const INSTALL_FAILED_MESSAGE =
+  'Güncelleme kurulamadı; program eski sürümle çalışmaya devam ediyor. Daha sonra yeniden deneyin.';
 
 const message = (error) => (error instanceof Error ? error.message : String(error));
 
@@ -22,7 +35,15 @@ const message = (error) => (error instanceof Error ? error.message : String(erro
  * Guncelleyici. Profilde bulut adresi ya da guncelleme anahtari yoksa `disabled` kalir.
  * onStatus her durum degisikliginde cagrilir (backend'e iletilir).
  */
-export function createUpdater({ currentVersion, config, log, onStatus, autoUpdater }) {
+export function createUpdater({
+  currentVersion,
+  config,
+  log,
+  onStatus,
+  autoUpdater,
+  onInstallFailed = () => {},
+  installTimeoutMs = INSTALL_QUIT_TIMEOUT_MS,
+}) {
   const feed = updateFeedUrl(config.cloudUrl, config.channel);
   let status = {
     state: feed && config.updatePublicKeys.length > 0 ? 'idle' : 'disabled',
@@ -37,6 +58,7 @@ export function createUpdater({ currentVersion, config, log, onStatus, autoUpdat
   let ready = null; // { manifest, file }
   let checking = false;
   let timers = [];
+  let installTimer = null;
   const set = (patch) => {
     status = { ...status, ...patch };
     onStatus(status);
@@ -59,6 +81,38 @@ export function createUpdater({ currentVersion, config, log, onStatus, autoUpdat
     autoUpdater.on('download-progress', (progress) => {
       set({ state: 'downloading', progress: Math.min(99, Math.round(progress.percent)) });
     });
+    // Denetim/indirme hatalari zaten yakalaniyor (await); kurulum hatasi yalniz bu olayla gelir
+    // (yukleyici yolu yok, calistirilamadi). Eskiden dinlenmiyordu: program kapali kaliyordu.
+    autoUpdater.on('error', (error) => {
+      if (status.state === 'installing') failInstall(message(error));
+    });
+  }
+
+  function failInstall(reason) {
+    if (status.state !== 'installing') return;
+    clearTimeout(installTimer);
+    installTimer = null;
+    ready = null; // sonraki denetim dosyayi yeniden indirir
+    log(`[guncelleme] kurulum basarisiz: ${reason}`);
+    set({ state: 'error', error: INSTALL_FAILED_MESSAGE, progress: null });
+    onInstallFailed(reason);
+  }
+
+  // Backend'i durdurmadan once: dosya yerinde, boyutu imzali bilgiyle ayni ve electron-updater
+  // ayni dosyayi kuracak (yolu kaybolmussa quitAndInstall hicbir sey yapmadan doner).
+  function verifyInstaller() {
+    if (!existsSync(ready.file))
+      throw new Error('Kurulum dosyası bulunamadı; yeniden indirilecek.');
+    if (statSync(ready.file).size !== ready.manifest.size) {
+      throw new Error('Kurulum dosyası eksik ya da değişmiş; yeniden indirilecek.');
+    }
+    const installerPath = autoUpdater.installerPath;
+    if (
+      installerPath !== undefined &&
+      (!installerPath || resolve(installerPath) !== resolve(ready.file))
+    ) {
+      throw new Error('Kurulum dosyası hazır değil; yeniden indirilecek.');
+    }
   }
 
   async function check() {
@@ -111,6 +165,7 @@ export function createUpdater({ currentVersion, config, log, onStatus, autoUpdat
   async function install(version, beforeQuit) {
     if (status.state !== 'ready' || !ready || ready.manifest.version !== version) return false;
     try {
+      verifyInstaller();
       if ((await sha512File(ready.file)) !== ready.manifest.sha512) {
         throw new Error('İndirilen dosya değişmiş; yeniden indirilecek.');
       }
@@ -121,8 +176,25 @@ export function createUpdater({ currentVersion, config, log, onStatus, autoUpdat
     }
     set({ state: 'installing' });
     await beforeQuit();
-    autoUpdater.quitAndInstall(true, true);
-    return true;
+    if (status.state !== 'installing') return false;
+    // Program kapanmaya baslamazsa (quitting cagrilmazsa) kurulum basarisiz sayilir.
+    installTimer = setTimeout(
+      () => failInstall('program kurulum icin kapanmadi'),
+      installTimeoutMs,
+    );
+    installTimer.unref?.();
+    try {
+      autoUpdater.quitAndInstall(true, true);
+    } catch (error) {
+      failInstall(message(error));
+    }
+    return status.state === 'installing';
+  }
+
+  /** Program kurulum icin gercekten kapaniyor (before-quit): zaman asimi beklenmez. */
+  function quitting() {
+    clearTimeout(installTimer);
+    installTimer = null;
   }
 
   function start() {
@@ -136,5 +208,13 @@ export function createUpdater({ currentVersion, config, log, onStatus, autoUpdat
     timers = [];
   }
 
-  return { status: () => status, check, install, start, stop };
+  return {
+    status: () => status,
+    installing: () => status.state === 'installing',
+    check,
+    install,
+    quitting,
+    start,
+    stop,
+  };
 }

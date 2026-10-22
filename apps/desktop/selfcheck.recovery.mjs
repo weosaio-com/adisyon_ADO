@@ -1,6 +1,7 @@
 // Kendini toparlama kurallarinin self-check'i (Electron'suz): `node selfcheck.recovery.mjs`
 import assert from 'node:assert';
 import {
+  installFailedDialog,
   allowReload,
   planRestart,
   RELOAD_MAX_IN_WINDOW,
@@ -49,5 +50,11 @@ assert.strictEqual(
 // --- Pencere metinleri: kayit dosyasi yolu ve iki secim ---
 assert.match(restartGiveUpDialog('C:\\x\\backend-error.log').message, /backend-error\.log/);
 assert.deepStrictEqual(unresponsiveDialog().buttons, ['Yeniden yükle', 'Bekle']);
+
+// Guncelleme kurulamadi penceresi: anlasilir Turkce, kayit dosyasinin yolu.
+const installFailed = installFailedDialog('C:/kayit.log');
+assert.strictEqual(installFailed.title, 'Güncelleme kurulamadı');
+assert.match(installFailed.message, /eski sürümle çalışmaya devam/);
+assert.match(installFailed.message, /C:\/kayit\.log/);
 
 console.log('✓ desktop recovery self-check OK');
