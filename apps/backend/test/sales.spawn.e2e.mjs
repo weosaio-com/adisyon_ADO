@@ -349,6 +349,51 @@ try {
       'SAT-8 yeniden odenen adisyonda completedAt son tam odeme ani',
     );
   }
+
+  // --- SAT-9: masaya yeni musteri oturduktan sonra onceki odemenin iadesi ---
+  {
+    const table = tables[2];
+    const first = must(await call('POST', '/orders', { tableId: table.id }), 'masa ac');
+    must(
+      await call('POST', `/orders/${first.id}/items`, { productId: p50.id, quantity: 1000 }),
+      'kalem',
+    );
+    const paid = must(
+      await call('POST', `/orders/${first.id}/payments`, {
+        method: 'card',
+        amount: 5000,
+        idempotencyKey: key('pay'),
+      }),
+      'kart odeme',
+    );
+    const next = must(await call('POST', '/orders', { tableId: table.id }), 'yeni musteri');
+    const rev = await call('POST', `/orders/${first.id}/payments/${paid.payments[0].id}/reverse`, {
+      reason: 'Yanlış ödeme yöntemi',
+      idempotencyKey: key('rev'),
+    });
+    const reopened = await getOrder(first.id);
+    t.check(rev.status === 201, `SAT-9 iade yapilir (${rev.status} ${code(rev) ?? ''})`);
+    t.check(
+      reopened.status === 'open' &&
+        reopened.tableId === null &&
+        reopened.note?.includes(table.name),
+      `SAT-9 adisyon masasiz acilir, notta eski masa (${reopened.tableId} / ${reopened.note})`,
+    );
+    t.check(
+      (await getOrder(next.id)).tableId === table.id,
+      'SAT-9 yeni musterinin adisyonu masada',
+    );
+    const fixed = must(
+      await call('POST', `/orders/${first.id}/payments`, {
+        method: 'cash',
+        amount: 5000,
+        idempotencyKey: key('pay'),
+      }),
+      'dogru yontemle odeme',
+    );
+    t.check(fixed.status === 'completed', 'SAT-9 dogru yontemle yeniden odenir');
+    must(await call('POST', `/orders/${next.id}/discard`), 'bos adisyon');
+  }
 } finally {
   await backend.stop(child);
 }

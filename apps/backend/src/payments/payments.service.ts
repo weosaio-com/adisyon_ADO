@@ -23,7 +23,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { RecordPaymentDto, ReversePaymentDto } from './dto/payments.schemas';
 import { allocatePayment, settlePayment } from './payments.calc';
 import { formatTl } from './money-limits';
-import { completeOrderTx, writeOrderTx } from '../orders/order-tx';
+import { activeOrderOnTableTx, completeOrderTx, writeOrderTx } from '../orders/order-tx';
 
 /**
  * Odeme modulu (PR3): adisyona odeme al (append-only, cift-cekim idempotent),
@@ -411,6 +411,16 @@ export class PaymentsService {
         const netPaid = (charges._sum.amount ?? 0) - (refunds._sum.amount ?? 0);
 
         if (order.isPaid && netPaid < order.grandTotal) {
+          // Masaya yeni musteri oturduysa (masada baska aktif adisyon var) adisyon masasiz
+          // acilir, eski masa notta kalir: aksi halde masa basina tek aktif adisyon indeksi
+          // iadeyi anlasilmaz DATA_CONFLICT ile reddediyordu ve duzeltme yapilamiyordu.
+          const clash = order.tableId
+            ? await activeOrderOnTableTx(tx, user.branchId, order.tableId, order.id)
+            : null;
+          const table =
+            clash && order.tableId
+              ? await tx.table.findUnique({ where: { id: order.tableId }, select: { name: true } })
+              : null;
           // Yeniden acilan adisyon satis degildir: completedAt silinir (tekrar tam
           // odendiginde o anla yazilir); raporlar onu iade gunune kadar satis saymaz.
           await writeOrderTx(
@@ -422,10 +432,21 @@ export class PaymentsService {
               closedBy: null,
               closedAt: null,
               completedAt: null,
+              ...(clash
+                ? {
+                    tableId: null,
+                    note: [
+                      order.note,
+                      `İade ile yeniden açıldı (önceki masa: ${table?.name ?? 'masa'})`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · '),
+                  }
+                : {}),
             },
             [OrderStatus.Completed],
           );
-          if (order.tableId) {
+          if (order.tableId && !clash) {
             await tx.table.update({
               where: { id: order.tableId },
               data: {
