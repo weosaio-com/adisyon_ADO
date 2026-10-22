@@ -28,7 +28,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import { InstallMetricsService } from '../common/metrics/install-metrics.service';
-import { BackgroundWorkerService } from '../common/worker/worker.service';
+import { BackgroundWorkerService, CLOUD_LANE } from '../common/worker/worker.service';
 import { AppConfigService } from '../config/app-config.service';
 import { resolveInstallId } from '../common/util/install-id';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -120,7 +120,14 @@ export class CloudService implements OnModuleInit, OnApplicationBootstrap, OnMod
   ) {}
 
   onModuleInit() {
-    this.worker.registerHandler(CLOUD_PUBLISH_TASK, (_payload, branchId) => this.publish(branchId));
+    // Kendi seridinde: gorsel yuklemesi internete takilsa da mutfak fisi kuyrugu beklemez (PLT-7).
+    this.worker.registerHandler(
+      CLOUD_PUBLISH_TASK,
+      (_payload, branchId) => this.publish(branchId),
+      {
+        lane: CLOUD_LANE,
+      },
+    );
   }
 
   async onApplicationBootstrap() {
