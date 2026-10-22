@@ -488,6 +488,21 @@ try {
     );
   }
 
+  // --- SAT-23: ayni odeme anahtariyla es zamanli ikinci istek ilk odemenin sonucunu alir ---
+  {
+    const order = await takeaway(p50);
+    const body = { method: 'card', amount: 5000, idempotencyKey: key('twice') };
+    const [a, b] = await Promise.all([
+      call('POST', `/orders/${order.id}/payments`, body),
+      call('POST', `/orders/${order.id}/payments`, body),
+    ]);
+    const payments = must(await call('GET', `/orders/${order.id}/payments`), 'odemeler');
+    t.check(
+      a.status === 201 && b.status === 201 && payments.length === 1,
+      `SAT-23 cift dokunus: iki yanit da basarili, tek odeme (${a.status}/${b.status}, ${payments.length})`,
+    );
+  }
+
   // --- SAT-16: elle kasa hareketi yalniz nakit giris/cikis, isaret turden, aciklama zorunlu ---
   {
     const txn = (body) => call('POST', '/cash/transactions', { method: 'cash', ...body });

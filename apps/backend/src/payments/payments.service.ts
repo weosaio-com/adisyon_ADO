@@ -65,6 +65,10 @@ export class PaymentsService {
     const paymentId = newId();
     try {
       await this.prisma.$transaction(async (tx) => {
+        // Ayni anahtar islem icinde, durum kontrolunden ONCE aranir: es zamanli tekrar
+        // (cift dokunus, zaman asimi sonrasi yeniden gonderim) "acik degil" yerine ilk
+        // odemenin sonucunu alir; kasiyer odemenin alinmadigini sanmaz.
+        if (await this.replayInTx(tx, user, orderId, dto.idempotencyKey)) return;
         const order = await tx.order.findFirst({
           where: { id: orderId, branchId: user.branchId, deletedAt: null },
         });
@@ -273,6 +277,7 @@ export class PaymentsService {
     const refundId = newId();
     try {
       await this.prisma.$transaction(async (tx) => {
+        if (await this.replayInTx(tx, user, orderId, dto.idempotencyKey)) return;
         const order = await tx.order.findFirst({
           where: { id: orderId, branchId: user.branchId, deletedAt: null },
         });
@@ -514,6 +519,28 @@ export class PaymentsService {
       where: { orderId, order: { branchId: user.branchId }, deletedAt: null },
       orderBy: { paidAt: 'asc' },
     });
+  }
+
+  // Ayni idempotencyKey ile yazilmis odeme/iade islem icinde var mi? Varsa (ayni adisyon)
+  // true: cagiran yeni kayit acmadan mevcut sonucu doner. Baska adisyondaysa 409.
+  private async replayInTx(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    orderId: string,
+    idempotencyKey: string,
+  ): Promise<boolean> {
+    const dup = await tx.payment.findUnique({
+      where: { idempotencyKey },
+      include: { order: { select: { branchId: true } } },
+    });
+    if (!dup) return false;
+    if (dup.orderId !== orderId || dup.order.branchId !== user.branchId) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Bu islem anahtari baska bir odemede kullanilmis.',
+      });
+    }
+    return true;
   }
 
   private async orderWithPayments(branchId: string, orderId: string) {
