@@ -6,6 +6,15 @@ import { isDatabaseBusyError } from '../http/db-busy';
 
 export type JobHandler = (payload: unknown, branchId: string) => Promise<void>;
 
+/**
+ * Seritler: her serit kendi sirasiyla ve digerini beklemeden calisir. Varsayilan serit mutfak/bar
+ * fisi, alan olaylari (stok, kasa) gibi yerel ve hizli isler icindir. Internete giden yavas isler
+ * (QR menu yayini: gorseller tek tek, her biri 20 sn'ye kadar) kendi seridinde calisir; boylece
+ * fis kuyrugunu tutmaz (PLT-7: 8 gorsel yuklenirken mutfak fisi 33,7 sn gecikiyordu).
+ */
+export const DEFAULT_LANE = 'main';
+export const CLOUD_LANE = 'cloud';
+
 /** Isin sonucu (tamamlandi / hata) veritabani mesgulse bu beklemelerle yeniden yazilir. */
 export const RESULT_RETRY_DELAYS_MS = [250, 1_000];
 /**
@@ -25,6 +34,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class BackgroundWorkerService implements OnModuleInit {
   private readonly logger = new Logger(BackgroundWorkerService.name);
   private readonly handlers = new Map<string, JobHandler>();
+  /** Varsayilan serit disindaki isler: gorev adi -> serit. */
+  private readonly laneOf = new Map<string, string>();
   /** Bu surecte su an calisan isler: bekci bunlara dokunmaz. */
   private readonly active = new Set<string>();
   /**
@@ -50,11 +61,14 @@ export class BackgroundWorkerService implements OnModuleInit {
     this.logger.log('Background Worker Service initialized');
   }
 
-  registerHandler(taskName: string, handler: JobHandler) {
+  registerHandler(taskName: string, handler: JobHandler, options: { lane?: string } = {}) {
     if (this.handlers.has(taskName)) {
       this.logger.warn(`Handler for task "${taskName}" is already registered. Overwriting.`);
     }
     this.handlers.set(taskName, handler);
+    const lane = options.lane ?? DEFAULT_LANE;
+    if (lane === DEFAULT_LANE) this.laneOf.delete(taskName);
+    else this.laneOf.set(taskName, lane);
     this.logger.log(`Task handler registered: ${taskName}`);
   }
 
@@ -83,15 +97,35 @@ export class BackgroundWorkerService implements OnModuleInit {
     return id;
   }
 
-  async processNextJobs(): Promise<number> {
-    await this.flushUnsavedResults();
-    await this.requeueStaleRunning();
+  /** Calisan seritler (zamanlayici her birini ayri, digerini beklemeden turlar). */
+  lanes(): string[] {
+    return [DEFAULT_LANE, ...new Set(this.laneOf.values())];
+  }
+
+  /**
+   * Bir seridin hazir islerini sirayla calistirir. Varsayilan serit, baska seride kayitli olmayan
+   * tum isleri (isleyicisi olmayanlar dahil) alir; bekci ve gecikmeli sonuc yazimi da orada calisir.
+   */
+  async processNextJobs(lane: string = DEFAULT_LANE): Promise<number> {
+    const elsewhere = [...this.laneOf].filter(([, l]) => l !== lane).map(([task]) => task);
+    const own = [...this.laneOf].filter(([, l]) => l === lane).map(([task]) => task);
+    if (lane === DEFAULT_LANE) {
+      await this.flushUnsavedResults();
+      await this.requeueStaleRunning();
+    } else if (own.length === 0) {
+      return 0;
+    }
     const now = new Date();
     // Tek turda kisa sureli POS yogunlugunu erit; kilit her isi yine tek sahipli yapar.
     const jobs = await this.prisma.backgroundJob.findMany({
       where: {
         status: 'pending',
         runAt: { lte: now },
+        ...(lane === DEFAULT_LANE
+          ? elsewhere.length
+            ? { taskName: { notIn: elsewhere } }
+            : {}
+          : { taskName: { in: own } }),
       },
       orderBy: { runAt: 'asc' },
       take: 20,

@@ -4,7 +4,8 @@ import 'reflect-metadata';
 import assert from 'node:assert';
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { BackgroundWorkerService, STALE_RUNNING_MS } from './worker.service';
+import { BackgroundWorkerService, CLOUD_LANE, STALE_RUNNING_MS } from './worker.service';
+import { SchedulerService } from '../schedule/schedule.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 
 Logger.overrideLogger(false);
@@ -34,6 +35,7 @@ function fakeDb() {
   const state = { locked: false, updateLocked: false, writes: 0 };
   type Where = {
     id?: string | { notIn: string[] };
+    taskName?: { in?: string[]; notIn?: string[] };
     status?: string;
     runAt?: { lte: Date };
     OR?: Array<{ lockedAt: null | { lt: Date } }>;
@@ -41,6 +43,8 @@ function fakeDb() {
   const matches = (row: Row, where: Where) => {
     if (typeof where.id === 'string' && row.id !== where.id) return false;
     if (where.id && typeof where.id === 'object' && where.id.notIn.includes(row.id)) return false;
+    if (where.taskName?.in && !where.taskName.in.includes(row.taskName)) return false;
+    if (where.taskName?.notIn && where.taskName.notIn.includes(row.taskName)) return false;
     if (where.status && row.status !== where.status) return false;
     if (where.runAt && row.runAt > where.runAt.lte) return false;
     if (
@@ -231,6 +235,40 @@ async function main() {
     await worker.processNextJobs();
     assert.strictEqual(db.rows.get('j5')!.status, 'completed');
     assert.strictEqual(calls, 1);
+  }
+
+  // 6. Seritler (PLT-7): QR menu yayini internete takilirken mutfak fisi seridi beklemez; yayin
+  //    surerken bekci onu "takili" sanip yeniden kuyruklamaz.
+  {
+    const db = fakeDb();
+    db.add('publish', { taskName: 'cloud.publish' });
+    db.add('print1', { taskName: 'print.job' });
+    const worker = newWorker(db.prisma);
+    const scheduler = new SchedulerService(worker);
+    let releasePublish = () => {};
+    const publishGate = new Promise<void>((resolve) => (releasePublish = resolve));
+    const printed: string[] = [];
+    worker.registerHandler('cloud.publish', () => publishGate, { lane: CLOUD_LANE });
+    worker.registerHandler('print.job', async (_payload, branchId) => {
+      printed.push(branchId);
+    });
+    assert.deepStrictEqual(worker.lanes(), ['main', CLOUD_LANE]);
+    const firstTick = scheduler.handleWorkerTick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(db.rows.get('print1')!.status, 'completed', 'fis yayini beklemedi');
+    assert.strictEqual(db.rows.get('publish')!.status, 'running');
+    // Yayin surerken yeni fis gelir ve bir sonraki turda basilir; yayin ikinci kez baslamaz.
+    db.add('print2', { taskName: 'print.job' });
+    db.rows.get('publish')!.lockedAt = new Date(Date.now() - STALE_RUNNING_MS - 1_000);
+    (worker as unknown as { lastStaleCheck: number }).lastStaleCheck = 0;
+    await scheduler.handleWorkerTick();
+    assert.strictEqual(db.rows.get('print2')!.status, 'completed');
+    assert.strictEqual(db.rows.get('publish')!.status, 'running', 'calisan yayina bekci dokunmaz');
+    assert.strictEqual(db.rows.get('publish')!.attempts, 1);
+    releasePublish();
+    await firstTick;
+    assert.strictEqual(db.rows.get('publish')!.status, 'completed');
+    assert.strictEqual(printed.length, 2);
   }
 
   console.log('✓ worker.service self-check');
