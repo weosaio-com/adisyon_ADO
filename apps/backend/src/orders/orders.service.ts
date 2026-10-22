@@ -62,6 +62,16 @@ const DAY_END_HOUR = 6;
  * KAPSAM DISI (PR2): mutfaga gonder, adisyon-seviyesi indirim, held, canli WS masa katmani.
  * Odeme/kapatma ayri modul.
  */
+/**
+ * Iptal/void/indirim gerekcesi zorunlu (URN-3): "neden iptal edildi / neden indirim
+ * yapildi" sorusunun cevabi denetim kaydinda kalsin. Bos ya da yalniz bosluk -> 400.
+ */
+function requireReason(reason: string | null | undefined, message: string): string {
+  const text = reason?.trim() ?? '';
+  if (!text) throw new BadRequestException({ code: 'REASON_REQUIRED', message });
+  return text;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -223,16 +233,17 @@ export class OrdersService {
   }
 
   async cancelOrder(user: AuthUser, id: string, dto: CancelOrderDto) {
+    const reason = requireReason(dto.reason, 'Adisyon iptali için gerekçe yazın.');
     const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.branchId, id);
-      const updated = await this.cancelInTx(tx, user, order, dto.reason);
+      const updated = await this.cancelInTx(tx, user, order, reason);
       await this.auditTx(tx, user, {
         action: 'order.cancel',
         entityType: 'order',
         entityId: id,
         oldValue: order,
         newValue: updated,
-        ...(dto.reason ? { reason: dto.reason } : {}),
+        reason,
       });
       return updated;
     });
@@ -446,6 +457,7 @@ export class OrdersService {
 
   // Void: gonderilmis/onaylanmis kalemi iptal eder (Owner). Satir kalir, status=cancelled.
   async voidItem(user: AuthUser, orderId: string, itemId: string, dto: VoidItemDto) {
+    const reason = requireReason(dto.reason, 'Kalem iptali için gerekçe seçin.');
     const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
       const item = await this.itemOrThrow(orderId, itemId, tx);
@@ -458,7 +470,7 @@ export class OrdersService {
       await this.writeItem(tx, item, {
         status: OrderItemStatus.Cancelled,
         voidedBy: user.userId,
-        voidReason: dto.reason ?? null,
+        voidReason: reason,
       });
       const updated = await this.recompute(tx, user, order);
       await this.events.publishDurable(
@@ -484,7 +496,7 @@ export class OrdersService {
         entityType: 'order_item',
         entityId: itemId,
         oldValue: item,
-        ...(dto.reason ? { reason: dto.reason } : {}),
+        reason,
       });
       return updated;
     });
@@ -808,6 +820,7 @@ export class OrdersService {
       const replay = await this.existingDiscountByOp(user, orderId, dto.clientOpId);
       if (replay) return replay;
     }
+    const reason = requireReason(dto.reason, 'İndirim için gerekçe yazın.');
     const hasFull = user.permissions.includes(Permission.DiscountApplyFull);
     const id = newId();
     let updated;
@@ -866,7 +879,7 @@ export class OrdersService {
             value: dto.value,
             amount,
             appliedBy: user.userId,
-            reason: dto.reason ?? null,
+            reason,
             approvedBy: hasFull ? user.userId : null,
             ...(dto.clientOpId ? { clientOpId: dto.clientOpId } : {}),
             ...this.provenance(user),
@@ -879,7 +892,7 @@ export class OrdersService {
           entityType: 'order_discount',
           entityId: id,
           newValue: discount,
-          ...(dto.reason ? { reason: dto.reason } : {}),
+          reason,
         });
         return updated;
       });

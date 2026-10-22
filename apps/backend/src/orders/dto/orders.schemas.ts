@@ -48,13 +48,16 @@ export const itemNoteSchema = z.object({
 export type ItemNoteDto = z.infer<typeof itemNoteSchema>;
 
 // --- Kalem void / adisyon iptal (gerekce) ---
+// Gerekce zorunlu (bos olamaz): serviste 400 REASON_REQUIRED ile anlasilir mesaj doner.
+const reason = z.string().max(200, 'Gerekçe en fazla 200 karakter olabilir.').nullish();
+
 export const voidItemSchema = z.object({
-  reason: z.string().nullish(),
+  reason,
 });
 export type VoidItemDto = z.infer<typeof voidItemSchema>;
 
 export const cancelOrderSchema = z.object({
-  reason: z.string().nullish(),
+  reason,
 });
 export type CancelOrderDto = z.infer<typeof cancelOrderSchema>;
 
@@ -87,7 +90,7 @@ export const applyDiscountSchema = z
       .int()
       .positive('İndirim sıfırdan büyük olmalıdır.')
       .max(MAX_MONEY_KURUS, 'İndirim en fazla 10.000.000 TL olabilir.'),
-    reason: z.string().nullish(),
+    reason,
     clientOpId, // tekrar korumasi: ayni anahtarla ikinci istek ikinci indirim acmaz
   })
   .refine((d) => d.type !== 'percent' || d.value <= 100, {

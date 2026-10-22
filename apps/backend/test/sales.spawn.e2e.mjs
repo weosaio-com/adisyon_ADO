@@ -510,6 +510,34 @@ try {
     );
   }
 
+  // --- URN-3: kalem iptali, adisyon iptali ve indirimde gerekce zorunlu ---
+  {
+    const order = await takeaway(p50, p10);
+    const item = order.items[0];
+    must(await call('POST', `/orders/${order.id}/send-kitchen`), 'mutfaga');
+    const results = {
+      void: await call('POST', `/orders/${order.id}/items/${item.id}/void`, {}),
+      voidBlank: await call('POST', `/orders/${order.id}/items/${item.id}/void`, { reason: '  ' }),
+      discount: await call('POST', `/orders/${order.id}/discounts`, { type: 'amount', value: 100 }),
+      cancel: await call('POST', `/orders/${order.id}/cancel`, {}),
+    };
+    t.check(
+      Object.values(results).every((r) => r.status === 400 && code(r) === 'REASON_REQUIRED'),
+      `URN-3 gerekcesiz void/indirim/iptal reddedilir (${Object.entries(results)
+        .map(([k, r]) => `${k}:${r.status}:${code(r)}`)
+        .join(' ')})`,
+    );
+    const voided = must(
+      await call('POST', `/orders/${order.id}/items/${item.id}/void`, { reason: ' Zayi ' }),
+      'void',
+    );
+    t.check(
+      voided.items.find((i) => i.id === item.id)?.voidReason === 'Zayi',
+      'URN-3 gerekce kayda gecer (bosluklar kirpilir)',
+    );
+    must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'Müşteri vazgeçti' }), 'iptal');
+  }
+
   // --- SAT-23: ayni odeme anahtariyla es zamanli ikinci istek ilk odemenin sonucunu alir ---
   {
     const order = await takeaway(p50);
