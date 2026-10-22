@@ -1241,6 +1241,10 @@ export class OrdersService {
     if (!product) {
       throw new NotFoundException({ code: 'PRODUCT_NOT_FOUND', message: 'Urun bulunamadi.' });
     }
+    // Pasif ("satisa kapali") urun eski onbellekli tabletten/API'den de satilamaz.
+    if (!product.isActive) {
+      throw new ConflictException({ code: 'PRODUCT_INACTIVE', message: 'Ürün satışa kapalı.' });
+    }
     // "Tukendi" isaretli urun siparise eklenemez (QR menu ile ayni bilgi).
     if (!product.isAvailable) {
       throw new ConflictException({ code: 'PRODUCT_UNAVAILABLE', message: 'Ürün tükendi.' });

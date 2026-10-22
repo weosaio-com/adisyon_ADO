@@ -586,6 +586,32 @@ try {
     );
   }
 
+  // --- OFF-9 + BO-15: secili kalemleri mutfaga gonderme; pasif urun satilamaz ---
+  {
+    const order = await takeaway(p50, p10);
+    const [first, second] = order.items;
+    const sent = must(
+      await call('POST', `/orders/${order.id}/send-kitchen`, { itemIds: [first.id] }),
+      'secili gonder',
+    );
+    const status = (id) => sent.items.find((i) => i.id === id)?.status;
+    t.check(
+      status(first.id) === 'sent' && status(second.id) === 'pending',
+      `OFF-9 yalniz secili kalem mutfaga gider (${status(first.id)}/${status(second.id)})`,
+    );
+    const passive = await product('Eski menü', 2000);
+    must(await call('PATCH', `/products/${passive.id}`, { isActive: false }), 'pasif');
+    const sold = await call('POST', `/orders/${order.id}/items`, {
+      productId: passive.id,
+      quantity: 1000,
+    });
+    t.check(
+      sold.status === 409 && code(sold) === 'PRODUCT_INACTIVE',
+      `BO-15 pasif urun adisyona eklenemez (${sold.status} ${code(sold)})`,
+    );
+    must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
+  }
+
   // --- SAT-16: elle kasa hareketi yalniz nakit giris/cikis, isaret turden, aciklama zorunlu ---
   {
     const txn = (body) => call('POST', '/cash/transactions', { method: 'cash', ...body });
