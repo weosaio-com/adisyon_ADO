@@ -10,6 +10,24 @@ export interface SettleInput {
 }
 
 /**
+ * Kalandan fazla girilen tutari dagitir (SAT-2). Nakitte fazlasi para ustudur:
+ * adisyona ve kasaya yalniz kalan yazilir, fazlasi alinan nakde (received) gecer.
+ * Nakit disinda (kart/havale/QR/veresiye) fazla tahsilat yoktur -> null (reddedilir);
+ * aksi halde fazla tutar satis gibi kasaya/rapora girer, Z'de satis != tahsilat olur.
+ */
+export function allocatePayment(input: {
+  remaining: number; // kurus (adisyonun kalan bakiyesi, > 0)
+  amount: number; // kurus (girilen tutar)
+  method: string; // PaymentMethod
+  received?: number; // nakit verilen
+}): { amount: number; received?: number } | null {
+  const { remaining, amount, method, received } = input;
+  if (amount <= remaining) return { amount, ...(received !== undefined ? { received } : {}) };
+  if (method !== PaymentMethod.Cash) return null;
+  return { amount: remaining, received: Math.max(received ?? amount, amount) };
+}
+
+/**
  * Bir odemenin para-ustu + kapanis durumunu hesaplar (saf fonksiyon, para yolu).
  * `amount <= grandTotal - alreadyPaid` cagiran tarafindan dogrulanir.
  * Nakit: received > amount ise para ustu = received - amount; diger yontemlerde 0.
@@ -75,5 +93,24 @@ if (require.main === module) {
     }),
     { received: 5000, change: 0, fullyPaid: true },
   );
+  // SAT-2: nakitte kalandan fazlasi para ustu olur; adisyona yalniz kalan yazilir.
+  const cashOver = allocatePayment({ remaining: 5000, amount: 7000, method: 'cash' });
+  assert.deepStrictEqual(cashOver, { amount: 5000, received: 7000 });
+  assert.deepStrictEqual(
+    settlePayment({ grandTotal: 5000, alreadyPaid: 0, method: 'cash', ...cashOver! }),
+    { received: 7000, change: 2000, fullyPaid: true },
+  );
+  // Alinan nakit girilen tutardan buyukse o esas alinir.
+  assert.deepStrictEqual(
+    allocatePayment({ remaining: 5000, amount: 7000, method: 'cash', received: 10000 }),
+    { amount: 5000, received: 10000 },
+  );
+  // Kart/havale/veresiyede fazla tahsilat yok.
+  assert.strictEqual(allocatePayment({ remaining: 5000, amount: 7000, method: 'card' }), null);
+  assert.strictEqual(allocatePayment({ remaining: 5000, amount: 5001, method: 'debt' }), null);
+  // Kalan kadar ya da az: oldugu gibi.
+  assert.deepStrictEqual(allocatePayment({ remaining: 5000, amount: 5000, method: 'card' }), {
+    amount: 5000,
+  });
   console.log('payments.calc self-check OK');
 }

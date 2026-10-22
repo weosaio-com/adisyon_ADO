@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { Readable } from 'node:stream';
 import { newId, createDomainEvent, DomainEventName, type MenuTranslations } from '@ado/shared';
+import { sortNatural } from '../tables/natural-order';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
@@ -142,9 +143,9 @@ export class CatalogService implements OnModuleInit {
   async listCategories(user: AuthUser) {
     const rows = await this.prisma.category.findMany({
       where: { branchId: user.branchId, deletedAt: null },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
-    return rows.map(categoryView);
+    // Turkce dogal sira (sortOrder, sonra ad): SQLite bayt sirasi "Çorbalar"i sona atiyordu.
+    return sortNatural(rows).map(categoryView);
   }
 
   async getCategory(user: AuthUser, id: string) {
@@ -271,9 +272,8 @@ export class CatalogService implements OnModuleInit {
         ...(query.barcode ? { barcode: query.barcode } : {}),
         ...(query.search ? { name: { contains: query.search } } : {}),
       },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
-    return rows.map(productView);
+    return sortNatural(rows).map(productView);
   }
 
   async getProduct(user: AuthUser, id: string) {

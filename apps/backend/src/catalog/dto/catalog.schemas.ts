@@ -5,6 +5,7 @@ import {
   MENU_LIMITS,
   menuTranslationsSchema,
 } from '@ado/shared';
+import { MAX_MONEY_KURUS, nonNegativeMoneyKurus, smallInt } from '../../payments/money-limits';
 
 /** Query string 'true'/'false' -> boolean. z.coerce.boolean 'false'i true yapar; kullanmiyoruz. */
 const boolQuery = z
@@ -16,7 +17,7 @@ const boolQuery = z
 export const createCategorySchema = z.object({
   name: z.string().min(1),
   parentId: z.string().nullish(),
-  sortOrder: z.number().int().optional(),
+  sortOrder: smallInt('Sıra').optional(),
   color: z.string().nullish(),
   isActive: z.boolean().optional(),
   translations: menuTranslationsSchema.optional(),
@@ -34,13 +35,13 @@ export const createProductSchema = z.object({
   brandId: z.string().nullish(),
   barcode: z.string().nullish(),
   sku: z.string().nullish(),
-  purchasePrice: z.number().int().nonnegative().optional(),
-  salePrice: z.number().int().nonnegative(),
+  purchasePrice: nonNegativeMoneyKurus('Alış fiyatı').optional(),
+  salePrice: nonNegativeMoneyKurus('Satış fiyatı'),
   trackStock: z.boolean().optional(),
-  minStock: z.number().int().nonnegative().nullish(),
+  minStock: z.number().int().nonnegative().max(MAX_MONEY_KURUS, 'En az stok çok büyük.').nullish(),
   isActive: z.boolean().optional(),
   isFavorite: z.boolean().optional(),
-  sortOrder: z.number().int().optional(),
+  sortOrder: smallInt('Sıra').optional(),
   // QR menu (@ado/shared menu.ts)
   description: z.string().trim().max(MENU_LIMITS.description).nullish(),
   allergens: allergenListSchema.optional(),
@@ -76,7 +77,7 @@ export type UpdateUnitDto = z.infer<typeof updateUnitSchema>;
 // --- Vergi (oran binde: %10 -> 100) ---
 export const createTaxSchema = z.object({
   name: z.string().min(1),
-  ratePermille: z.number().int().nonnegative(),
+  ratePermille: z.number().int().nonnegative().max(1000, 'KDV oranı en fazla %100 olabilir.'),
   isDefault: z.boolean().optional(),
 });
 export const updateTaxSchema = createTaxSchema.partial();

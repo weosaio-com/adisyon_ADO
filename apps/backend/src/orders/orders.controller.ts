@@ -16,6 +16,7 @@ import {
   moveTableSchema,
   mergeOrderSchema,
   splitOrderSchema,
+  sendKitchenSchema,
   type OpenOrderDto,
   type AddItemDto,
   type UpdateItemDto,
@@ -27,6 +28,7 @@ import {
   type MoveTableDto,
   type MergeOrderDto,
   type SplitOrderDto,
+  type SendKitchenDto,
 } from './dto/orders.schemas';
 
 /**
@@ -122,6 +124,13 @@ export class OrdersController {
     return this.orders.discardEmptyOrder(user, id);
   }
 
+  // Toplami karsilanmis (0 TL ya da tamami odenmis) acik adisyonu kapatir.
+  @Post(':id/close')
+  @RequirePermissions(Permission.PaymentTake)
+  close(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.orders.closeOrder(user, id);
+  }
+
   @Post(':id/cancel')
   @RequirePermissions(Permission.OrderCancel)
   cancel(
@@ -179,8 +188,12 @@ export class OrdersController {
   // Bekleyen kalemleri mutfaga/bara ilet (hazirlik fisi + kalem kilidi).
   @Post(':id/send-kitchen')
   @RequirePermissions(Permission.OrderSendKitchen)
-  sendKitchen(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.orders.sendToKitchen(user, id);
+  sendKitchen(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(sendKitchenSchema)) dto: SendKitchenDto,
+  ) {
+    return this.orders.sendToKitchen(user, id, dto?.itemIds ? { itemIds: dto.itemIds } : {});
   }
 
   // Adisyon-seviyesi indirim. Min. yetki: apply_limited; >%10 serviste apply_full istenir.

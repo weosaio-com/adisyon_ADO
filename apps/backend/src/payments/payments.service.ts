@@ -21,7 +21,9 @@ import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { RecordPaymentDto, ReversePaymentDto } from './dto/payments.schemas';
-import { settlePayment } from './payments.calc';
+import { allocatePayment, settlePayment } from './payments.calc';
+import { formatTl } from './money-limits';
+import { activeOrderOnTableTx, completeOrderTx, writeOrderTx } from '../orders/order-tx';
 
 /**
  * Odeme modulu (PR3): adisyona odeme al (append-only, cift-cekim idempotent),
@@ -61,9 +63,12 @@ export class PaymentsService {
     }
 
     const paymentId = newId();
-    let payment;
     try {
-      payment = await this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx) => {
+        // Ayni anahtar islem icinde, durum kontrolunden ONCE aranir: es zamanli tekrar
+        // (cift dokunus, zaman asimi sonrasi yeniden gonderim) "acik degil" yerine ilk
+        // odemenin sonucunu alir; kasiyer odemenin alinmadigini sanmaz.
+        if (await this.replayInTx(tx, user, orderId, dto.idempotencyKey)) return;
         const order = await tx.order.findFirst({
           where: { id: orderId, branchId: user.branchId, deletedAt: null },
         });
@@ -89,21 +94,29 @@ export class PaymentsService {
             message: 'Adisyon zaten tamamen odendi.',
           });
         }
-        // Kalandan fazla tahsilat: normalde engellenir; kullanici acikca
-        // onayladiginda (allowOverpay) uyari ile devam edilebilir.
-        if (dto.amount > remaining && !dto.allowOverpay) {
+        // Kalandan fazla tutar: nakitte fazlasi para ustu (adisyona ve kasaya yalniz kalan
+        // yazilir); kart/havale/QR/veresiyede fazla tahsilat reddedilir (allowOverpay artik
+        // etkisiz: fazla tutar satis gibi kasaya ve Z raporuna giriyordu).
+        const allocated = allocatePayment({
+          remaining,
+          amount: dto.amount,
+          method: dto.method,
+          ...(dto.received !== undefined ? { received: dto.received } : {}),
+        });
+        if (!allocated) {
           throw new BadRequestException({
             code: 'BILL_OVERPAY',
-            message: `Odeme tutari kalan bakiyeyi (${remaining}) asamaz.`,
+            message: `Kalan tutardan (${formatTl(remaining)}) fazla tahsil edilemez; fazlası yalnız nakitte para üstü olarak verilir.`,
           });
         }
+        const amount = allocated.amount;
 
         const { received, change, fullyPaid } = settlePayment({
           grandTotal: order.grandTotal,
           alreadyPaid,
-          amount: dto.amount,
+          amount,
           method: dto.method,
-          ...(dto.received !== undefined ? { received: dto.received } : {}),
+          ...(allocated.received !== undefined ? { received: allocated.received } : {}),
         });
 
         const debtAccount =
@@ -145,7 +158,7 @@ export class PaymentsService {
             orderId,
             method: dto.method,
             direction: PaymentDirection.Charge,
-            amount: dto.amount,
+            amount,
             received,
             change,
             reference: dto.reference ?? null,
@@ -157,29 +170,11 @@ export class PaymentsService {
           },
         });
 
-        const orderUpdate = await tx.order.updateMany({
-          where: { id: orderId, version: order.version, status: OrderStatus.Open },
-          data: fullyPaid
-            ? {
-                isPaid: true,
-                status: OrderStatus.Completed,
-                closedBy: user.userId,
-                closedAt: new Date(),
-                completedAt: order.completedAt ?? new Date(),
-                version: { increment: 1 },
-                syncState: 'pending',
-              }
-            : {
-                version: { increment: 1 },
-                syncState: 'pending',
-              },
-        });
-        if (orderUpdate.count !== 1) {
-          throw new ConflictException({
-            code: 'ORDER_CHANGED',
-            message: 'Adisyon es zamanli olarak degisti. Lutfen tekrar deneyin.',
-          });
-        }
+        // Kosullu yazim (surum + acik): arada adisyon degistiyse 409 ORDER_CHANGED.
+        // Tam odemede ortak tamamlama: completedAt = SON tam odeme ani (iade ile yeniden
+        // acilip tekrar odenen adisyon satisa bugunun tarihiyle girer), masa bosalir.
+        if (fullyPaid) await completeOrderTx(tx, order, user.userId);
+        else await writeOrderTx(tx, order, {});
 
         if (cashSession) {
           await tx.cashTransaction.create({
@@ -187,7 +182,7 @@ export class PaymentsService {
               id: newId(),
               cashSessionId: cashSession.id,
               type: CashTxnType.Sale,
-              amount: dto.amount,
+              amount,
               method: dto.method,
               relatedPaymentId: paymentId,
               createdBy: user.userId,
@@ -203,7 +198,7 @@ export class PaymentsService {
               id: newId(),
               debtAccountId: debtAccount.id,
               type: DebtTxnType.DebtAdd,
-              amount: dto.amount,
+              amount,
               relatedOrderId: orderId,
               relatedPaymentId: paymentId,
               createdBy: user.userId,
@@ -214,33 +209,10 @@ export class PaymentsService {
           });
           await tx.debtAccount.update({
             where: { id: debtAccount.id },
-            data: { balance: { increment: dto.amount }, version: { increment: 1 } },
+            data: { balance: { increment: amount }, version: { increment: 1 } },
           });
         }
 
-        if (fullyPaid) {
-          // Baska acik adisyon yoksa masayi bosalt (split adisyon guvenligi).
-          if (order.tableId) {
-            const stillOpen = await tx.order.count({
-              where: {
-                branchId: user.branchId,
-                tableId: order.tableId,
-                status: OrderStatus.Open,
-                deletedAt: null,
-              },
-            });
-            if (stillOpen === 0) {
-              await tx.table.update({
-                where: { id: order.tableId },
-                data: {
-                  status: TableStatus.Empty,
-                  version: { increment: 1 },
-                  syncState: 'pending',
-                },
-              });
-            }
-          }
-        }
         await this.events.publishDurable(
           tx,
           createDomainEvent(
@@ -248,7 +220,7 @@ export class PaymentsService {
             {
               orderId,
               paymentId,
-              amount: dto.amount,
+              amount,
               method: dto.method,
               ...(dto.customerId ? { customerId: dto.customerId } : {}),
             },
@@ -259,7 +231,16 @@ export class PaymentsService {
             },
           ),
         );
-        return p;
+        // Denetim kaydi ayni islemde: yazilamazsa odeme de yazilmaz.
+        await this.audit.recordTx(tx, {
+          branchId: user.branchId,
+          action: 'payment.take',
+          entityType: 'payment',
+          entityId: paymentId,
+          userId: user.userId,
+          newValue: p,
+          ...this.provenance(user),
+        });
       });
     } catch (e) {
       // Yaris: ayni idempotencyKey araya girdi -> idempotent don.
@@ -274,16 +255,6 @@ export class PaymentsService {
       }
       throw e;
     }
-
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'payment.take',
-      entityType: 'payment',
-      entityId: paymentId,
-      userId: user.userId,
-      newValue: payment,
-      ...this.provenance(user),
-    });
 
     return this.orderWithPayments(user.branchId, orderId);
   }
@@ -304,9 +275,9 @@ export class PaymentsService {
     }
 
     const refundId = newId();
-    let refund;
     try {
-      refund = await this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx) => {
+        if (await this.replayInTx(tx, user, orderId, dto.idempotencyKey)) return;
         const order = await tx.order.findFirst({
           where: { id: orderId, branchId: user.branchId, deletedAt: null },
         });
@@ -442,24 +413,42 @@ export class PaymentsService {
         const netPaid = (charges._sum.amount ?? 0) - (refunds._sum.amount ?? 0);
 
         if (order.isPaid && netPaid < order.grandTotal) {
-          const reopened = await tx.order.updateMany({
-            where: { id: orderId, version: order.version },
-            data: {
+          // Masaya yeni musteri oturduysa (masada baska aktif adisyon var) adisyon masasiz
+          // acilir, eski masa notta kalir: aksi halde masa basina tek aktif adisyon indeksi
+          // iadeyi anlasilmaz DATA_CONFLICT ile reddediyordu ve duzeltme yapilamiyordu.
+          const clash = order.tableId
+            ? await activeOrderOnTableTx(tx, user.branchId, order.tableId, order.id)
+            : null;
+          const table =
+            clash && order.tableId
+              ? await tx.table.findUnique({ where: { id: order.tableId }, select: { name: true } })
+              : null;
+          // Yeniden acilan adisyon satis degildir: completedAt silinir (tekrar tam
+          // odendiginde o anla yazilir); raporlar onu iade gunune kadar satis saymaz.
+          await writeOrderTx(
+            tx,
+            order,
+            {
               isPaid: false,
               status: OrderStatus.Open,
               closedBy: null,
               closedAt: null,
-              version: { increment: 1 },
-              syncState: 'pending',
+              completedAt: null,
+              ...(clash
+                ? {
+                    tableId: null,
+                    note: [
+                      order.note,
+                      `İade ile yeniden açıldı (önceki masa: ${table?.name ?? 'masa'})`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · '),
+                  }
+                : {}),
             },
-          });
-          if (reopened.count !== 1) {
-            throw new ConflictException({
-              code: 'ORDER_CHANGED',
-              message: 'Adisyon es zamanli olarak degisti. Lutfen tekrar deneyin.',
-            });
-          }
-          if (order.tableId) {
+            [OrderStatus.Completed],
+          );
+          if (order.tableId && !clash) {
             await tx.table.update({
               where: { id: order.tableId },
               data: {
@@ -489,7 +478,16 @@ export class PaymentsService {
             },
           ),
         );
-        return refundPayment;
+        await this.audit.recordTx(tx, {
+          branchId: user.branchId,
+          action: 'payment.refund',
+          entityType: 'payment',
+          entityId: refundId,
+          userId: user.userId,
+          newValue: refundPayment,
+          ...(dto.reason ? { reason: dto.reason } : {}),
+          ...this.provenance(user),
+        });
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -513,17 +511,6 @@ export class PaymentsService {
       throw e;
     }
 
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'payment.refund',
-      entityType: 'payment',
-      entityId: refundId,
-      userId: user.userId,
-      newValue: refund,
-      ...(dto.reason ? { reason: dto.reason } : {}),
-      ...this.provenance(user),
-    });
-
     return this.orderWithPayments(user.branchId, orderId);
   }
 
@@ -532,6 +519,28 @@ export class PaymentsService {
       where: { orderId, order: { branchId: user.branchId }, deletedAt: null },
       orderBy: { paidAt: 'asc' },
     });
+  }
+
+  // Ayni idempotencyKey ile yazilmis odeme/iade islem icinde var mi? Varsa (ayni adisyon)
+  // true: cagiran yeni kayit acmadan mevcut sonucu doner. Baska adisyondaysa 409.
+  private async replayInTx(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    orderId: string,
+    idempotencyKey: string,
+  ): Promise<boolean> {
+    const dup = await tx.payment.findUnique({
+      where: { idempotencyKey },
+      include: { order: { select: { branchId: true } } },
+    });
+    if (!dup) return false;
+    if (dup.orderId !== orderId || dup.order.branchId !== user.branchId) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Bu islem anahtari baska bir odemede kullanilmis.',
+      });
+    }
+    return true;
   }
 
   private async orderWithPayments(branchId: string, orderId: string) {

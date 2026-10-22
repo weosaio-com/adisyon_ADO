@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { smallInt } from '../../payments/money-limits';
 
 /** Query string 'true'/'false' -> boolean. */
 const boolQuery = z
@@ -9,7 +10,7 @@ const boolQuery = z
 // --- Salon (Hall) ---
 export const createHallSchema = z.object({
   name: z.string().min(1),
-  sortOrder: z.number().int().optional(),
+  sortOrder: smallInt('Sıra').optional(),
   isActive: z.boolean().optional(),
 });
 export const updateHallSchema = createHallSchema.partial();
@@ -22,9 +23,9 @@ export type UpdateHallDto = z.infer<typeof updateHallSchema>;
 export const createTableSchema = z.object({
   hallId: z.string().min(1),
   name: z.string().min(1),
-  seats: z.number().int().positive().optional(),
-  posX: z.number().int().nullish(),
-  posY: z.number().int().nullish(),
+  seats: z.number().int().positive().max(1000, 'Koltuk sayısı en fazla 1000 olabilir.').optional(),
+  posX: smallInt('Konum').nullish(),
+  posY: smallInt('Konum').nullish(),
   isActive: z.boolean().optional(),
 });
 export const updateTableSchema = createTableSchema.partial();
