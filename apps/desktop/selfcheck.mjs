@@ -14,7 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { rotatingLog } from './rotating-log.mjs';
-import { applyPendingRestore, ensureSecrets } from './restore.mjs';
+import { applyPendingRestore, ensureSecrets, restoreSkippedDialog } from './restore.mjs';
+import { spawnSync } from 'node:child_process';
 import {
   appConfigEnv,
   cloudOrigin,
@@ -113,17 +114,166 @@ const restoreFixture = (marker) => {
   assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
   rmSync(f.dir, { recursive: true, force: true });
 }
+// Gecersiz isaret programi acilmaz hale getirmez (PLT-3): takas yapilmaz, isaret kenara alinir,
+// her acilista ayni hata tekrarlanmaz, sorun bildirilir.
+const asideFiles = (dir) =>
+  readdirSync(dir).filter((n) => /^restore-pending\.invalid-.+\.json$/.test(n));
+const invalidMarker = (f, content) => {
+  const before = asideFiles(f.dir);
+  writeFileSync(join(f.dir, 'restore-pending.json'), content);
+  const problems = [];
+  const applied = applyPendingRestore(f.dir, f.dbPath, f.secretsPath, {
+    onProblem: (problem) => problems.push(problem),
+  });
+  assert.strictEqual(applied, false, 'takas yapilmaz');
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB', 'DB degismedi');
+  assert.strictEqual(problems.length, 1);
+  assert.strictEqual(problems[0].retry, false);
+  assert.ok(!existsSync(join(f.dir, 'restore-pending.json')), 'isaret yerinde kalmaz');
+  const aside = asideFiles(f.dir).filter((n) => !before.includes(n));
+  assert.strictEqual(
+    aside.length,
+    1,
+    'isaret restore-pending.invalid-<zaman>.json olarak saklanir',
+  );
+  assert.strictEqual(problems[0].setAside, join(f.dir, aside[0]));
+  assert.strictEqual(
+    readFileSync(join(f.dir, aside[0]), 'utf8'),
+    content,
+    'icerik korunur (destek)',
+  );
+  // Sonraki acilis normal: isaret yok.
+  assert.strictEqual(applyPendingRestore(f.dir, f.dbPath, f.secretsPath), false);
+  return problems[0];
+};
 {
-  // Veri dizini disini gosteren staging reddedilir, DB'ye dokunulmaz.
+  // Veri dizini disini gosteren staging reddedilir, DB'ye ve anahtara dokunulmaz.
   const f = restoreFixture({ backupKey: 'bbbb'.repeat(16) });
   const outside = join(tempDir('ado-outside-'), 'evil.db');
   writeFileSync(outside, 'KOTU');
-  writeFileSync(join(f.dir, 'restore-pending.json'), JSON.stringify({ stagePath: outside }));
-  assert.throws(() => applyPendingRestore(f.dir, f.dbPath, f.secretsPath), /Gecersiz restore/);
-  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB', 'DB degismedi');
+  const problem = invalidMarker(
+    f,
+    JSON.stringify({ stagePath: outside, backupKey: 'bbbb'.repeat(16) }),
+  );
+  assert.match(problem.reason, /Gecersiz restore/);
   assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
   rmSync(f.dir, { recursive: true, force: true });
 }
+{
+  // Yarim yazilmis isaret (elektrik kesintisi) ve silinmis staging (antivirus, elle temizlik).
+  const f = restoreFixture({});
+  assert.match(invalidMarker(f, '{"stagePath":"C:\\\\Us').reason, /okunamadi/);
+  rmSync(f.stagePath);
+  const missing = invalidMarker(f, JSON.stringify({ stagePath: f.stagePath }));
+  assert.match(missing.reason, /bulunamadi/);
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // Takas sirasinda hata (or. disk dolu): geri alinir, anahtar eski haline doner, isaret sonraki
+  // acilis icin kalir; engel kalkinca takas yapilir.
+  const f = restoreFixture({ backupKey: 'cccc'.repeat(16) });
+  mkdirSync(join(f.dir, 'ado.restore-incoming.db')); // kopya yazilamaz
+  const problems = [];
+  const applied = applyPendingRestore(f.dir, f.dbPath, f.secretsPath, {
+    onProblem: (problem) => problems.push(problem),
+  });
+  assert.strictEqual(applied, false);
+  assert.strictEqual(problems[0]?.retry, true, 'sonraki acilista yeniden denenir');
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB');
+  assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
+  assert.ok(existsSync(join(f.dir, 'restore-pending.json')), 'isaret kalir');
+  assert.ok(!readdirSync(f.dir).some((n) => n.startsWith('ado.pre-restore-')), 'yarim takas yok');
+  rmSync(join(f.dir, 'ado.restore-incoming.db'), { recursive: true });
+  assert.strictEqual(applyPendingRestore(f.dir, f.dbPath, f.secretsPath), true);
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'YEDEK-DB');
+  assert.strictEqual(
+    JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY,
+    'cccc'.repeat(16),
+  );
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // PLT-2: canli DB yarim kalmis bir yazmanin sicak gunlugunu tasiyor (zorla kapatma). Gunluk
+  // yeni DB'ye uygulanmamali: geri yuklenen veri tam yedek, geri donus kopyasi tutarli olmali.
+  const f = restoreFixture({});
+  const fill = (path, label) => {
+    rmSync(path, { force: true });
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA journal_mode=DELETE; CREATE TABLE sales(id INTEGER PRIMARY KEY, note TEXT)');
+    const insert = db.prepare('INSERT INTO sales(note) VALUES (?)');
+    db.exec('BEGIN');
+    for (let i = 0; i < 2000; i++) insert.run(`${label}-${i}-${'-'.repeat(200)}`);
+    db.exec('COMMIT');
+    db.close();
+  };
+  fill(f.stagePath, 'YEDEK');
+  fill(f.dbPath, 'CANLI');
+  const crash =
+    "const { DatabaseSync } = require('node:sqlite');" +
+    `const db = new DatabaseSync(${JSON.stringify(f.dbPath)});` +
+    "db.exec('PRAGMA cache_size=1'); db.exec('BEGIN');" +
+    "db.exec(\"UPDATE sales SET note='YARIM-'||id\"); process.kill(process.pid, 'SIGKILL');";
+  spawnSync(process.execPath, ['-e', crash]);
+  assert.ok(existsSync(`${f.dbPath}-journal`), 'sicak gunluk olustu (deney gecerli)');
+  const logged = [];
+  assert.strictEqual(
+    applyPendingRestore(f.dir, f.dbPath, f.secretsPath, { log: (line) => logged.push(line) }),
+    true,
+  );
+  assert.ok(!existsSync(`${f.dbPath}-journal`), 'yeni DB yaninda eski gunluk kalmaz');
+  const prefixes = (path) => {
+    const db = new DatabaseSync(path);
+    const rows = db.prepare('SELECT substr(note, 1, 5) p, count(*) c FROM sales GROUP BY p').all();
+    db.close();
+    return Object.fromEntries(rows.map((row) => [row.p, row.c]));
+  };
+  assert.deepStrictEqual(prefixes(f.dbPath), { YEDEK: 2000 }, 'geri yuklenen veri tam yedek');
+  const rollback = readdirSync(f.dir).find((n) => /^ado\.pre-restore-\d+\.db$/.test(n));
+  assert.deepStrictEqual(
+    prefixes(join(f.dir, rollback)),
+    { CANLI: 2000 },
+    'geri donus kopyasi yarim islem olmadan',
+  );
+  assert.ok(logged.some((line) => /geri alindi/.test(line)));
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // Bozuk eski DB'nin gecersiz yan dosyalarini SQLite temizler; yeni DB'nin yaninda kalmaz.
+  const f = restoreFixture({});
+  writeFileSync(`${f.dbPath}-journal`, 'ESKI-GUNLUK');
+  writeFileSync(`${f.dbPath}-wal`, 'ESKI-WAL');
+  assert.strictEqual(applyPendingRestore(f.dir, f.dbPath, f.secretsPath), true);
+  assert.ok(!existsSync(`${f.dbPath}-journal`) && !existsSync(`${f.dbPath}-wal`));
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'YEDEK-DB');
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // Eski DB hic acilamiyorsa (kilitli/okunamaz) gunluk eski DB ile birlikte tasinir, kayda yazilir.
+  const f = restoreFixture({});
+  rmSync(f.dbPath);
+  mkdirSync(f.dbPath); // acilamayan "veritabani"
+  writeFileSync(`${f.dbPath}-journal`, 'ESKI-GUNLUK');
+  const logged = [];
+  assert.strictEqual(
+    applyPendingRestore(f.dir, f.dbPath, f.secretsPath, { log: (line) => logged.push(line) }),
+    true,
+  );
+  assert.ok(!existsSync(`${f.dbPath}-journal`), 'yeni DB yaninda eski gunluk kalmaz');
+  const rollback = readdirSync(f.dir).find((n) => /^ado\.pre-restore-\d+\.db$/.test(n));
+  assert.strictEqual(readFileSync(join(f.dir, `${rollback}-journal`), 'utf8'), 'ESKI-GUNLUK');
+  assert.ok(
+    logged.some((line) => /uygulanamadi/.test(line)),
+    'kayda yazilir',
+  );
+  rmSync(f.dir, { recursive: true, force: true });
+}
+// Kullaniciya pencere: iki durum ayri anlatilir, kayit dosyasi yolu var.
+assert.match(restoreSkippedDialog({ retry: true }, 'C:/k.log').message, /bir sonraki/);
+assert.match(
+  restoreSkippedDialog({ retry: false }, 'C:/k.log').message,
+  /yeniden\s+başlatabilirsiniz/,
+);
+assert.match(restoreSkippedDialog({ retry: false }, 'C:/k.log').message, /C:\/k\.log/);
 
 // --- Derleme profili (app-config) ---
 {

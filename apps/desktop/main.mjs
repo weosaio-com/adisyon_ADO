@@ -4,7 +4,7 @@ import { app, BrowserWindow, dialog, shell } from 'electron';
 import { join } from 'node:path';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { rotatingLog } from './rotating-log.mjs';
-import { applyPendingRestore, ensureSecrets } from './restore.mjs';
+import { applyPendingRestore, ensureSecrets, restoreSkippedDialog } from './restore.mjs';
 import { appConfigEnv, loadAppConfig } from './app-config.mjs';
 import { applyMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
@@ -46,6 +46,8 @@ const reloadHistory = [];
 let unresponsiveTimer = null;
 // Acilis basarisiz olursa hata penceresinde gosterilecek son backend ciktisi.
 const recentOutput = outputTail();
+// Bekleyen yedek geri yuklemesi uygulanamadiysa (bozuk isaret, takas hatasi) pencere acilinca soylenir.
+let restoreProblem = null;
 
 // /health yalniz veritabanini denetler (disk dolu olsa da 200). Asili istek beklemeyi uzatmasin.
 const isUp = () =>
@@ -67,7 +69,18 @@ function packagedEnv() {
   mkdirSync(dataDir, { recursive: true }); // ilk aciliste henuz yok
   const dbPath = join(dataDir, 'ado.db');
   const secretsPath = join(dataDir, 'secrets.json');
-  applyPendingRestore(dataDir, dbPath, secretsPath);
+  applyPendingRestore(dataDir, dbPath, secretsPath, {
+    log,
+    onProblem: (problem) => {
+      const next = problem.setAside
+        ? `; isaret kenara alindi: ${problem.setAside}`
+        : problem.retry
+          ? '; sonraki acilista yeniden denenecek'
+          : '';
+      log(`geri yukleme uygulanamadi: ${problem.reason}${next}`);
+      restoreProblem = problem;
+    },
+  });
   if (!existsSync(dbPath)) {
     copyFileSync(join(process.resourcesPath, 'template.db'), dbPath);
   }
@@ -169,6 +182,7 @@ async function restartBackend() {
   });
   if (result.ok) {
     log('backend yeniden acildi');
+    showRestoreProblem();
     // Yeni backend guncelleme durumunu bilmez (Ayarlar > Guncelleme karti): yeniden bildirilir.
     if (updater) sendToBackend({ type: 'update-status', ...updater.status() });
     return;
@@ -176,6 +190,13 @@ async function restartBackend() {
   log(`backend yeniden acilamadi: ${JSON.stringify(result)}`);
   // Asili kaldiysa kapat: cikis dinleyicisi sonraki denemeyi planlar.
   if (child && child === backend && child.exitCode === null) child.kill();
+}
+
+function showRestoreProblem() {
+  if (!restoreProblem) return;
+  const { title, message } = restoreSkippedDialog(restoreProblem, logPath);
+  restoreProblem = null;
+  void showMessage({ type: 'warning', title, message, buttons: ['Tamam'] });
 }
 
 // Ana surecten acilan pencereden sonra klavye odagi pencereye donsun (Windows'ta kaybolabiliyor).
@@ -351,6 +372,7 @@ async function start() {
     }
     backendReady = true;
     await openWindow();
+    showRestoreProblem();
     startUpdater();
   } catch (err) {
     // Sessiz cikis olmasin: hatayi goster, sonra kapan.
