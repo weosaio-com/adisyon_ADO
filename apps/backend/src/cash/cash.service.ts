@@ -1,9 +1,16 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { DURABLE_LISTENER } from '../common/events/durable-listener';
 import { Prisma } from '@prisma/client';
 import { newId, CashTxnType, OrderStatus, type DomainEvent } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../common/audit/audit.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { OpenSessionDto, CloseSessionDto, CreateCashTransactionDto } from './dto/cash.schemas';
 import { businessDayOf } from '../reports/reports.calc';
@@ -12,19 +19,19 @@ import { businessDayOf } from '../reports/reports.calc';
 export class CashService {
   private readonly logger = new Logger(CashService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
+
+  private provenance(user: AuthUser): { deviceId?: string } {
+    return user.deviceId ? { deviceId: user.deviceId } : {};
+  }
 
   // ===========================================================================
   // Cash Session Management
   // ===========================================================================
   async openSession(user: AuthUser, dto: OpenSessionDto) {
-    const existing = await this.prisma.cashSession.findFirst({
-      where: { branchId: user.branchId, status: 'open', deletedAt: null },
-    });
-    if (existing) {
-      throw new ConflictException('Zaten açık bir kasa oturumu mevcut.');
-    }
-
     const id = newId();
     // İş günü (06:00 kuralı, LOCAL tarih) — reports.calc ile ayni tanim.
     const now = new Date();
@@ -32,6 +39,13 @@ export class CashService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.cashSession.findFirst({
+          where: { branchId: user.branchId, status: 'open', deletedAt: null },
+          select: { id: true },
+        });
+        if (existing) {
+          throw new ConflictException('Zaten açık bir kasa oturumu mevcut.');
+        }
         const session = await tx.cashSession.create({
           data: {
             id,
@@ -58,6 +72,16 @@ export class CashService {
           },
         });
 
+        // Denetim kaydi ayni islemde: kim, hangi bakiyeyle acti (geri alinirsa kayit da yok).
+        await this.audit.recordTx(tx, {
+          branchId: user.branchId,
+          action: 'cash.session.open',
+          entityType: 'cash_session',
+          entityId: id,
+          userId: user.userId,
+          newValue: { openingFloat: dto.openingFloat, businessDay },
+          ...this.provenance(user),
+        });
         return session;
       });
     } catch (e) {
@@ -75,14 +99,14 @@ export class CashService {
   }
 
   async closeSession(user: AuthUser, dto: CloseSessionDto) {
-    const session = await this.prisma.cashSession.findFirst({
-      where: { branchId: user.branchId, status: 'open', deletedAt: null },
-    });
-    if (!session) {
-      throw new NotFoundException('Açık kasa oturumu bulunamadı.');
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      const session = await tx.cashSession.findFirst({
+        where: { branchId: user.branchId, status: 'open', deletedAt: null },
+      });
+      if (!session) {
+        throw new NotFoundException('Açık kasa oturumu bulunamadı.');
+      }
+
       const openOrderCount = await tx.order.count({
         where: {
           branchId: user.branchId,
@@ -139,6 +163,21 @@ export class CashService {
       if (closed.count !== 1) {
         throw new ConflictException('Kasa oturumu es zamanli olarak kapatildi.');
       }
+      // Kim, hangi sayimla kapatti ve fark neydi: degistirilemez zincirde.
+      await this.audit.recordTx(tx, {
+        branchId: user.branchId,
+        action: 'cash.session.close',
+        entityType: 'cash_session',
+        entityId: session.id,
+        userId: user.userId,
+        newValue: {
+          openingFloat: session.openingFloat,
+          expectedAmount,
+          countedAmount: dto.countedAmount,
+          difference,
+        },
+        ...this.provenance(user),
+      });
       return tx.cashSession.findUniqueOrThrow({ where: { id: session.id } });
     });
   }
@@ -169,23 +208,43 @@ export class CashService {
   // Cash Transactions
   // ===========================================================================
   async createTransaction(user: AuthUser, dto: CreateCashTransactionDto) {
-    const session = await this.prisma.cashSession.findFirst({
-      where: { branchId: user.branchId, status: 'open', deletedAt: null },
-    });
-    if (!session) {
-      throw new ConflictException('İşlem yapabilmek için önce kasa oturumu açmalısınız.');
+    const note = dto.note?.trim() ?? '';
+    // Para cikisinda aciklama zorunlu: kim neden para cekti kayitta kalsin.
+    if (dto.type === CashTxnType.Payout && !note) {
+      throw new BadRequestException({
+        code: 'CASH_NOTE_REQUIRED',
+        message: 'Para çıkışı için açıklama yazın.',
+      });
     }
-
-    return this.prisma.cashTransaction.create({
-      data: {
-        id: newId(),
-        cashSessionId: session.id,
-        type: dto.type,
-        amount: dto.amount,
-        method: dto.method,
-        createdBy: user.userId,
-        note: dto.note ?? null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const session = await tx.cashSession.findFirst({
+        where: { branchId: user.branchId, status: 'open', deletedAt: null },
+      });
+      if (!session) {
+        throw new ConflictException('İşlem yapabilmek için önce kasa oturumu açmalısınız.');
+      }
+      const created = await tx.cashTransaction.create({
+        data: {
+          id: newId(),
+          cashSessionId: session.id,
+          type: dto.type,
+          amount: dto.amount,
+          method: dto.method,
+          createdBy: user.userId,
+          note: note || null,
+        },
+      });
+      await this.audit.recordTx(tx, {
+        branchId: user.branchId,
+        action: 'cash.txn.create',
+        entityType: 'cash_transaction',
+        entityId: created.id,
+        userId: user.userId,
+        newValue: created,
+        ...(note ? { reason: note } : {}),
+        ...this.provenance(user),
+      });
+      return created;
     });
   }
 

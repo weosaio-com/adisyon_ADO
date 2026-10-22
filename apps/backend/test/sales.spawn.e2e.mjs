@@ -443,6 +443,58 @@ try {
     );
     must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
   }
+
+  // --- SAT-11: kasa acilis/kapanis ve para giris/cikisi denetim kaydinda (en sonda: kasa kapanir) ---
+  {
+    const audit = async (action) => must(await call('GET', `/audit?action=${action}`), 'denetim');
+    const opened = await audit('cash.session.open');
+    t.check(
+      opened.length === 1 && JSON.parse(opened[0].newValue).openingFloat === 10000,
+      `SAT-11 kasa acilisi denetimde (${opened.length})`,
+    );
+    const silent = await call('POST', '/cash/transactions', {
+      type: 'payout',
+      amount: -2000,
+      method: 'cash',
+    });
+    t.check(
+      silent.status === 400 && code(silent) === 'CASH_NOTE_REQUIRED',
+      `SAT-11 aciklamasiz para cikisi reddedilir (${silent.status} ${code(silent)})`,
+    );
+    must(
+      await call('POST', '/cash/transactions', {
+        type: 'payout',
+        amount: -2000,
+        method: 'cash',
+        note: 'Tüp gaz',
+      }),
+      'para cikisi',
+    );
+    const txns = await audit('cash.txn.create');
+    t.check(
+      txns.length === 1 && txns[0].reason === 'Tüp gaz' && txns[0].userName,
+      `SAT-11 para cikisi denetimde, kim ve neden (${txns.length})`,
+    );
+    const session = must(await call('GET', '/cash/sessions/active'), 'kasa');
+    const expected =
+      session.openingFloat +
+      session.transactions
+        .filter((tx) => tx.type !== 'opening' && tx.type !== 'closing')
+        .reduce((sum, tx) => sum + tx.amount, 0);
+    const closed = await call('POST', '/cash/sessions/close', { countedAmount: expected - 500 });
+    t.check(closed.status === 201, `SAT-11 kasa kapanir (${closed.status} ${code(closed) ?? ''})`);
+    const closes = await audit('cash.session.close');
+    const detail = closes[0] ? JSON.parse(closes[0].newValue) : {};
+    t.check(
+      closes.length === 1 &&
+        detail.expectedAmount === expected &&
+        detail.countedAmount === expected - 500 &&
+        detail.difference === -500,
+      `SAT-11 kapanis denetimde: beklenen/sayilan/fark (${JSON.stringify(detail)})`,
+    );
+    const chain = must(await call('GET', '/audit/verify'), 'zincir');
+    t.check(chain.valid === true, `denetim zinciri gecerli (${chain.count} kayit)`);
+  }
 } finally {
   await backend.stop(child);
 }

@@ -30,58 +30,8 @@ export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   async record(entry: AuditEntry, attempt = 0): Promise<string> {
-    const oldValue = entry.oldValue === undefined ? null : JSON.stringify(entry.oldValue);
-    const newValue = entry.newValue === undefined ? null : JSON.stringify(entry.newValue);
-
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const last = await tx.auditLog.findFirst({
-          where: { branchId: entry.branchId },
-          orderBy: [{ sequence: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-          select: { hash: true, sequence: true },
-        });
-        const prevHash = last?.hash ?? GENESIS_HASH;
-        const sequence = (last?.sequence ?? 0) + 1;
-
-        const id = newId();
-        const createdAt = new Date();
-        const payload = JSON.stringify([
-          prevHash,
-          id,
-          entry.branchId,
-          entry.userId ?? '',
-          entry.action,
-          entry.entityType,
-          entry.entityId,
-          oldValue ?? '',
-          newValue ?? '',
-          entry.reason ?? '',
-          createdAt.toISOString(),
-        ]);
-        const hash = createHash('sha256').update(payload).digest('hex');
-
-        await tx.auditLog.create({
-          data: {
-            id,
-            branchId: entry.branchId,
-            userId: entry.userId ?? null,
-            action: entry.action,
-            entityType: entry.entityType,
-            entityId: entry.entityId,
-            oldValue,
-            newValue,
-            reason: entry.reason ?? null,
-            prevHash,
-            hash,
-            sequence,
-            createdAt,
-            ...(entry.deviceId ? { deviceId: entry.deviceId } : {}),
-            ...(entry.origin ? { origin: entry.origin } : {}),
-            ...(entry.clientOpId ? { clientOpId: entry.clientOpId } : {}),
-          },
-        });
-        return hash;
-      });
+      return await this.prisma.$transaction((tx) => this.recordTx(tx, entry));
     } catch (error) {
       if (
         attempt < 2 &&
@@ -92,6 +42,63 @@ export class AuditService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Denetim kaydini CAGIRANIN islemi icinde yazar: is islemi geri alinirsa kayit da
+   * geri alinir; kayit yazilamazsa is islemi de yazilmaz (kayitsiz para hareketi ya da
+   * "kaydedildi ama istemciye hata dondu" durumu olusmaz).
+   */
+  async recordTx(tx: Prisma.TransactionClient, entry: AuditEntry): Promise<string> {
+    const oldValue = entry.oldValue === undefined ? null : JSON.stringify(entry.oldValue);
+    const newValue = entry.newValue === undefined ? null : JSON.stringify(entry.newValue);
+
+    const last = await tx.auditLog.findFirst({
+      where: { branchId: entry.branchId },
+      orderBy: [{ sequence: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      select: { hash: true, sequence: true },
+    });
+    const prevHash = last?.hash ?? GENESIS_HASH;
+    const sequence = (last?.sequence ?? 0) + 1;
+
+    const id = newId();
+    const createdAt = new Date();
+    const payload = JSON.stringify([
+      prevHash,
+      id,
+      entry.branchId,
+      entry.userId ?? '',
+      entry.action,
+      entry.entityType,
+      entry.entityId,
+      oldValue ?? '',
+      newValue ?? '',
+      entry.reason ?? '',
+      createdAt.toISOString(),
+    ]);
+    const hash = createHash('sha256').update(payload).digest('hex');
+
+    await tx.auditLog.create({
+      data: {
+        id,
+        branchId: entry.branchId,
+        userId: entry.userId ?? null,
+        action: entry.action,
+        entityType: entry.entityType,
+        entityId: entry.entityId,
+        oldValue,
+        newValue,
+        reason: entry.reason ?? null,
+        prevHash,
+        hash,
+        sequence,
+        createdAt,
+        ...(entry.deviceId ? { deviceId: entry.deviceId } : {}),
+        ...(entry.origin ? { origin: entry.origin } : {}),
+        ...(entry.clientOpId ? { clientOpId: entry.clientOpId } : {}),
+      },
+    });
+    return hash;
   }
 
   // Denetim kaydi okuma (raporlar > kayit gecmisi). Salt-okuma; en yeni ustte.
