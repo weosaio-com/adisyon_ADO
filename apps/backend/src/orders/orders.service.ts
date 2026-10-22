@@ -995,8 +995,7 @@ export class OrdersService {
       where: { orderId, deletedAt: null, status: { not: OrderItemStatus.Cancelled } },
       select: { lineTotal: true, lineDiscount: true, taxRatePermille: true },
     });
-    // Adisyon-seviyesi indirimler (satir indirimine EK). taxTotal bilgi amacli
-    // satir bazinda kalir (ponytail: bilgi fisi, resmi mali degil).
+    // Adisyon-seviyesi indirimler (satir indirimine EK); icerideki KDV indirimli tutardan.
     const orderDiscounts = await tx.orderDiscount.findMany({
       where: { orderId, deletedAt: null },
       select: { amount: true },
@@ -1004,6 +1003,7 @@ export class OrdersService {
     const totals = applyOrderDiscounts(
       computeItemTotals(items),
       orderDiscounts.map((d) => d.amount),
+      items,
     );
     if (totals.discountTotal > totals.subtotal || totals.grandTotal < 0) {
       throw new ConflictException({
