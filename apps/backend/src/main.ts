@@ -9,6 +9,7 @@ import { AppModule } from './app.module';
 import { loadEnv } from './config/env.schema';
 import { API_PREFIX } from './common/http/api-prefix';
 import { bodyParserException } from './common/http/all-exceptions.filter';
+import { webStatic } from './common/http/web-static';
 import { resolveDataDir } from './common/util/data-dir';
 import { currentTlsHosts, ensureTlsMaterial } from './tls/tls.certs';
 import { DesktopBridgeService } from './desktop/desktop-bridge.service';
@@ -135,15 +136,8 @@ async function bootstrap(): Promise<void> {
   // Hem src/ (ts-node) hem dist/ (build) ayni derinlikte -> ../../frontend/dist.
   const webDist = join(__dirname, '..', '..', 'frontend', 'dist');
   if (existsSync(webDist)) {
-    app.use(express.static(webDist));
-    // SPA fallback: /api disindaki GET istekleri index.html'e duser.
-    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-      if (req.method === 'GET' && !req.path.startsWith('/api')) {
-        res.sendFile(join(webDist, 'index.html'));
-      } else {
-        next();
-      }
-    });
+    // Dosyalar; eksik paket dosyasina 404; /api disindaki diger GET'ler index.html (SPA).
+    app.use(...webStatic(webDist));
     app.get(Logger).log(`Frontend sunuluyor: ${webDist}`);
   }
 
