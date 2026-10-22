@@ -444,6 +444,50 @@ try {
     must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
   }
 
+  // --- SAT-6: indirim ve elle kasa hareketinde tekrar korumasi; denetim islem icinde ---
+  {
+    const order = await takeaway(p50);
+    const discountBody = { type: 'amount', value: 500, reason: 'Müdavim', clientOpId: key('dsc') };
+    const [d1, d2] = await Promise.all([
+      call('POST', `/orders/${order.id}/discounts`, discountBody),
+      call('POST', `/orders/${order.id}/discounts`, discountBody),
+    ]);
+    const d3 = await call('POST', `/orders/${order.id}/discounts`, discountBody);
+    const discounted = await getOrder(order.id);
+    t.check(
+      d1.status === 201 && d2.status === 201 && d3.status === 201,
+      `SAT-6 ayni anahtarla indirim tekrari basarili doner (${d1.status}/${d2.status}/${d3.status})`,
+    );
+    t.check(
+      discounted.discounts.length === 1 && discounted.discountTotal === 500,
+      `SAT-6 ayni anahtarla tek indirim (${discounted.discounts.length})`,
+    );
+    const items = must(await call('GET', `/audit?entityType=order_item`), 'denetim');
+    t.check(
+      discounted.items.every((item) => items.some((a) => a.entityId === item.id)),
+      'SAT-6 kalem ekleme denetim kaydinda',
+    );
+    must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
+
+    const cashBody = {
+      type: 'income',
+      amount: 1500,
+      method: 'cash',
+      note: 'Bozuk para',
+      idempotencyKey: key('cash'),
+    };
+    const [c1, c2] = await Promise.all([
+      call('POST', '/cash/transactions', cashBody),
+      call('POST', '/cash/transactions', cashBody),
+    ]);
+    const session = must(await call('GET', '/cash/sessions/active'), 'kasa');
+    const same = session.transactions.filter((tx) => tx.note === 'Bozuk para');
+    t.check(
+      c1.status === 201 && c2.status === 201 && c1.data.id === c2.data.id && same.length === 1,
+      `SAT-6 ayni anahtarla tek kasa hareketi (${c1.status}/${c2.status}, ${same.length})`,
+    );
+  }
+
   // --- SAT-11: kasa acilis/kapanis ve para giris/cikisi denetim kaydinda (en sonda: kasa kapanir) ---
   {
     const audit = async (action) => must(await call('GET', `/audit?action=${action}`), 'denetim');
@@ -470,9 +514,9 @@ try {
       }),
       'para cikisi',
     );
-    const txns = await audit('cash.txn.create');
+    const txns = (await audit('cash.txn.create')).filter((a) => a.reason === 'Tüp gaz');
     t.check(
-      txns.length === 1 && txns[0].reason === 'Tüp gaz' && txns[0].userName,
+      txns.length === 1 && !!txns[0].userName,
       `SAT-11 para cikisi denetimde, kim ve neden (${txns.length})`,
     );
     const session = must(await call('GET', '/cash/sessions/active'), 'kasa');

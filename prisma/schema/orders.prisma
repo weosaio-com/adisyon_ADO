@@ -120,6 +120,7 @@ model OrderDiscount {
   appliedBy  String  @map("applied_by")
   reason     String?
   approvedBy String? @map("approved_by") // Waiter >%10 ise Owner
+  clientOpId String? @unique @map("client_op_id") // tekrar korumasi (cift dokunus / zaman asimi)
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")

@@ -18,7 +18,7 @@ import {
   WAITER_MAX_DISCOUNT_PERMILLE,
 } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../common/audit/audit.service';
+import { AuditService, type AuditEntry } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { LicenseService } from '../license/license.service';
@@ -75,6 +75,21 @@ export class OrdersService {
     return user.deviceId ? { deviceId: user.deviceId } : {};
   }
 
+  // Denetim kaydi ana islemin ICINDE: kayit yazilamazsa islem de geri alinir (kayitsiz
+  // degisiklik ya da "kaydedildi ama istemciye hata dondu" durumu olusmaz).
+  private auditTx(
+    tx: Tx,
+    user: AuthUser,
+    entry: Omit<AuditEntry, 'branchId' | 'userId' | 'deviceId'>,
+  ): Promise<string> {
+    return this.audit.recordTx(tx, {
+      ...entry,
+      branchId: user.branchId,
+      userId: user.userId,
+      ...this.provenance(user),
+    });
+  }
+
   // ===========================================================================
   // Adisyon
   // ===========================================================================
@@ -126,6 +141,12 @@ export class OrdersService {
             data: { status: TableStatus.Occupied, version: { increment: 1 }, syncState: 'pending' },
           });
         }
+        await this.auditTx(tx, user, {
+          action: 'order.open',
+          entityType: 'order',
+          entityId: id,
+          newValue: order,
+        });
         return order;
       });
     } catch (e) {
@@ -143,15 +164,6 @@ export class OrdersService {
       throw e;
     }
 
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.open',
-      entityType: 'order',
-      entityId: id,
-      userId: user.userId,
-      newValue: created,
-      ...this.provenance(user),
-    });
     await this.publishOrderEvent(user, DomainEventName.OrderCreated, created);
     return this.orderWithItems(id);
   }
@@ -178,7 +190,7 @@ export class OrdersService {
   // Odemesi tamamlanmis acik adisyonu kapatir: toplami 0 olan (tam indirim/ikram, sifir
   // fiyatli urun) ya da kalani 0'a dusmus adisyon. Para hareketi yazilmaz.
   async closeOrder(user: AuthUser, id: string) {
-    const { before, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, id);
       const activeItems = await tx.orderItem.count({
         where: { orderId: id, deletedAt: null, status: { not: OrderItemStatus.Cancelled } },
@@ -196,37 +208,33 @@ export class OrdersService {
           message: `Adisyonda ödenmemiş ${formatTl(order.grandTotal - paid)} var; kapatmak için ödeme alın.`,
         });
       }
-      return { before: order, updated: await this.settleInTx(tx, user, order) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.close',
-      entityType: 'order',
-      entityId: id,
-      userId: user.userId,
-      oldValue: before,
-      newValue: updated,
-      ...this.provenance(user),
+      const updated = await this.settleInTx(tx, user, order);
+      await this.auditTx(tx, user, {
+        action: 'order.close',
+        entityType: 'order',
+        entityId: id,
+        oldValue: order,
+        newValue: updated,
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(id);
   }
 
   async cancelOrder(user: AuthUser, id: string, dto: CancelOrderDto) {
-    const { before, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.branchId, id);
-      return { before: order, updated: await this.cancelInTx(tx, user, order, dto.reason) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.cancel',
-      entityType: 'order',
-      entityId: id,
-      userId: user.userId,
-      oldValue: before,
-      newValue: updated,
-      ...(dto.reason ? { reason: dto.reason } : {}),
-      ...this.provenance(user),
+      const updated = await this.cancelInTx(tx, user, order, dto.reason);
+      await this.auditTx(tx, user, {
+        action: 'order.cancel',
+        entityType: 'order',
+        entityId: id,
+        oldValue: order,
+        newValue: updated,
+        ...(dto.reason ? { reason: dto.reason } : {}),
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(id);
@@ -286,7 +294,14 @@ export class OrdersService {
             },
           });
         }
-        return { item, product, lineTotal, updated: await this.recompute(tx, user, order) };
+        const updated = await this.recompute(tx, user, order);
+        await this.auditTx(tx, user, {
+          action: 'order.item.add',
+          entityType: 'order_item',
+          entityId: itemId,
+          newValue: item,
+        });
+        return { product, lineTotal, updated };
       });
     } catch (e) {
       if (dto.clientOpId && isUniqueViolation(e)) {
@@ -297,16 +312,7 @@ export class OrdersService {
     }
     if (!result) return this.orderWithItems(orderId);
 
-    const { item, product, lineTotal, updated } = result;
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.item.add',
-      entityType: 'order_item',
-      entityId: itemId,
-      userId: user.userId,
-      newValue: item,
-      ...this.provenance(user),
-    });
+    const { product, lineTotal, updated } = result;
     await this.publishOrderItemEvent(user, DomainEventName.OrderItemAdded, {
       orderId,
       orderItemId: itemId,
@@ -319,7 +325,7 @@ export class OrdersService {
   }
 
   async updateItem(user: AuthUser, orderId: string, itemId: string, dto: UpdateItemDto) {
-    const { item, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
       const item = await this.itemOrThrow(orderId, itemId, tx);
       this.assertItemEditable(item);
@@ -330,37 +336,34 @@ export class OrdersService {
         lineTotal: gross - item.lineDiscount,
       });
       // Toplam alinan odemenin altina inerse recompute ORDER_PAID_EXCEEDS_TOTAL atar (geri alinir).
-      return { item, updated: await this.recompute(tx, user, order) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.item.update',
-      entityType: 'order_item',
-      entityId: itemId,
-      userId: user.userId,
-      oldValue: item,
-      ...this.provenance(user),
+      const updated = await this.recompute(tx, user, order);
+      await this.auditTx(tx, user, {
+        action: 'order.item.update',
+        entityType: 'order_item',
+        entityId: itemId,
+        oldValue: item,
+        newValue: { quantity: dto.quantity },
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
   }
 
   async removeItem(user: AuthUser, orderId: string, itemId: string) {
-    const { item, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
       const item = await this.itemOrThrow(orderId, itemId, tx);
       this.assertItemEditable(item);
       await this.writeItem(tx, item, { deletedAt: new Date() });
-      return { item, updated: await this.recompute(tx, user, order) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.item.remove',
-      entityType: 'order_item',
-      entityId: itemId,
-      userId: user.userId,
-      oldValue: item,
-      ...this.provenance(user),
+      const updated = await this.recompute(tx, user, order);
+      await this.auditTx(tx, user, {
+        action: 'order.item.remove',
+        entityType: 'order_item',
+        entityId: itemId,
+        oldValue: item,
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
@@ -370,7 +373,7 @@ export class OrdersService {
   // not eklenmez (mutfak fisi basildi; degisiklik icin void + yeni kalem).
   async setItemNote(user: AuthUser, orderId: string, itemId: string, dto: ItemNoteDto) {
     const text = dto.note?.trim() ?? '';
-    const { order, existing } = await this.prisma.$transaction(async (tx) => {
+    const order = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
       const item = await this.itemOrThrow(orderId, itemId, tx);
       this.assertItemEditable(item);
@@ -399,17 +402,14 @@ export class OrdersService {
           },
         });
       }
-      return { order, existing };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.item.note',
-      entityType: 'order_item',
-      entityId: itemId,
-      userId: user.userId,
-      oldValue: existing?.note ?? null,
-      newValue: text || null,
-      ...this.provenance(user),
+      await this.auditTx(tx, user, {
+        action: 'order.item.note',
+        entityType: 'order_item',
+        entityId: itemId,
+        oldValue: existing?.note ?? null,
+        newValue: text || null,
+      });
+      return order;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, order);
     return this.orderWithItems(orderId);
@@ -418,7 +418,7 @@ export class OrdersService {
   // Yanlislikla acilan masa: aktif kalemi ve odemesi olmayan adisyon kapatilir (masa bosalir).
   async discardEmptyOrder(user: AuthUser, id: string) {
     const reason = 'Boş adisyon kapatıldı';
-    const { before, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.branchId, id);
       const activeItems = await tx.orderItem.count({
         where: { orderId: id, deletedAt: null, status: { not: OrderItemStatus.Cancelled } },
@@ -429,18 +429,16 @@ export class OrdersService {
           message: 'Adisyonda ürün var; dolu adisyonu yalnızca yönetici iptal edebilir.',
         });
       }
-      return { before: order, updated: await this.cancelInTx(tx, user, order, reason) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.cancel',
-      entityType: 'order',
-      entityId: id,
-      userId: user.userId,
-      oldValue: before,
-      newValue: updated,
-      reason,
-      ...this.provenance(user),
+      const updated = await this.cancelInTx(tx, user, order, reason);
+      await this.auditTx(tx, user, {
+        action: 'order.cancel',
+        entityType: 'order',
+        entityId: id,
+        oldValue: order,
+        newValue: updated,
+        reason,
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(id);
@@ -448,7 +446,7 @@ export class OrdersService {
 
   // Void: gonderilmis/onaylanmis kalemi iptal eder (Owner). Satir kalir, status=cancelled.
   async voidItem(user: AuthUser, orderId: string, itemId: string, dto: VoidItemDto) {
-    const { item, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
       const item = await this.itemOrThrow(orderId, itemId, tx);
       if (item.status === OrderItemStatus.Cancelled) {
@@ -481,17 +479,14 @@ export class OrdersService {
           },
         ),
       );
-      return { item, updated };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.item.void',
-      entityType: 'order_item',
-      entityId: itemId,
-      userId: user.userId,
-      oldValue: item,
-      ...(dto.reason ? { reason: dto.reason } : {}),
-      ...this.provenance(user),
+      await this.auditTx(tx, user, {
+        action: 'order.item.void',
+        entityType: 'order_item',
+        entityId: itemId,
+        oldValue: item,
+        ...(dto.reason ? { reason: dto.reason } : {}),
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
@@ -501,26 +496,24 @@ export class OrdersService {
   // Beklet / tekrar ac + masa tasi
   // ===========================================================================
   async holdOrder(user: AuthUser, orderId: string) {
-    const { order, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
-      return { order, updated: await writeOrderTx(tx, order, { status: OrderStatus.Held }) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.hold',
-      entityType: 'order',
-      entityId: orderId,
-      userId: user.userId,
-      oldValue: order,
-      newValue: updated,
-      ...this.provenance(user),
+      const updated = await writeOrderTx(tx, order, { status: OrderStatus.Held });
+      await this.auditTx(tx, user, {
+        action: 'order.hold',
+        entityType: 'order',
+        entityId: orderId,
+        oldValue: order,
+        newValue: updated,
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
   }
 
   async resumeOrder(user: AuthUser, orderId: string) {
-    const { order, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.branchId, orderId);
       if (order.status !== OrderStatus.Held) {
         throw new ConflictException({
@@ -542,17 +535,14 @@ export class OrdersService {
       const updated = await writeOrderTx(tx, order, { status: OrderStatus.Open }, [
         OrderStatus.Held,
       ]);
-      return { order, updated };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.resume',
-      entityType: 'order',
-      entityId: orderId,
-      userId: user.userId,
-      oldValue: order,
-      newValue: updated,
-      ...this.provenance(user),
+      await this.auditTx(tx, user, {
+        action: 'order.resume',
+        entityType: 'order',
+        entityId: orderId,
+        oldValue: order,
+        newValue: updated,
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
@@ -576,21 +566,18 @@ export class OrdersService {
         data: { status: TableStatus.Occupied, version: { increment: 1 }, syncState: 'pending' },
       });
       if (order.tableId) await freeTableIfIdleTx(tx, user.branchId, order.tableId);
-      return { oldTableId: order.tableId, updated };
+      await this.auditTx(tx, user, {
+        action: 'order.move_table',
+        entityType: 'order',
+        entityId: orderId,
+        oldValue: { tableId: order.tableId },
+        newValue: { tableId: targetTableId },
+      });
+      return updated;
     });
     if (!moved) return this.orderWithItems(orderId);
 
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.move_table',
-      entityType: 'order',
-      entityId: orderId,
-      userId: user.userId,
-      oldValue: { tableId: moved.oldTableId },
-      newValue: { tableId: targetTableId },
-      ...this.provenance(user),
-    });
-    await this.publishOrderEvent(user, DomainEventName.OrderUpdated, moved.updated);
+    await this.publishOrderEvent(user, DomainEventName.OrderUpdated, moved);
     return this.orderWithItems(orderId);
   }
 
@@ -609,52 +596,47 @@ export class OrdersService {
         message: 'Adisyon kendisiyle birlestirilemez.',
       });
     }
-    const { target, source, updatedTarget, cancelledSource } = await this.prisma.$transaction(
-      async (tx) => {
-        const target = await this.lockOpenOrder(tx, user.branchId, targetOrderId);
-        const source = await this.lockOpenOrder(tx, user.branchId, sourceOrderId);
+    const { updatedTarget, cancelledSource } = await this.prisma.$transaction(async (tx) => {
+      const target = await this.lockOpenOrder(tx, user.branchId, targetOrderId);
+      const source = await this.lockOpenOrder(tx, user.branchId, sourceOrderId);
 
-        // Kaynagin odemeleri hedefe TASINMAZ; odemeli kaynak birlesirse musteri
-        // ayni tutari ikinci kez oder -> engelle.
-        if ((await netPaidTx(tx, sourceOrderId)) > 0) {
-          throw new ConflictException({
-            code: 'MERGE_SOURCE_HAS_PAYMENTS',
-            message: 'Odeme alinmis adisyon birlestirilemez; once odemeyi iade edin.',
-          });
-        }
+      // Kaynagin odemeleri hedefe TASINMAZ; odemeli kaynak birlesirse musteri
+      // ayni tutari ikinci kez oder -> engelle.
+      if ((await netPaidTx(tx, sourceOrderId)) > 0) {
+        throw new ConflictException({
+          code: 'MERGE_SOURCE_HAS_PAYMENTS',
+          message: 'Odeme alinmis adisyon birlestirilemez; once odemeyi iade edin.',
+        });
+      }
 
-        await tx.orderItem.updateMany({
-          where: { orderId: sourceOrderId, deletedAt: null },
-          data: { orderId: targetOrderId, version: { increment: 1 }, syncState: 'pending' },
-        });
-        await tx.orderDiscount.updateMany({
-          where: { orderId: sourceOrderId, deletedAt: null },
-          data: { orderId: targetOrderId, version: { increment: 1 }, syncState: 'pending' },
-        });
-        const cancelledSource = await writeOrderTx(tx, source, {
-          ...(await this.computeTotals(tx, sourceOrderId)),
-          status: OrderStatus.Cancelled,
-          closedBy: user.userId,
-          closedAt: new Date(),
-          completedAt: null,
-          note: `Birlestirildi -> ${target.orderNo}`,
-        });
-        const updatedTarget = await this.recompute(tx, user, target);
-        if (source.tableId) await freeTableIfIdleTx(tx, user.branchId, source.tableId);
-        return { target, source, updatedTarget, cancelledSource };
-      },
-    );
-
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.merge',
-      entityType: 'order',
-      entityId: targetOrderId,
-      userId: user.userId,
-      oldValue: { sourceOrderId, sourceOrderNo: source.orderNo },
-      newValue: { targetOrderId, targetOrderNo: target.orderNo },
-      ...this.provenance(user),
+      await tx.orderItem.updateMany({
+        where: { orderId: sourceOrderId, deletedAt: null },
+        data: { orderId: targetOrderId, version: { increment: 1 }, syncState: 'pending' },
+      });
+      await tx.orderDiscount.updateMany({
+        where: { orderId: sourceOrderId, deletedAt: null },
+        data: { orderId: targetOrderId, version: { increment: 1 }, syncState: 'pending' },
+      });
+      const cancelledSource = await writeOrderTx(tx, source, {
+        ...(await this.computeTotals(tx, sourceOrderId)),
+        status: OrderStatus.Cancelled,
+        closedBy: user.userId,
+        closedAt: new Date(),
+        completedAt: null,
+        note: `Birlestirildi -> ${target.orderNo}`,
+      });
+      const updatedTarget = await this.recompute(tx, user, target);
+      if (source.tableId) await freeTableIfIdleTx(tx, user.branchId, source.tableId);
+      await this.auditTx(tx, user, {
+        action: 'order.merge',
+        entityType: 'order',
+        entityId: targetOrderId,
+        oldValue: { sourceOrderId, sourceOrderNo: source.orderNo },
+        newValue: { targetOrderId, targetOrderNo: target.orderNo },
+      });
+      return { updatedTarget, cancelledSource };
     });
+
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updatedTarget);
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, cancelledSource);
     return this.orderWithItems(targetOrderId);
@@ -666,7 +648,7 @@ export class OrdersService {
   // parentOrderId ile bolme soyagaci izlenir.
   async splitOrder(user: AuthUser, sourceOrderId: string, dto: SplitOrderDto) {
     const newOrderId = newId();
-    const { source, updatedSource, newOrder } = await this.prisma.$transaction(async (tx) => {
+    const { updatedSource, newOrder } = await this.prisma.$transaction(async (tx) => {
       const source = await this.lockOpenOrder(tx, user.branchId, sourceOrderId);
       const items = await tx.orderItem.findMany({
         where: { id: { in: dto.itemIds }, orderId: sourceOrderId, deletedAt: null },
@@ -724,27 +706,22 @@ export class OrdersService {
       }
       // Odemeler kaynakta kalir: tasinan kalemler kaynak toplamini alinan odemenin
       // altina dusuremez (recompute ORDER_PAID_EXCEEDS_TOTAL atar, islem geri alinir).
-      return {
-        source,
-        updatedSource: await this.recompute(tx, user, source),
-        newOrder: await this.recompute(tx, user, created),
-      };
+      const updatedSource = await this.recompute(tx, user, source);
+      const newOrder = await this.recompute(tx, user, created);
+      await this.auditTx(tx, user, {
+        action: 'order.split',
+        entityType: 'order',
+        entityId: newOrderId,
+        oldValue: { sourceOrderId, sourceOrderNo: source.orderNo },
+        newValue: {
+          newOrderId,
+          itemIds: dto.itemIds,
+          targetTableId: dto.targetTableId ?? null,
+        },
+      });
+      return { updatedSource, newOrder };
     });
 
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.split',
-      entityType: 'order',
-      entityId: newOrderId,
-      userId: user.userId,
-      oldValue: { sourceOrderId, sourceOrderNo: source.orderNo },
-      newValue: {
-        newOrderId,
-        itemIds: dto.itemIds,
-        targetTableId: dto.targetTableId ?? null,
-      },
-      ...this.provenance(user),
-    });
     await this.publishOrderEvent(user, DomainEventName.OrderCreated, newOrder);
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updatedSource);
     return {
@@ -760,7 +737,7 @@ export class OrdersService {
   // damgalanir (artik duzenlenemez, void gerekir). order.item.sent yayinlanir ->
   // yazdirma modulu hazirlik fisi basar.
   async sendToKitchen(user: AuthUser, orderId: string) {
-    const pending = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       await this.lockOpenOrder(tx, user.branchId, orderId);
       const candidates = await tx.orderItem.findMany({
         where: { orderId, status: OrderItemStatus.Pending, deletedAt: null },
@@ -806,22 +783,18 @@ export class OrdersService {
           ),
         );
       }
-      return claimed;
-    });
-    if (pending.length === 0) {
-      throw new ConflictException({
-        code: 'NOTHING_TO_SEND',
-        message: 'Mutfaga iletilecek yeni kalem yok.',
+      if (claimed.length === 0) {
+        throw new ConflictException({
+          code: 'NOTHING_TO_SEND',
+          message: 'Mutfaga iletilecek yeni kalem yok.',
+        });
+      }
+      await this.auditTx(tx, user, {
+        action: 'order.send_kitchen',
+        entityType: 'order',
+        entityId: orderId,
+        newValue: { sentItemIds: claimed.map((i) => i.id) },
       });
-    }
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.send_kitchen',
-      entityType: 'order',
-      entityId: orderId,
-      userId: user.userId,
-      newValue: { sentItemIds: pending.map((i) => i.id) },
-      ...this.provenance(user),
     });
     return this.orderWithItems(orderId);
   }
@@ -830,77 +803,100 @@ export class OrdersService {
   // Adisyon-seviyesi indirim
   // ===========================================================================
   async applyDiscount(user: AuthUser, orderId: string, dto: ApplyDiscountDto) {
+    // Tekrar korumasi: ayni clientOpId ile gelen ikinci istek ikinci indirim acmaz.
+    if (dto.clientOpId) {
+      const replay = await this.existingDiscountByOp(user, orderId, dto.clientOpId);
+      if (replay) return replay;
+    }
     const hasFull = user.permissions.includes(Permission.DiscountApplyFull);
     const id = newId();
-    const { discount, updated } = await this.prisma.$transaction(async (tx) => {
-      const order = await this.lockOpenOrder(tx, user.branchId, orderId);
-
-      let amount: number;
-      if (dto.type === 'percent') {
-        if (dto.value > 100) {
-          throw new BadRequestException({ code: 'DISCOUNT_INVALID', message: 'Yuzde 100 asamaz.' });
+    let updated;
+    try {
+      updated = await this.prisma.$transaction(async (tx) => {
+        const order = await this.lockOpenOrder(tx, user.branchId, orderId);
+        if (
+          dto.clientOpId &&
+          (await tx.orderDiscount.findUnique({ where: { clientOpId: dto.clientOpId } }))
+        ) {
+          return null;
         }
-        amount = Math.round((order.subtotal * dto.value) / 100);
-      } else {
-        amount = dto.value; // kurus
-      }
-      if (amount <= 0) {
-        throw new BadRequestException({
-          code: 'DISCOUNT_INVALID',
-          message: 'Indirim tutari gecersiz.',
-        });
-      }
-      // Toplam indirim (satir + adisyon) ara toplami asamaz -> grandTotal negatif olmaz.
-      if (order.discountTotal + amount > order.subtotal) {
-        throw new BadRequestException({
-          code: 'DISCOUNT_EXCEEDS',
-          message: 'Toplam indirim ara toplami asamaz.',
-        });
-      }
-      // Yetki esigi TOPLAM indirim uzerinden: mevcut indirimler + yenisi ara toplamin
-      // %10'unu asarsa tam yetki (Owner) gerekir. Yalniz yenisine bakilinca garson %10'u
-      // ust uste ekleyerek sinirsiz indirim yapabiliyordu.
-      const overLimit =
-        (order.discountTotal + amount) * 1000 > order.subtotal * WAITER_MAX_DISCOUNT_PERMILLE;
-      if (overLimit && !hasFull) {
-        throw new ForbiddenException({
-          code: 'DISCOUNT_NEEDS_APPROVAL',
-          message: "Toplam indirim ara toplamın %10'unu aşıyor; yönetici onayı gerekir.",
-        });
-      }
 
-      const discount = await tx.orderDiscount.create({
-        data: {
-          id,
-          orderId,
-          type: dto.type,
-          value: dto.value,
-          amount,
-          appliedBy: user.userId,
-          reason: dto.reason ?? null,
-          approvedBy: hasFull ? user.userId : null,
-          ...this.provenance(user),
-        },
+        let amount: number;
+        if (dto.type === 'percent') {
+          if (dto.value > 100) {
+            throw new BadRequestException({
+              code: 'DISCOUNT_INVALID',
+              message: 'Yuzde 100 asamaz.',
+            });
+          }
+          amount = Math.round((order.subtotal * dto.value) / 100);
+        } else {
+          amount = dto.value; // kurus
+        }
+        if (amount <= 0) {
+          throw new BadRequestException({
+            code: 'DISCOUNT_INVALID',
+            message: 'Indirim tutari gecersiz.',
+          });
+        }
+        // Toplam indirim (satir + adisyon) ara toplami asamaz -> grandTotal negatif olmaz.
+        if (order.discountTotal + amount > order.subtotal) {
+          throw new BadRequestException({
+            code: 'DISCOUNT_EXCEEDS',
+            message: 'Toplam indirim ara toplami asamaz.',
+          });
+        }
+        // Yetki esigi TOPLAM indirim uzerinden: mevcut indirimler + yenisi ara toplamin
+        // %10'unu asarsa tam yetki (Owner) gerekir. Yalniz yenisine bakilinca garson %10'u
+        // ust uste ekleyerek sinirsiz indirim yapabiliyordu.
+        const overLimit =
+          (order.discountTotal + amount) * 1000 > order.subtotal * WAITER_MAX_DISCOUNT_PERMILLE;
+        if (overLimit && !hasFull) {
+          throw new ForbiddenException({
+            code: 'DISCOUNT_NEEDS_APPROVAL',
+            message: "Toplam indirim ara toplamın %10'unu aşıyor; yönetici onayı gerekir.",
+          });
+        }
+
+        const discount = await tx.orderDiscount.create({
+          data: {
+            id,
+            orderId,
+            type: dto.type,
+            value: dto.value,
+            amount,
+            appliedBy: user.userId,
+            reason: dto.reason ?? null,
+            approvedBy: hasFull ? user.userId : null,
+            ...(dto.clientOpId ? { clientOpId: dto.clientOpId } : {}),
+            ...this.provenance(user),
+          },
+        });
+        // Toplam alinan odemenin altina inerse recompute ORDER_PAID_EXCEEDS_TOTAL atar.
+        const updated = await this.recompute(tx, user, order);
+        await this.auditTx(tx, user, {
+          action: 'order.discount.apply',
+          entityType: 'order_discount',
+          entityId: id,
+          newValue: discount,
+          ...(dto.reason ? { reason: dto.reason } : {}),
+        });
+        return updated;
       });
-      // Toplam alinan odemenin altina inerse recompute ORDER_PAID_EXCEEDS_TOTAL atar.
-      return { discount, updated: await this.recompute(tx, user, order) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.discount.apply',
-      entityType: 'order_discount',
-      entityId: id,
-      userId: user.userId,
-      newValue: discount,
-      ...(dto.reason ? { reason: dto.reason } : {}),
-      ...this.provenance(user),
-    });
+    } catch (e) {
+      if (dto.clientOpId && isUniqueViolation(e)) {
+        const replay = await this.existingDiscountByOp(user, orderId, dto.clientOpId);
+        if (replay) return replay;
+      }
+      throw e;
+    }
+    if (!updated) return this.orderWithItems(orderId);
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
   }
 
   async removeDiscount(user: AuthUser, orderId: string, discountId: string) {
-    const { discount, updated } = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user.branchId, orderId);
       const discount = await tx.orderDiscount.findFirst({
         where: { id: discountId, orderId, deletedAt: null },
@@ -913,16 +909,14 @@ export class OrdersService {
         data: { deletedAt: new Date(), version: { increment: 1 }, syncState: 'pending' },
       });
       if (removed.count !== 1) throw orderChangedError();
-      return { discount, updated: await this.recompute(tx, user, order) };
-    });
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'order.discount.remove',
-      entityType: 'order_discount',
-      entityId: discountId,
-      userId: user.userId,
-      oldValue: discount,
-      ...this.provenance(user),
+      const updated = await this.recompute(tx, user, order);
+      await this.auditTx(tx, user, {
+        action: 'order.discount.remove',
+        entityType: 'order_discount',
+        entityId: discountId,
+        oldValue: discount,
+      });
+      return updated;
     });
     await this.publishOrderEvent(user, DomainEventName.OrderUpdated, updated);
     return this.orderWithItems(orderId);
@@ -1133,6 +1127,22 @@ export class OrdersService {
       });
     }
     return this.orderWithItems(existing.id);
+  }
+
+  // Ayni clientOpId ile uygulanmis indirim (idempotent tekrar) ya da null.
+  private async existingDiscountByOp(user: AuthUser, orderId: string, clientOpId: string) {
+    const existing = await this.prisma.orderDiscount.findUnique({
+      where: { clientOpId },
+      include: { order: { select: { branchId: true } } },
+    });
+    if (!existing) return null;
+    if (existing.orderId !== orderId || existing.order.branchId !== user.branchId) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Bu işlem anahtarı başka bir indirimde kullanılmış.',
+      });
+    }
+    return this.orderWithItems(orderId);
   }
 
   // Ayni clientOpId ile eklenmis kalem (idempotent tekrar) ya da null.

@@ -216,36 +216,76 @@ export class CashService {
         message: 'Para çıkışı için açıklama yazın.',
       });
     }
-    return this.prisma.$transaction(async (tx) => {
-      const session = await tx.cashSession.findFirst({
-        where: { branchId: user.branchId, status: 'open', deletedAt: null },
+    // Tekrar korumasi: zaman asimi/cift dokunusla gelen ikinci istek ilk kaydi doner.
+    if (dto.idempotencyKey) {
+      const replay = await this.existingTxnByKey(user, dto.idempotencyKey);
+      if (replay) return replay;
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const session = await tx.cashSession.findFirst({
+          where: { branchId: user.branchId, status: 'open', deletedAt: null },
+        });
+        if (!session) {
+          throw new ConflictException('İşlem yapabilmek için önce kasa oturumu açmalısınız.');
+        }
+        if (dto.idempotencyKey) {
+          const existing = await tx.cashTransaction.findUnique({
+            where: { idempotencyKey: dto.idempotencyKey },
+          });
+          if (existing) return existing;
+        }
+        const created = await tx.cashTransaction.create({
+          data: {
+            id: newId(),
+            cashSessionId: session.id,
+            type: dto.type,
+            amount: dto.amount,
+            method: dto.method,
+            createdBy: user.userId,
+            note: note || null,
+            ...(dto.idempotencyKey ? { idempotencyKey: dto.idempotencyKey } : {}),
+          },
+        });
+        await this.audit.recordTx(tx, {
+          branchId: user.branchId,
+          action: 'cash.txn.create',
+          entityType: 'cash_transaction',
+          entityId: created.id,
+          userId: user.userId,
+          newValue: created,
+          ...(note ? { reason: note } : {}),
+          ...this.provenance(user),
+        });
+        return created;
       });
-      if (!session) {
-        throw new ConflictException('İşlem yapabilmek için önce kasa oturumu açmalısınız.');
+    } catch (e) {
+      const unique =
+        (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') ||
+        /UNIQUE constraint failed/i.test(e instanceof Error ? e.message : '');
+      if (dto.idempotencyKey && unique) {
+        const replay = await this.existingTxnByKey(user, dto.idempotencyKey);
+        if (replay) return replay;
       }
-      const created = await tx.cashTransaction.create({
-        data: {
-          id: newId(),
-          cashSessionId: session.id,
-          type: dto.type,
-          amount: dto.amount,
-          method: dto.method,
-          createdBy: user.userId,
-          note: note || null,
-        },
-      });
-      await this.audit.recordTx(tx, {
-        branchId: user.branchId,
-        action: 'cash.txn.create',
-        entityType: 'cash_transaction',
-        entityId: created.id,
-        userId: user.userId,
-        newValue: created,
-        ...(note ? { reason: note } : {}),
-        ...this.provenance(user),
-      });
-      return created;
+      throw e;
+    }
+  }
+
+  // Ayni anahtarla yazilmis elle kasa hareketi (idempotent tekrar) ya da null.
+  private async existingTxnByKey(user: AuthUser, idempotencyKey: string) {
+    const existing = await this.prisma.cashTransaction.findUnique({
+      where: { idempotencyKey },
+      include: { cashSession: { select: { branchId: true } } },
     });
+    if (!existing) return null;
+    if (existing.cashSession.branchId !== user.branchId) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Bu işlem anahtarı başka bir şubede kullanılmış.',
+      });
+    }
+    const { cashSession: _session, ...txn } = existing;
+    return txn;
   }
 
   // ===========================================================================

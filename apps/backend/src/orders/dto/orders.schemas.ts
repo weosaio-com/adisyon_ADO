@@ -88,6 +88,7 @@ export const applyDiscountSchema = z
       .positive('İndirim sıfırdan büyük olmalıdır.')
       .max(MAX_MONEY_KURUS, 'İndirim en fazla 10.000.000 TL olabilir.'),
     reason: z.string().nullish(),
+    clientOpId, // tekrar korumasi: ayni anahtarla ikinci istek ikinci indirim acmaz
   })
   .refine((d) => d.type !== 'percent' || d.value <= 100, {
     message: 'Yüzde indirim en fazla 100 olabilir.',

@@ -63,9 +63,8 @@ export class PaymentsService {
     }
 
     const paymentId = newId();
-    let payment;
     try {
-      payment = await this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx) => {
         const order = await tx.order.findFirst({
           where: { id: orderId, branchId: user.branchId, deletedAt: null },
         });
@@ -228,7 +227,16 @@ export class PaymentsService {
             },
           ),
         );
-        return p;
+        // Denetim kaydi ayni islemde: yazilamazsa odeme de yazilmaz.
+        await this.audit.recordTx(tx, {
+          branchId: user.branchId,
+          action: 'payment.take',
+          entityType: 'payment',
+          entityId: paymentId,
+          userId: user.userId,
+          newValue: p,
+          ...this.provenance(user),
+        });
       });
     } catch (e) {
       // Yaris: ayni idempotencyKey araya girdi -> idempotent don.
@@ -243,16 +251,6 @@ export class PaymentsService {
       }
       throw e;
     }
-
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'payment.take',
-      entityType: 'payment',
-      entityId: paymentId,
-      userId: user.userId,
-      newValue: payment,
-      ...this.provenance(user),
-    });
 
     return this.orderWithPayments(user.branchId, orderId);
   }
@@ -273,9 +271,8 @@ export class PaymentsService {
     }
 
     const refundId = newId();
-    let refund;
     try {
-      refund = await this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx) => {
         const order = await tx.order.findFirst({
           where: { id: orderId, branchId: user.branchId, deletedAt: null },
         });
@@ -476,7 +473,16 @@ export class PaymentsService {
             },
           ),
         );
-        return refundPayment;
+        await this.audit.recordTx(tx, {
+          branchId: user.branchId,
+          action: 'payment.refund',
+          entityType: 'payment',
+          entityId: refundId,
+          userId: user.userId,
+          newValue: refundPayment,
+          ...(dto.reason ? { reason: dto.reason } : {}),
+          ...this.provenance(user),
+        });
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -499,17 +505,6 @@ export class PaymentsService {
       }
       throw e;
     }
-
-    await this.audit.record({
-      branchId: user.branchId,
-      action: 'payment.refund',
-      entityType: 'payment',
-      entityId: refundId,
-      userId: user.userId,
-      newValue: refund,
-      ...(dto.reason ? { reason: dto.reason } : {}),
-      ...this.provenance(user),
-    });
 
     return this.orderWithPayments(user.branchId, orderId);
   }

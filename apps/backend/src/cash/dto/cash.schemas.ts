@@ -17,5 +17,7 @@ export const createCashTransactionSchema = z.object({
   amount: moneyKurus(), // kurus (girdi/cikti durumuna gore +/-)
   method: z.nativeEnum(PaymentMethod),
   note: z.string().nullish(),
+  // Tekrar korumasi (istege bagli): ayni anahtarla gelen ikinci istek ikinci hareket acmaz.
+  idempotencyKey: z.string().min(1).max(100).optional(),
 });
 export type CreateCashTransactionDto = z.infer<typeof createCashTransactionSchema>;
