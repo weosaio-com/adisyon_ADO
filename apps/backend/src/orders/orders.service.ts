@@ -748,11 +748,18 @@ export class OrdersService {
   // Bekleyen (pending) kalemleri mutfaga iletir: status -> sent, sentToKitchenAt
   // damgalanir (artik duzenlenemez, void gerekir). order.item.sent yayinlanir ->
   // yazdirma modulu hazirlik fisi basar.
-  async sendToKitchen(user: AuthUser, orderId: string) {
+  // opts.itemIds: yalniz bu kalemler gonderilir (cevrimdisi siparis baska tabletin acik
+  // adisyonuyla birlesince o garsonun henuz gondermedigi kalemler mutfaga gitmesin).
+  async sendToKitchen(user: AuthUser, orderId: string, opts: { itemIds?: string[] } = {}) {
     await this.prisma.$transaction(async (tx) => {
       await this.lockOpenOrder(tx, user.branchId, orderId);
       const candidates = await tx.orderItem.findMany({
-        where: { orderId, status: OrderItemStatus.Pending, deletedAt: null },
+        where: {
+          orderId,
+          status: OrderItemStatus.Pending,
+          deletedAt: null,
+          ...(opts.itemIds ? { id: { in: opts.itemIds } } : {}),
+        },
       });
       const claimed: typeof candidates = [];
       for (const item of candidates) {

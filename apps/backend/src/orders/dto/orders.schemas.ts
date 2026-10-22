@@ -80,6 +80,14 @@ export const splitOrderSchema = z.object({
 });
 export type SplitOrderDto = z.infer<typeof splitOrderSchema>;
 
+// --- Mutfaga gonder (istege bagli: yalniz secili bekleyen kalemler) ---
+export const sendKitchenSchema = z
+  .object({
+    itemIds: z.array(z.string().min(1)).min(1).max(500).optional(),
+  })
+  .optional();
+export type SendKitchenDto = z.infer<typeof sendKitchenSchema>;
+
 // --- Adisyon-seviyesi indirim ---
 // percent: value = yuzde (1-100). amount: value = kurus.
 export const applyDiscountSchema = z
