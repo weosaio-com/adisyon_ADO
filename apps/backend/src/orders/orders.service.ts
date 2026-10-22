@@ -15,6 +15,7 @@ import {
   OrderItemStatus,
   TableStatus,
   Permission,
+  WAITER_MAX_DISCOUNT_PERMILLE,
 } from '@ado/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
@@ -856,12 +857,15 @@ export class OrdersService {
           message: 'Toplam indirim ara toplami asamaz.',
         });
       }
-      // Yetki esigi: ara toplamin %10'unu asan indirim tam-yetki (Owner) gerektirir.
-      const ratio = order.subtotal > 0 ? amount / order.subtotal : 1;
-      if (ratio > 0.1 && !hasFull) {
+      // Yetki esigi TOPLAM indirim uzerinden: mevcut indirimler + yenisi ara toplamin
+      // %10'unu asarsa tam yetki (Owner) gerekir. Yalniz yenisine bakilinca garson %10'u
+      // ust uste ekleyerek sinirsiz indirim yapabiliyordu.
+      const overLimit =
+        (order.discountTotal + amount) * 1000 > order.subtotal * WAITER_MAX_DISCOUNT_PERMILLE;
+      if (overLimit && !hasFull) {
         throw new ForbiddenException({
           code: 'DISCOUNT_NEEDS_APPROVAL',
-          message: '%10 uzeri indirim Owner onayi gerektirir.',
+          message: "Toplam indirim ara toplamın %10'unu aşıyor; yönetici onayı gerekir.",
         });
       }
 

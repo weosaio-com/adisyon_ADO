@@ -21,6 +21,16 @@ const netPaid = async (orderId) =>
   );
 /** Hata zarfindaki kod (basarili yanitta undefined). */
 const code = (res) => res.data?.error?.code;
+/** Baska kullanicinin belirteciyle istek (garson PIN girisi gibi). */
+const callAs = async (token, method, path, body) => {
+  const res = await fetch(backend.base + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  const json = await res.json().catch(() => ({}));
+  return { status: res.status, data: json.data ?? json };
+};
 const getOrder = async (orderId) => must(await call('GET', `/orders/${orderId}`), 'adisyon');
 
 try {
@@ -393,6 +403,45 @@ try {
     );
     t.check(fixed.status === 'completed', 'SAT-9 dogru yontemle yeniden odenir');
     must(await call('POST', `/orders/${next.id}/discard`), 'bos adisyon');
+  }
+
+  // --- SAT-10: garson %10 indirim sinirini ust uste ekleyerek asamaz ---
+  {
+    must(
+      await call('POST', '/users', {
+        username: 'garson1',
+        displayName: 'Garson',
+        role: 'waiter',
+        pin: '4321',
+      }),
+      'garson',
+    );
+    const login = await fetch(`${backend.base}/auth/login-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'garson1', pin: '4321' }),
+    }).then((r) => r.json());
+    const waiter = login.data.accessToken;
+    const order = await takeaway(p50, p50); // 100 TL
+    const discount = (value) =>
+      callAs(waiter, 'POST', `/orders/${order.id}/discounts`, {
+        type: 'percent',
+        value,
+        reason: 'Müdavim',
+      });
+    const firstTen = await discount(10);
+    const secondTen = await discount(10);
+    t.check(firstTen.status === 201, `SAT-10 garson %10 indirim yapar (${firstTen.status})`);
+    t.check(
+      secondTen.status === 403 && code(secondTen) === 'DISCOUNT_NEEDS_APPROVAL',
+      `SAT-10 ikinci %10 toplam sinira takilir (${secondTen.status} ${code(secondTen)})`,
+    );
+    const after = await getOrder(order.id);
+    t.check(
+      after.discountTotal === 1000,
+      `SAT-10 toplam indirim %10'da kalir (${after.discountTotal})`,
+    );
+    must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
   }
 } finally {
   await backend.stop(child);
