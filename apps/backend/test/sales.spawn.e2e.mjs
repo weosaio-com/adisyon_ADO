@@ -74,6 +74,28 @@ try {
     return getOrder(order.id);
   };
 
+  // --- URN-1: kategori/urun/masa listeleri Turkce dogal sirada ---
+  {
+    must(await call('POST', '/tables', { hallId: hall.id, name: 'Masa 10' }), 'masa 10');
+    const tableNames = must(await call('GET', `/tables?hallId=${hall.id}`), 'masalar').map(
+      (row) => row.name,
+    );
+    t.check(
+      tableNames.join(',') === 'Masa 1,Masa 2,Masa 3,Masa 4,Masa 5,Masa 6,Masa 10',
+      `URN-1 masalar sayi sirasinda (${tableNames.join(',')})`,
+    );
+    for (const name of ['Tatlılar', 'Çorbalar', 'Izgaralar', 'Ana Yemekler']) {
+      must(await call('POST', '/categories', { name }), name);
+    }
+    const catNames = must(await call('GET', '/categories'), 'kategoriler')
+      .map((row) => row.name)
+      .filter((name) => name !== 'Satis');
+    t.check(
+      catNames.join(',') === 'Ana Yemekler,Çorbalar,Izgaralar,Tatlılar',
+      `URN-1 kategoriler Turkce sirada (${catNames.join(',')})`,
+    );
+  }
+
   // --- SAT-4: odeme ile ayni anda eklenen kalem kapanmis adisyonda odenmeden kalmaz ---
   {
     let broken = 0;

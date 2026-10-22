@@ -13,6 +13,7 @@ import {
   encodeTableCode,
   TABLE_CODE_BYTES,
 } from '@ado/shared';
+import { sortNatural } from './natural-order';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
@@ -102,11 +103,11 @@ export class TablesService implements OnModuleInit {
   // ===========================================================================
   // Salon (Hall)
   // ===========================================================================
-  listHalls(user: AuthUser) {
-    return this.prisma.hall.findMany({
+  async listHalls(user: AuthUser) {
+    const rows = await this.prisma.hall.findMany({
       where: { branchId: user.branchId, deletedAt: null },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    return sortNatural(rows); // Turkce dogal sira: sortOrder, sonra ad
   }
 
   getHall(user: AuthUser, id: string) {
@@ -195,16 +196,16 @@ export class TablesService implements OnModuleInit {
   // ===========================================================================
   // Masa (Table)
   // ===========================================================================
-  listTables(user: AuthUser, query: TableQueryDto) {
-    return this.prisma.table.findMany({
+  async listTables(user: AuthUser, query: TableQueryDto) {
+    const rows = await this.prisma.table.findMany({
       where: {
         branchId: user.branchId,
         deletedAt: null,
         ...(query.hallId ? { hallId: query.hallId } : {}),
         ...(query.active !== undefined ? { isActive: query.active } : {}),
       },
-      orderBy: [{ name: 'asc' }],
     });
+    return sortNatural(rows); // "Masa 2" < "Masa 10" (bayt sirasi tersini veriyordu)
   }
 
   getTable(user: AuthUser, id: string) {
