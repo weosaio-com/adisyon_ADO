@@ -22,7 +22,7 @@ import { AuditService, type AuditEntry } from '../common/audit/audit.service';
 import { EventBusService } from '../common/events/event-bus.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { LicenseService } from '../license/license.service';
-import { computeItemTotals, applyOrderDiscounts } from './orders.calc';
+import { computeItemTotals, applyOrderDiscounts, effectiveDiscountAmounts } from './orders.calc';
 import { assertMoneyWithinLimit, formatTl } from '../payments/money-limits';
 import {
   ACTIVE_ORDER_STATUSES,
@@ -710,6 +710,27 @@ export class OrdersService {
         where: { id: { in: dto.itemIds }, orderId: sourceOrderId, deletedAt: null },
         data: { orderId: newOrderId, version: { increment: 1 }, syncState: 'pending' },
       });
+      // Yuzde indirim masanin tamamina verilmistir: bolunen hesaba da ayni oran uygulanir
+      // (tutar indirimi kaynakta kalir). Tutarlar iki adisyonda da yeniden hesaplanir.
+      const percentDiscounts = await tx.orderDiscount.findMany({
+        where: { orderId: sourceOrderId, deletedAt: null, type: 'percent' },
+      });
+      for (const d of percentDiscounts) {
+        await tx.orderDiscount.create({
+          data: {
+            id: newId(),
+            orderId: newOrderId,
+            discountId: d.discountId,
+            type: d.type,
+            value: d.value,
+            amount: 0,
+            appliedBy: d.appliedBy,
+            reason: d.reason,
+            approvedBy: d.approvedBy,
+            ...this.provenance(user),
+          },
+        });
+      }
       if (dto.targetTableId) {
         await tx.table.update({
           where: { id: dto.targetTableId },
@@ -996,19 +1017,28 @@ export class OrdersService {
       select: { lineTotal: true, lineDiscount: true, taxRatePermille: true },
     });
     // Adisyon-seviyesi indirimler (satir indirimine EK); icerideki KDV indirimli tutardan.
+    // Yuzde indirim guncel ara toplamdan yeniden hesaplanir ve satirina yazilir (fis/rapor
+    // ayni tutari gorur): "%10" yazan indirim kalem eklenince/iptal edilince %10 kalir.
     const orderDiscounts = await tx.orderDiscount.findMany({
       where: { orderId, deletedAt: null },
-      select: { amount: true },
+      select: { id: true, type: true, value: true, amount: true },
     });
-    const totals = applyOrderDiscounts(
-      computeItemTotals(items),
-      orderDiscounts.map((d) => d.amount),
-      items,
-    );
+    const itemTotals = computeItemTotals(items);
+    const amounts = effectiveDiscountAmounts(itemTotals.subtotal, orderDiscounts);
+    for (const [i, d] of orderDiscounts.entries()) {
+      const amount = amounts[i]!;
+      if (amount !== d.amount) {
+        await tx.orderDiscount.update({
+          where: { id: d.id },
+          data: { amount, version: { increment: 1 }, syncState: 'pending' },
+        });
+      }
+    }
+    const totals = applyOrderDiscounts(itemTotals, amounts, items);
     if (totals.discountTotal > totals.subtotal || totals.grandTotal < 0) {
       throw new ConflictException({
         code: 'DISCOUNT_EXCEEDS',
-        message: 'Toplam indirim ara toplami asamaz.',
+        message: 'Toplam indirim ara toplamı aşıyor; önce indirimi kaldırın ya da azaltın.',
       });
     }
     // Toplamlar 32-bit alana yazilir: ara toplam (en buyuk deger) sinirda tutulur.

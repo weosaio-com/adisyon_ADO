@@ -33,6 +33,17 @@ export function computeItemTotals(items: TotalsInput[]): OrderTotals {
   return { subtotal, discountTotal, taxTotal, serviceCharge, coverCharge, grandTotal };
 }
 
+// Adisyon indirimlerinin guncel tutari: yuzde indirim GUNCEL ara toplamdan yeniden
+// hesaplanir (sonradan eklenen kaleme de uygulanir, iptalde kuculur); tutar indirimi sabit.
+export function effectiveDiscountAmounts(
+  subtotal: number,
+  discounts: Array<{ type: string; value: number; amount: number }>,
+): number[] {
+  return discounts.map((d) =>
+    d.type === 'percent' ? Math.round((subtotal * d.value) / 100) : d.amount,
+  );
+}
+
 // Adisyon-seviyesi indirimleri (satir indirimine EK) katar. KDV fiyata dahil oldugundan
 // indirim KDV'yi de dusurur: indirim kalemlere net tutarlariyla orantili dagitilir ve
 // icerideki KDV indirimli tutardan satir bazinda yeniden hesaplanir (`items` verilirse).
@@ -102,6 +113,18 @@ if (require.main === module) {
   const mixedHalf = applyOrderDiscounts(computeItemTotals(mixed), [11500], mixed);
   assert.strictEqual(mixedHalf.taxTotal, 500 + 1000, 'oranli dagitim (1000/2 + 2000/2)');
   assert.strictEqual(applyOrderDiscounts(computeItemTotals(mixed), [23000], mixed).taxTotal, 0);
+  // SAT-14: yuzde indirim guncel ara toplamdan; tutar indirimi sabit.
+  assert.deepStrictEqual(
+    effectiveDiscountAmounts(20000, [
+      { type: 'percent', value: 10, amount: 1000 },
+      { type: 'amount', value: 500, amount: 500 },
+    ]),
+    [2000, 500],
+  );
+  assert.deepStrictEqual(
+    effectiveDiscountAmounts(1000, [{ type: 'percent', value: 10, amount: 2000 }]),
+    [100],
+  );
   // Indirimsiz: KDV aynen.
   assert.strictEqual(applyOrderDiscounts(computeItemTotals(mixed), [], mixed).taxTotal, 3000);
 

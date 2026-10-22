@@ -612,6 +612,85 @@ try {
     must(await call('POST', `/orders/${order.id}/cancel`, { reason: 'test' }), 'iptal');
   }
 
+  // --- SAT-14: yuzde indirim guncel ara toplamdan; bolunen hesaba da uygulanir ---
+  {
+    // (a) %10 sonrasi eklenen kaleme de uygulanir.
+    const grow = await takeaway(p50, p50);
+    must(
+      await call('POST', `/orders/${grow.id}/discounts`, {
+        type: 'percent',
+        value: 10,
+        reason: 'Müdavim',
+      }),
+      'indirim',
+    );
+    const grown = must(
+      await call('POST', `/orders/${grow.id}/items`, { productId: p50.id, quantity: 2000 }),
+      'kalem',
+    );
+    t.check(
+      grown.subtotal === 20000 && grown.discountTotal === 2000 && grown.grandTotal === 18000,
+      `SAT-14 yuzde indirim yeni kaleme de uygulanir (${grown.discountTotal}/${grown.grandTotal})`,
+    );
+    t.check(grown.discounts[0]?.amount === 2000, 'SAT-14 indirim satirindaki tutar guncel');
+    must(await call('POST', `/orders/${grow.id}/cancel`, { reason: 'test' }), 'iptal');
+
+    // (b) Kalem silinince yuzde indirim kuculur; tutar indirimi asarsa anlasilir 409.
+    const shrink = await takeaway(p50, p10);
+    must(
+      await call('POST', `/orders/${shrink.id}/discounts`, {
+        type: 'percent',
+        value: 10,
+        reason: 'Müdavim',
+      }),
+      'indirim',
+    );
+    const kebap = shrink.items.find((i) => i.productId === p50.id);
+    const shrunk = must(await call('DELETE', `/orders/${shrink.id}/items/${kebap.id}`), 'sil');
+    t.check(
+      shrunk.discountTotal === 100 && shrunk.grandTotal === 900,
+      `SAT-14 kalem silinince yuzde indirim kuculur (${shrunk.discountTotal}/${shrunk.grandTotal})`,
+    );
+    must(await call('POST', `/orders/${shrink.id}/cancel`, { reason: 'test' }), 'iptal');
+    const fixed = await takeaway(p50, p10);
+    must(
+      await call('POST', `/orders/${fixed.id}/discounts`, {
+        type: 'amount',
+        value: 5000,
+        reason: 'Müdavim',
+      }),
+      'tutar indirimi',
+    );
+    const fixedKebap = fixed.items.find((i) => i.productId === p50.id);
+    const blocked = await call('DELETE', `/orders/${fixed.id}/items/${fixedKebap.id}`);
+    t.check(
+      blocked.status === 409 && code(blocked) === 'DISCOUNT_EXCEEDS',
+      `SAT-14 tutar indirimi ara toplami asarsa silme reddedilir (${blocked.status} ${code(blocked)})`,
+    );
+    must(await call('POST', `/orders/${fixed.id}/cancel`, { reason: 'test' }), 'iptal');
+
+    // (c) Bolmede yuzde indirim iki hesaba da uygulanir.
+    const whole = await takeaway(p50, p50);
+    must(
+      await call('POST', `/orders/${whole.id}/discounts`, {
+        type: 'percent',
+        value: 10,
+        reason: 'Müdavim',
+      }),
+      'indirim',
+    );
+    const split = must(
+      await call('POST', `/orders/${whole.id}/split`, { itemIds: [whole.items[0].id] }),
+      'bol',
+    );
+    t.check(
+      split.source.grandTotal === 4500 && split.created.grandTotal === 4500,
+      `SAT-14 bolunen iki hesapta da %10 (${split.source.grandTotal}/${split.created.grandTotal})`,
+    );
+    must(await call('POST', `/orders/${whole.id}/cancel`, { reason: 'test' }), 'iptal');
+    must(await call('POST', `/orders/${split.created.id}/cancel`, { reason: 'test' }), 'iptal');
+  }
+
   // --- SAT-16: elle kasa hareketi yalniz nakit giris/cikis, isaret turden, aciklama zorunlu ---
   {
     const txn = (body) => call('POST', '/cash/transactions', { method: 'cash', ...body });
