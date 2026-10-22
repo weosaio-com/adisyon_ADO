@@ -96,6 +96,23 @@ try {
     );
   }
 
+  // --- OFF-10: ayni masaya es zamanli acilista kaybeden anlasilir 409 alir ---
+  {
+    const table = tables[5];
+    const opens = await Promise.all(
+      [1, 2, 3].map(() => call('POST', '/orders', { tableId: table.id })),
+    );
+    const won = opens.filter((r) => r.status === 201);
+    const lost = opens.filter((r) => r.status !== 201);
+    t.check(
+      won.length === 1 && lost.every((r) => code(r) === 'TABLE_HAS_OPEN_ORDER'),
+      `OFF-10 tek adisyon, digerleri TABLE_HAS_OPEN_ORDER (${opens
+        .map((r) => `${r.status}:${code(r) ?? 'ok'}`)
+        .join(' ')})`,
+    );
+    must(await call('POST', `/orders/${won[0].data.id}/discard`), 'bos adisyon');
+  }
+
   // --- SAT-4: odeme ile ayni anda eklenen kalem kapanmis adisyonda odenmeden kalmaz ---
   {
     let broken = 0;
