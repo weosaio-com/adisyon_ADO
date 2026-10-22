@@ -83,6 +83,8 @@ function packagedEnv() {
   appConfig = config;
   return {
     NODE_ENV: 'production',
+    // Duz dosya yolu: backend bunu yol olarak da okur (veri dizini). Tek baglanti siniri
+    // (connection_limit=1, SQLite tek yazar) backend'in Prisma istemcisinde eklenir (tek kaynak).
     DATABASE_URL: 'file:' + dbPath.replaceAll('\\', '/'),
     ADO_DATA_DIR: dataDir,
     API_PORT: PORT,
