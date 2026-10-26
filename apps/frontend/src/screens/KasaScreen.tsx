@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError, hasPerm, isConnectivityError } from '../lib/api';
 import TextPromptModal from '../components/TextPromptModal';
+import { useDialogs } from '../components/DialogProvider';
 import { ulid } from '../offline/ids';
 import { formatKurus, parseTlToKurus as toKurus } from '../lib/format';
 import type { CashSession, Order } from '../lib/types';
@@ -23,10 +24,26 @@ const TXN_LABELS: Record<string, string> = {
   closing: 'Kapanış',
 };
 
+// Kapanmis kasa oturumu (POST /cash/sessions/close yaniti) + kapanistan hemen once alinan
+// tahsilat dokumu: gun sonu ozeti ekranda kalir ve yazdirilabilir (URN-5 / SAT-21).
+interface ClosedSession {
+  openedAt?: string;
+  closedAt?: string | null;
+  openingFloat: number;
+  expectedAmount: number | null;
+  countedAmount: number | null;
+  difference: number | null;
+}
+export interface CloseSummary {
+  session: ClosedSession;
+  payments: { method: string; totalKurus: number }[];
+}
+
 export default function KasaScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [error, setError] = useState('');
+  const [summary, setSummary] = useState<CloseSummary | null>(null);
 
   const session = useQuery<CashSession>({
     queryKey: ['cash', 'active'],
@@ -47,9 +64,12 @@ export default function KasaScreen() {
   });
 
   return (
-    <div className="flex h-full flex-col bg-slate-100">
-      <header className="flex items-center gap-3 bg-white px-6 py-3 shadow">
-        <button onClick={() => nav('/')} className="rounded-lg bg-slate-200 px-3 py-1 font-medium">
+    <div className="flex h-full flex-col bg-slate-100 print:bg-white">
+      <header className="flex items-center gap-3 bg-white px-6 py-3 shadow print:hidden">
+        <button
+          onClick={() => nav('/')}
+          className="min-h-11 rounded-lg bg-slate-200 px-3 font-medium"
+        >
           ← Masalar
         </button>
         <h1 className="text-lg font-bold text-slate-800">Kasa</h1>
@@ -60,16 +80,28 @@ export default function KasaScreen() {
 
         {session.isLoading && <p className="p-6 text-center text-slate-400">Yükleniyor…</p>}
 
-        {/* Yatay düzen: solda kasa oturumu, sağda açık adisyonlar */}
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          <div>
-            {panel === 'open' && <OpenForm onDone={refresh} onError={fail} />}
-            {panel === 'active' && session.data && (
-              <ActiveSession session={session.data} onDone={refresh} onError={fail} />
-            )}
+        {summary ? (
+          <DayEndSummary summary={summary} onDone={() => setSummary(null)} />
+        ) : (
+          /* Yatay düzen: solda kasa oturumu, sağda açık adisyonlar */
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <div>
+              {panel === 'open' && <OpenForm onDone={refresh} onError={fail} />}
+              {panel === 'active' && session.data && (
+                <ActiveSession
+                  session={session.data}
+                  onDone={refresh}
+                  onError={fail}
+                  onClosed={(closed) => {
+                    setSummary(closed);
+                    refresh();
+                  }}
+                />
+              )}
+            </div>
+            <OpenOrdersPanel />
           </div>
-          <OpenOrdersPanel />
-        </div>
+        )}
       </div>
     </div>
   );
@@ -155,11 +187,15 @@ function ActiveSession({
   session,
   onDone,
   onError,
+  onClosed,
 }: {
   session: CashSession;
   onDone: () => void;
   onError: (e: unknown) => void;
+  onClosed: (summary: CloseSummary) => void;
 }) {
+  const qc = useQueryClient();
+  const { confirmDialog } = useDialogs();
   const [dir, setDir] = useState<'payout' | 'income'>('income');
   const [amountTl, setAmountTl] = useState('');
   const [note, setNote] = useState('');
@@ -205,9 +241,21 @@ function ActiveSession({
   });
 
   const close = useMutation({
-    mutationFn: (countedAmount: number) =>
-      api('/cash/sessions/close', { method: 'POST', body: { countedAmount } }),
-    onSuccess: onDone,
+    mutationFn: async (countedAmount: number) => {
+      // Tahsilat dokumu kapanistan once alinir (kapanistan sonra acik oturum raporu yok).
+      const shift = await api<ShiftPayments | null>('/reports/shift').catch(
+        () => qc.getQueryData<ShiftPayments | null>(['shift', 'payments']) ?? null,
+      );
+      const closed = await api<ClosedSession>('/cash/sessions/close', {
+        method: 'POST',
+        body: { countedAmount },
+      });
+      return { session: closed, payments: shift?.payments ?? [] };
+    },
+    onSuccess: (result) => {
+      setCountTl('');
+      onClosed(result);
+    },
     onError,
   });
 
@@ -233,7 +281,22 @@ function ActiveSession({
   };
 
   const countKurus = toKurus(countTl);
-  const closeValid = countTl.trim() !== '' && Number.isFinite(countKurus) && countKurus >= 0;
+  const countLimit = moneyLimitError(countKurus);
+  const closeValid =
+    countTl.trim() !== '' && Number.isFinite(countKurus) && countKurus >= 0 && !countLimit;
+  // Kapanis geri alinmaz: once beklenen / sayilan / fark gosterilip onay istenir (URN-5).
+  const askClose = async () => {
+    const diff = countKurus - expected;
+    const ok = await confirmDialog({
+      title: 'Kasa kapatılsın mı?',
+      message: `Beklenen nakit ${formatKurus(expected)} · Sayılan ${formatKurus(countKurus)} · Fark ${formatKurus(diff)}${
+        diff < 0 ? ' (eksik)' : diff > 0 ? ' (fazla)' : ''
+      }. Kapanış geri alınamaz; gün sonu özeti gösterilir.`,
+      confirmLabel: 'Kasayı kapat',
+      danger: true,
+    });
+    if (ok) close.mutate(countKurus);
+  };
 
   return (
     <div className="space-y-4">
@@ -322,12 +385,14 @@ function ActiveSession({
         <h2 className="mb-1 font-bold text-slate-800">Kasa Kapat (Z)</h2>
         <p className="mb-3 text-sm text-slate-500">Sayılan nakit tutarını girin.</p>
         <input
+          data-testid="cash-count"
           value={countTl}
           onChange={(e) => setCountTl(e.target.value)}
           inputMode="decimal"
           placeholder="Sayılan Tutar (TL)"
-          className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2"
+          className="mb-2 min-h-11 w-full rounded-lg border border-slate-300 px-3"
         />
+        {countLimit && <p className="mb-2 text-sm text-red-600">{countLimit}</p>}
         {countValid(countKurus, countTl) && (
           <p className="mb-2 text-sm text-slate-600">
             Fark:{' '}
@@ -337,9 +402,10 @@ function ActiveSession({
           </p>
         )}
         <button
-          onClick={() => close.mutate(countKurus)}
+          data-testid="cash-close"
+          onClick={() => void askClose()}
           disabled={close.isPending || !closeValid}
-          className="w-full rounded-lg bg-red-600 py-3 font-semibold text-white disabled:opacity-40"
+          className="min-h-12 w-full rounded-lg bg-red-600 font-semibold text-white disabled:opacity-40"
         >
           Kasayı Kapat
         </button>
@@ -544,6 +610,97 @@ function PaymentsPanel() {
           onClose={() => setRefundFor(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Kasa kapanisindan sonra gun sonu ozeti: ekranda kalir, yazdirilabilir (URN-5 / SAT-21). */
+function DayEndSummary({ summary, onDone }: { summary: CloseSummary; onDone: () => void }) {
+  const nav = useNavigate();
+  const { session, payments } = summary;
+  const diff = session.difference ?? 0;
+  const total = payments.reduce((sum, p) => sum + p.totalKurus, 0);
+  const time = (value?: string | null) =>
+    value
+      ? new Date(value).toLocaleString('tr-TR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '—';
+  return (
+    <div
+      data-testid="day-end-summary"
+      className="mx-auto max-w-md rounded-2xl bg-white p-5 shadow print:max-w-none print:shadow-none"
+    >
+      <p className="text-xs font-bold tracking-wide text-brand-700 uppercase">Kasa kapandı</p>
+      <h2 className="mt-1 text-xl font-black text-slate-900">Gün sonu özeti</h2>
+      <p className="text-sm text-slate-500">
+        Açılış {time(session.openedAt)} · Kapanış {time(session.closedAt)}
+      </p>
+      <dl className="mt-4 space-y-1 text-sm">
+        <SummaryRow label="Açılış bakiyesi" value={formatKurus(session.openingFloat)} />
+        <SummaryRow label="Beklenen nakit" value={formatKurus(session.expectedAmount ?? 0)} />
+        <SummaryRow label="Sayılan nakit" value={formatKurus(session.countedAmount ?? 0)} />
+        <div
+          data-testid="day-end-difference"
+          className={`flex justify-between border-t pt-2 text-base font-black ${
+            diff < 0 ? 'text-red-600' : diff > 0 ? 'text-amber-700' : 'text-green-700'
+          }`}
+        >
+          <dt>Fark</dt>
+          <dd>
+            {formatKurus(diff)}
+            {diff < 0 ? ' (eksik)' : diff > 0 ? ' (fazla)' : ''}
+          </dd>
+        </div>
+      </dl>
+      {payments.length > 0 && (
+        <>
+          <h3 className="mt-4 mb-1 text-sm font-bold text-slate-700">
+            Tahsilat (ödeme türüne göre)
+          </h3>
+          <dl className="space-y-1 text-sm">
+            {payments.map((p) => (
+              <SummaryRow
+                key={p.method}
+                label={METHOD_LABEL[p.method] ?? p.method}
+                value={formatKurus(p.totalKurus)}
+              />
+            ))}
+            <SummaryRow label="Toplam" value={formatKurus(total)} bold />
+          </dl>
+        </>
+      )}
+      <div className="mt-5 grid grid-cols-2 gap-2 print:hidden">
+        <button
+          onClick={() => window.print()}
+          className="min-h-12 rounded-xl border border-slate-300 font-bold text-slate-700"
+        >
+          Yazdır
+        </button>
+        <button onClick={onDone} className="min-h-12 rounded-xl bg-slate-800 font-bold text-white">
+          Tamam
+        </button>
+      </div>
+      {hasPerm('report.view') && (
+        <button
+          onClick={() => nav('/report')}
+          className="mt-2 min-h-11 w-full rounded-xl text-sm font-semibold text-brand-700 print:hidden"
+        >
+          Ayrıntılı gün sonu raporu →
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className={`flex justify-between ${bold ? 'border-t pt-1 font-black' : 'text-slate-700'}`}>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
     </div>
   );
 }
