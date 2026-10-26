@@ -41,8 +41,16 @@
 }
 ```
 
+İsteğe bağlı `error.data`: hatanın bağlamı (ör. `TABLE_HAS_OPEN_ORDER` için
+`{ "orderId": "01J..." }`); istisnanın `code`/`message`/`details` dışındaki alanları yalnız burada
+döner. `422 VALIDATION_ERROR`'da `message` ilk sorunun şemada verilmiş (Türkçe) mesajıdır; şema
+mesaj vermediyse genel "Doğrulama hatası." döner, tüm sorunlar `details`'te kalır. Gövde
+ayrıştırıcı hataları: `413 PAYLOAD_TOO_LARGE` (genel sınır 100 KB, `/sync/mutations` 1 MB),
+`400 BAD_JSON`, `415 UNSUPPORTED_MEDIA_TYPE`.
+
 **HTTP kodları:** `200/201` başarı · `400` iş kuralı · `401` kimlik yok · `403` yetki yok ·
-`404` bulunamadı · `409` çakışma/versiyon · `422` şema doğrulama · `429` rate limit · `500` sunucu.
+`404` bulunamadı · `409` çakışma/versiyon · `413` gövde çok büyük · `422` şema doğrulama ·
+`429` rate limit · `500` sunucu · `503` veritabanı meşgul (`DB_BUSY`, tekrar denenebilir).
 
 **Sayfalama (liste uçları):** `?cursor=<ulid>&limit=50` → `data: [...]`, `meta.nextCursor`.
 (ULID sıralı olduğu için cursor tabanlı; offset yok.)
