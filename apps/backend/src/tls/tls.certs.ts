@@ -66,6 +66,90 @@ function normalizeHosts(hosts: TlsHosts): TlsHosts {
   };
 }
 
+// --- Ad kisiti (OFF-15) ------------------------------------------------------------------
+// Tabletlere (ve garsonlarin telefonlarina) kurulan yerel CA, ca.key.pem ele gecirilse bile
+// banka / e-posta gibi herhangi bir site icin sertifika uretemesin: CA'ya kritik
+// NameConstraints eklenir. Izinli: ozel / yerel IPv4 araliklari, localhost, *.local ve kurulum
+// anindaki bilgisayar adi. Sunucu sertifikasinin adlari da bu kumeye suzulur (izin disi tek bir
+// ad bile zinciri gecersiz kilar).
+const PERMITTED_V4: ReadonlyArray<readonly [string, number]> = [
+  ['10.0.0.0', 8],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['100.64.0.0', 10], // CGNAT / VPN (or. Tailscale): internetten yonlenmez
+];
+const NAME_CONSTRAINTS_OID = '2.5.29.30';
+
+function ipv4Bytes(ip: string): number[] {
+  return ip.split('.').map((part) => Number(part) & 0xff);
+}
+
+/** IPv4 adresi izinli ozel / yerel araliklardan birinde mi. */
+export function ipPermitted(ip: string): boolean {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false;
+  const value = ipv4Bytes(ip).reduce((acc, b) => acc * 256 + b, 0);
+  return PERMITTED_V4.some(([base, bits]) => {
+    const start = ipv4Bytes(base).reduce((acc, b) => acc * 256 + b, 0);
+    const size = 2 ** (32 - bits);
+    return value >= start && value < start + size;
+  });
+}
+
+/** DNS adi izinli mi: tam eslesme ya da alt alan (RFC 5280: "local" -> "kasa.local"). */
+export function dnsPermitted(name: string, permitted: string[]): boolean {
+  return permitted.some((p) => name === p || name.endsWith(`.${p}`));
+}
+
+// En kucuk DER kodlayici (yalniz NameConstraints icin): etiket + uzunluk + icerik.
+function der(tag: number, content: number[]): number[] {
+  const len = content.length;
+  const head =
+    len < 0x80 ? [len] : len < 0x100 ? [0x81, len] : [0x82, (len >> 8) & 0xff, len & 0xff];
+  return [tag, ...head, ...content];
+}
+
+/**
+ * NameConstraints ::= SEQUENCE { permittedSubtrees [0] GeneralSubtrees } (RFC 5280 4.2.1.10).
+ * extraIps: kurulum anindaki ozel aralik disi LAN adresleri (tam adres, /32).
+ */
+export function nameConstraintsDer(permittedDns: string[], extraIps: string[] = []): ArrayBuffer {
+  const subtree = (generalName: number[]) => der(0x30, generalName);
+  const dns = permittedDns.map((name) => subtree(der(0x82, [...Buffer.from(name, 'ascii')])));
+  const ranges: (readonly [string, number])[] = [
+    ...PERMITTED_V4,
+    ...extraIps.map((ip) => [ip, 32] as const),
+  ];
+  const ips = ranges.map(([base, bits]) => {
+    // Onek uzunlugundan 4 baytlik maske (172.16/12 -> ff.f0.00.00).
+    const mask = [0, 1, 2, 3].map((i) => {
+      const n = Math.max(0, Math.min(8, bits - i * 8));
+      return (0xff << (8 - n)) & 0xff;
+    });
+    return subtree(der(0x87, [...ipv4Bytes(base), ...mask]));
+  });
+  const body = der(0x30, der(0xa0, [...dns, ...ips].flat()));
+  return new Uint8Array(body).buffer;
+}
+
+/**
+ * CA'nin izin verdigi adlar (ca.json): kisitli CA'da sunucu adlari bunlara suzulur. extraIps:
+ * ag ozel aralik disinda bir adres kullaniyorsa (nadir) kurulum anindaki tam adresler.
+ */
+interface CaMeta {
+  permittedDns: string[];
+  extraIps?: string[];
+}
+
+function permittedHosts(hosts: TlsHosts, meta: CaMeta | null): TlsHosts {
+  if (!meta) return hosts; // eski (kisitsiz) CA: suzme yok
+  return {
+    ips: hosts.ips.filter((ip) => ipPermitted(ip) || (meta.extraIps ?? []).includes(ip)),
+    dnsNames: hosts.dnsNames.filter((name) => dnsPermitted(name, meta.permittedDns)),
+  };
+}
+
 const sameHosts = (a: TlsHosts, b: TlsHosts) =>
   a.ips.join(',') === b.ips.join(',') && a.dnsNames.join(',') === b.dnsNames.join(',');
 
@@ -77,7 +161,7 @@ function writePrivate(path: string, pem: string): void {
   writeFileSync(path, pem, { mode: 0o600 });
 }
 
-async function createCa(now: Date): Promise<{ keyPem: string; certPem: string }> {
+async function createCa(now: Date, meta: CaMeta): Promise<{ keyPem: string; certPem: string }> {
   const keys = (await crypto.subtle.generateKey(KEY_ALG, true, [
     'sign',
     'verify',
@@ -96,6 +180,11 @@ async function createCa(now: Date): Promise<{ keyPem: string; certPem: string }>
       new x509.KeyUsagesExtension(
         x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign,
         true,
+      ),
+      new x509.Extension(
+        NAME_CONSTRAINTS_OID,
+        true,
+        nameConstraintsDer(meta.permittedDns, meta.extraIps),
       ),
       await x509.SubjectKeyIdentifierExtension.create(keys.publicKey),
     ],
@@ -164,19 +253,39 @@ export async function ensureTlsMaterial(
   const file = (name: string) => join(dir, name);
 
   let ca: { keyPem: string; certPem: string };
+  let caMeta: CaMeta | null = null;
   if (existsSync(file('ca.key.pem')) && existsSync(file('ca.crt.pem'))) {
     ca = {
       keyPem: readFileSync(file('ca.key.pem'), 'utf8'),
       certPem: readFileSync(file('ca.crt.pem'), 'utf8'),
     };
+    try {
+      caMeta = JSON.parse(readFileSync(file('ca.json'), 'utf8')) as CaMeta;
+    } catch {
+      caMeta = null; // eski kurulum: CA kisitsiz (tabletlerde yeniden kurulum gerekmesin)
+    }
   } else {
-    ca = await createCa(now);
+    // Izinli adlar: localhost, *.local ve kurulum anindaki bilgisayar adlari; ag ozel aralik
+    // disindaysa kurulum anindaki LAN adresleri de (tam adres).
+    const normalized = normalizeHosts(hosts);
+    const names = normalized.dnsNames.filter(
+      (name) => name !== 'localhost' && !name.endsWith('.local'),
+    );
+    const extraIps = normalized.ips.filter(
+      (ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !ipPermitted(ip),
+    );
+    caMeta = {
+      permittedDns: ['localhost', 'local', ...names],
+      ...(extraIps.length ? { extraIps } : {}),
+    };
+    ca = await createCa(now, caMeta);
     writePrivate(file('ca.key.pem'), ca.keyPem);
     writeFileSync(file('ca.crt.pem'), ca.certPem);
+    writeFileSync(file('ca.json'), JSON.stringify(caMeta));
     rmSync(file('server.json'), { force: true }); // yeni CA -> eski sunucu sertifikasi gecersiz
   }
 
-  const wanted = normalizeHosts(hosts);
+  const wanted = permittedHosts(normalizeHosts(hosts), caMeta);
   let meta: { hosts: TlsHosts; notBefore?: string; notAfter: string } | null = null;
   try {
     meta = JSON.parse(readFileSync(file('server.json'), 'utf8'));
@@ -222,6 +331,11 @@ if (require.main === module) {
     const leaf = new NodeX509Certificate(first.cert);
 
     assert.ok(ca.ca, 'CA sertifikasi CA olmali');
+    const constraints = new x509.X509Certificate(first.caCert).getExtension(NAME_CONSTRAINTS_OID);
+    assert.ok(constraints?.critical, 'CA kritik ad kisiti tasir (OFF-15)');
+    assert.ok(ipPermitted('192.168.1.20') && ipPermitted('10.1.2.3') && ipPermitted('172.31.0.1'));
+    assert.ok(!ipPermitted('8.8.8.8') && !ipPermitted('172.32.0.1'), 'genel IP izinli degil');
+    assert.ok(dnsPermitted('kasa.local', ['local']) && !dnsPermitted('banka.com.tr', ['local']));
     assert.ok(!leaf.ca, 'sunucu sertifikasi CA olmamali');
     assert.ok(leaf.checkIssued(ca), 'sunucu sertifikasi CA tarafindan verilmis');
     assert.ok(leaf.verify(ca.publicKey), 'CA imzasi dogrulanmali');
@@ -252,6 +366,48 @@ if (require.main === module) {
     // Onceki cagri gelecek tarihli sertifika uretti: gercek saatte (geri alinmis saat gibi) yenilenir.
     const tls = await ensureTlsMaterial(dir, { ...hosts, ips: ['10.0.0.5'] });
     assert.ok(tls.renewed, 'notBefore gelecekteyse sertifika yenilenir');
+
+    // Ag ozel aralik disindaysa kurulum anindaki adres izinli (tabletler bozulmasin).
+    const oddDir = mkdtempSync(join(tmpdir(), 'ado-tls-odd-'));
+    const odd = await ensureTlsMaterial(oddDir, { ips: ['192.0.2.2'], dnsNames: [] });
+    assert.ok(
+      new NodeX509Certificate(odd.cert).subjectAltName?.includes('IP Address:192.0.2.2'),
+      'kurulumdaki ozel olmayan LAN adresi SANda',
+    );
+    rmSync(oddDir, { recursive: true, force: true });
+
+    // Izin disi IP sunucu sertifikasina yazilmaz (yazilsaydi zincir gecersiz olurdu).
+    const publicIp = await ensureTlsMaterial(dir, { ...hosts, ips: ['10.0.0.5', '8.8.8.8'] });
+    assert.ok(
+      !new NodeX509Certificate(publicIp.cert).subjectAltName?.includes('8.8.8.8'),
+      'genel IP SANa yazilmaz',
+    );
+
+    // CA anahtari ele gecirilse bile baska site icin sertifika dogrulanmaz (ad kisiti).
+    const forged = await createLeaf(
+      { keyPem: readFileSync(join(dir, 'ca.key.pem'), 'utf8'), certPem: first.caCert },
+      { ips: [], dnsNames: ['banka.example.com'] },
+      new Date(),
+    );
+    const evil = createHttpsServer({ key: forged.keyPem, cert: forged.certPem }, (_q, r) =>
+      r.end('x'),
+    );
+    await new Promise<void>((resolve) => evil.listen(0, '127.0.0.1', resolve));
+    const evilPort = (evil.address() as AddressInfo).port;
+    const rejected = await new Promise<string>((resolve) => {
+      const req = httpsRequest(
+        { host: '127.0.0.1', port: evilPort, ca: first.caCert, servername: 'banka.example.com' },
+        () => resolve('kabul edildi'),
+      );
+      req.on('error', (err: NodeJS.ErrnoException) => resolve(err.code ?? err.message));
+      req.end();
+    });
+    evil.close();
+    assert.notStrictEqual(
+      rejected,
+      'kabul edildi',
+      `ad kisiti disi sertifika reddedilir (${rejected})`,
+    );
 
     // Gercek TLS el sikismasi: Node yalniz yerel CA'ya guvenerek 127.0.0.1'e baglanir.
     const server = createHttpsServer({ key: tls.key, cert: tls.cert }, (_req, res) =>
