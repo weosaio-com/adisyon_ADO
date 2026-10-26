@@ -1,6 +1,6 @@
 {
   "name": "ado",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Adisyon / POS otomasyonu - offline-first, ticari seviye",
   "packageManager": "pnpm@11.9.0",

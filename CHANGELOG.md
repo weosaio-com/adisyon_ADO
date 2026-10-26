@@ -5,10 +5,10 @@ Sürümleme: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-10-20
+## [0.4.2] - 2026-10-26
 
 Kararlılık sürümü: sahadaki "program bazen donuyor, kapatıp açmak gerekiyor" sorununun doğrulanmış
-nedenleri giderildi (#34, #35).
+nedenleri giderildi (#34, #35, #38). 0.4.1 yayınlanmadı; içeriği bu sürümdedir.
 
 ### Yükseltme notları
 
@@ -41,6 +41,21 @@ nedenleri giderildi (#34, #35).
   sorulur. Çökme ve kilitlenmeler kayıt dosyasına yazılır.
 - Ekranlar gerçek hataları eski verinin arkasına saklamıyor (**Tekrar dene**); canlı güncellemeler
   token süresi dolunca yenileyip yeniden bağlanır.
+- **Çok cihazda takılma:** yoğun saatte birden çok tablet aynı anda sipariş girince yaşanan 5 sn'ye
+  varan donma ve "Sistem meşgul"/"Sunucu hatası" hataları giderildi; veritabanına tek sıradan
+  erişiliyor (24 eşzamanlı cihazla denendi). Yedek alınırken satış ekranları takılmıyor.
+- **Mutfak fişi gecikmesi:** QR menü yayını (görsel yükleme) mutfak ve bar fişlerini bekletmiyor;
+  veritabanı meşgulken arka plan işi takılı kalmıyor, fiş programı yeniden başlatmadan basılıyor.
+- **Yanıt vermeyen arka plan:** masaüstü, çöken arka plan bölümünün yanında yanıt vermeyeni de
+  yaklaşık 1 dakikada fark edip yeniden başlatıyor.
+- **Güncelleme kurulamazsa:** program "Program güncelleniyor" ekranında kalmıyor; eski sürümle açılıp
+  "Güncelleme kurulamadı" gösteriyor.
+- **Geri yükleme:** yarım kalan işlem geri yüklenen veriye karışmıyor; bozuk geri yükleme kaydı
+  programın açılmasını engellemiyor ("Yedek geri yüklenemedi").
+- **Kayıt dosyası:** uyarı ve hatalar ayrı, uzun ömürlü `ado-olaylar.log` dosyasında; başarılı
+  istekler artık yazılmıyor, donmanın izi kaybolmuyor.
+- Çok büyük ya da bozuk isteklerde anlaşılır Türkçe hata (413/400); doğrulama hatalarında ilgili
+  alanın mesajı görünüyor; güncellemeden sonra eski dosya isteyen tablette beyaz ekran riski azaldı.
 
 ### Changed
 

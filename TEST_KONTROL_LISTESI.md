@@ -274,14 +274,14 @@ deneme lisansı istenip girilir. Şeritte "Lisans süresi doldu: … itibarıyla
 açılamayacak (N gün kaldı)" yazar; adisyon hâlâ açılır. Ek süre bitince yeni adisyon açılmaz ama
 açık adisyon ödenip kapatılır; raporlar ve gün sonu çalışır.
 
-## 22. (0.4.1 yayınlanınca) 0.4.0'dan otomatik güncelleme
+## 22. (0.4.2 yayınlanınca) 0.4.0'dan otomatik güncelleme
 
 **Yap:** 0.4.0 kurulu bilgisayarda 17. adımı yapın.
 
-**Beklenen:** 17. adımdaki gibi. Ek olarak güncellemeden sonra **Ayarlar › Güncelleme** "Sürüm 0.4.1"
+**Beklenen:** 17. adımdaki gibi. Ek olarak güncellemeden sonra **Ayarlar › Güncelleme** "Sürüm 0.4.2"
 der, Lisans kartında "Bulut: bağlı" ve Bulut Yedeği kartında son bulut yedeği görünür.
 
-## 23. (0.4.1) Donma düzeltmeleri
+## 23. (0.4.2) Donma düzeltmeleri
 
 **Yap:**
 
@@ -291,6 +291,8 @@ der, Lisans kartında "Bulut: bağlı" ve Bulut Yedeği kartında son bulut yede
    **Vazgeç** deyin (ya da Esc). Hemen ardından bir yazı kutusuna tıklayıp yazın.
 3. Yazıcıyı kapatın, bir fiş yazdırın; beklemeden masa açıp sipariş girmeye devam edin.
 4. Programı gün boyu kapatmadan kullanın.
+5. Yoğun saati benzetin: 3–4 tablet ya da telefondan aynı anda birkaç masaya sipariş girin; bu sırada
+   kasada **Ayarlar › Yedekler › Yedek al** deyin.
 
 **Beklenen:**
 
@@ -301,6 +303,8 @@ der, Lisans kartında "Bulut: bağlı" ve Bulut Yedeği kartında son bulut yede
 3. Program donmaz, sipariş girişi sürer; en geç 30 sn içinde 9. adımdaki "fiş yazdırılamadı" uyarısı
    çıkar.
 4. Donma olmaz. Olursa programı kapatmayın: pencere 30 sn yanıt vermezse program **Yeniden yükle /
-   Bekle** diye sorar; **Yeniden yükle** kayıtlı adisyonları silmez. Arka plan kapanırsa program
-   birkaç saniye içinde kendisi yeniden başlatır. Saati not edin ve
-   `%APPDATA%\@ado\desktop\backend-error.log` dosyasını gönderin.
+   Bekle** diye sorar; **Yeniden yükle** kayıtlı adisyonları silmez. Arka plan kapanır ya da yanıt
+   vermezse program en geç yaklaşık 1 dakikada kendisi yeniden başlatır. Saati not edin ve
+   `%APPDATA%\@ado\desktop\` klasöründeki `ado-olaylar.log` ve `backend-error.log` dosyalarını gönderin.
+5. Ekranlar takılmaz, "Sistem meşgul" ya da "Sunucu hatası" çıkmaz; siparişler mutfağa birkaç saniye
+   içinde düşer, yedek alınır.
