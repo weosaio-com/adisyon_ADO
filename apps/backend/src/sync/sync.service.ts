@@ -24,6 +24,12 @@ import {
 } from './dto/sync.schemas';
 import type { PushMutationsDto, ResolveReviewDto, SyncMutation } from './dto/sync.schemas';
 
+/**
+ * Cevrimdisi gorulen fiyat sunucudakinden farkli (OFF-3). Review nedeni metin kolon: paylasilan
+ * OfflineReviewReason listesine dokunmadan yerel sabit.
+ */
+const PRICE_CHANGED = 'price_changed';
+
 /** Bir offline mutasyonun sunucu sonucu. OFFLINE_DESIGN.md §7.1 */
 interface MutationResult {
   clientOpId: string;
@@ -172,7 +178,11 @@ export class SyncService {
       const mutation: SyncMutation = {
         clientOpId: review.clientOpId,
         type: review.mutationType as OfflineMutationType,
-        payload: JSON.parse(review.mutationPayload) as Record<string, unknown>,
+        // Onay = guncel fiyat kabul edildi: fiyat denetimi tekrar review acmasin.
+        payload: {
+          ...(JSON.parse(review.mutationPayload) as Record<string, unknown>),
+          unitPrice: undefined,
+        },
       };
       result = await this.applyResolution(user, review.deviceId, mutation, dto);
       if (
@@ -311,7 +321,7 @@ export class SyncService {
         case OfflineMutationType.OpenTable:
           return await this.applyOpenTable(user, m);
         case OfflineMutationType.AddLine:
-          return await this.applyAddLine(user, m);
+          return await this.applyAddLine(user, deviceId, m);
         case OfflineMutationType.UpdateLineQty:
           return await this.applyUpdateLineQty(user, m);
         case OfflineMutationType.AddNote:
@@ -368,7 +378,11 @@ export class SyncService {
     }
   }
 
-  private async applyAddLine(user: AuthUser, m: SyncMutation): Promise<MutationResult> {
+  private async applyAddLine(
+    user: AuthUser,
+    deviceId: string,
+    m: SyncMutation,
+  ): Promise<MutationResult> {
     const p = addLinePayload.parse(m.payload);
     // Pasif urun offline'da satilamaz (K4 tablosu: rejected PRODUCT_INACTIVE).
     const product = await this.prisma.product.findFirst({
@@ -382,6 +396,11 @@ export class SyncService {
       };
     }
     const orderId = await this.resolveOrderId(user, p);
+    // Garsonun gordugu fiyat sunucudakinden farkli: musteriye soylenen tutar degismesin diye
+    // kalem Owner onayina alinir (onayda guncel fiyatla eklenir ya da reddedilir).
+    if (p.unitPrice !== undefined && p.unitPrice !== product.salePrice) {
+      return this.createReview(user, deviceId, m, PRICE_CHANGED);
+    }
     await this.orders.addItem(user, orderId, {
       productId: p.productId,
       quantity: p.quantity,
@@ -543,7 +562,7 @@ export class SyncService {
     user: AuthUser,
     deviceId: string,
     m: SyncMutation,
-    reason: OfflineReviewReason,
+    reason: OfflineReviewReason | typeof PRICE_CHANGED,
   ): Promise<MutationResult> {
     const id = newId();
     await this.prisma.pendingOfflineReview.create({

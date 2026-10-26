@@ -130,6 +130,10 @@ async function problemFor(
     ? await draftGet(entry.localOrderId)
     : undefined;
   const what = describeEntry(entry, draft);
+  const serverOrderId =
+    draft?.serverId ??
+    (typeof entry.payload.orderId === 'string' ? entry.payload.orderId : undefined);
+  const tableId = draft?.tableId ?? entry.tableId;
   return {
     id: entry.clientOpId,
     kind,
@@ -138,6 +142,8 @@ async function problemFor(
     message: problemMessage(kind, reason, what),
     what,
     localOrderId: entry.localOrderId,
+    ...(serverOrderId ? { serverOrderId } : {}),
+    ...(tableId ? { tableId } : {}),
     orderLabel: draft ? draft.orderNo.replace(/^⏳\s*/, '') : (entry.label ?? 'Adisyon'),
     ...(reviewId ? { reviewId } : {}),
     createdAt: Date.now(),

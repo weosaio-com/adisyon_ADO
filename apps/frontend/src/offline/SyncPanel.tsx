@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { problemsAll, problemsDelete } from './db';
 import { getState, kick, refreshPending, subscribe } from './engine';
+import { problemsForOrder } from './sync-core';
 
 // SyncBadge'den ayri: dongusel import olmasin.
 function useSyncState() {
@@ -28,16 +29,10 @@ export function useSyncProblems(enabled = true) {
 
 // Gonderim durumu + sunucunun kabul etmedigi / yonetici onayina aldigi kayitlar. OFF-1, OFF-3
 export default function SyncPanel({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient();
   const sync = useSyncState();
   const problems = useSyncProblems();
   const list = problems.data ?? [];
-
-  const dismiss = async (ids: string[]) => {
-    await problemsDelete(ids);
-    await refreshPending();
-    await qc.invalidateQueries({ queryKey: ['sync-problems'] });
-  };
+  const dismiss = useDismissProblems();
 
   // Portal: rozet bulaniklastirilmis (backdrop-blur) basligin icinde; sabit konumlu pencere
   // orada basliga hapsolur. Pencere govdeye cizilir.
@@ -147,6 +142,49 @@ function SyncProblemList({
         ))}
       </ul>
     </div>
+  );
+}
+
+/** Sorunlari kapat ("Anladım"): listeden silinir, sayac tazelenir. */
+function useDismissProblems() {
+  const qc = useQueryClient();
+  return async (ids: string[]) => {
+    await problemsDelete(ids);
+    await refreshPending();
+    await qc.invalidateQueries({ queryKey: ['sync-problems'] });
+  };
+}
+
+/**
+ * Sipariş ekraninda: bu adisyona ait, sunucuya gecmeyen ya da onay bekleyen islemler (OFF-3).
+ * Garson musteriye soyledigi siparisle adisyonun farkini burada gorur.
+ */
+export function OrderProblems({ orderId }: { orderId: string }) {
+  const problems = useSyncProblems();
+  const dismiss = useDismissProblems();
+  const mine = problemsForOrder(problems.data ?? [], orderId);
+  if (mine.length === 0) return null;
+  return (
+    <li
+      role="alert"
+      data-testid="order-problems"
+      className="rounded-2xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950"
+    >
+      <p className="font-black">Bu adisyonda sunucuya geçmeyen işlem var</p>
+      <ul className="mt-1 space-y-1">
+        {mine.map((p) => (
+          <li key={p.id} data-testid="order-problem">
+            {p.message}
+          </li>
+        ))}
+      </ul>
+      <button
+        onClick={() => void dismiss(mine.map((p) => p.id))}
+        className="mt-2 min-h-11 rounded-xl bg-white/80 px-4 font-bold"
+      >
+        Anladım
+      </button>
+    </li>
   );
 }
 

@@ -14,6 +14,7 @@ import DiscountModal from './DiscountModal';
 import TableTransferModal from './TableTransferModal';
 import SplitModal from './SplitModal';
 import SyncBadge, { useSyncState } from '../offline/SyncBadge';
+import { OrderProblems } from '../offline/SyncPanel';
 import { isOffline } from '../offline/engine';
 import { draftDelete } from '../offline/db';
 import { ulid } from '../offline/ids';
@@ -471,6 +472,7 @@ export default function OrderScreen() {
         </header>
 
         <ul className="min-h-0 flex-1 space-y-2 overflow-auto bg-stone-50/70 p-3">
+          <OrderProblems orderId={id} />
           {(currentOrder?.items ?? []).length === 0 && (
             <li className="flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-white text-center">
               <span className="text-sm font-bold text-ink-800">Adisyon boş</span>

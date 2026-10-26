@@ -41,6 +41,9 @@ export const addLinePayload = z
     productId: z.string().min(1),
     quantity: z.number().int().positive(), // milis (x1000)
     note: z.string().nullish(),
+    // Garsonun cevrimdisi gordugu birim fiyat (kurus). Sunucudaki fiyat farkliysa kalem
+    // sessizce baska fiyatla yazilmaz: Owner onayina (price_changed) alinir. OFF-3
+    unitPrice: z.number().int().nonnegative().optional(),
   })
   .refine(hasOrderRef, { message: 'orderId veya orderClientOpId gerekli' });
 

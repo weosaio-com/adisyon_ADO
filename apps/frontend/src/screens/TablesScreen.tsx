@@ -15,7 +15,7 @@ import { CANCEL_REASONS } from './reason';
 import { formatKurus } from '../lib/format';
 import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
-import { SyncProblemsBanner } from '../offline/SyncPanel';
+import { SyncProblemsBanner, useSyncProblems } from '../offline/SyncPanel';
 import { offlineOpenTable } from '../offline/actions';
 import { isOffline } from '../offline/engine';
 import { draftAll } from '../offline/db';
@@ -82,6 +82,10 @@ export default function TablesScreen() {
   const heldByTable = new Map<string, Order>();
   for (const order of heldOrders.data ?? [])
     if (order.tableId) heldByTable.set(order.tableId, order);
+  // Senkron sorunu olan masalar (reddedilen / onay bekleyen kalem): masa kartinda "!" isareti.
+  const problemTables = new Set(
+    (useSyncProblems().data ?? []).flatMap((problem) => (problem.tableId ? [problem.tableId] : [])),
+  );
   const localByTable = new Map<string, DraftOrder>();
   for (const draft of localDrafts.data ?? [])
     if (draft.tableId && !draft.serverId) localByTable.set(draft.tableId, draft);
@@ -460,11 +464,21 @@ export default function TablesScreen() {
                                 : 'border-stone-200 bg-white text-ink-900'
                         }`}
                       >
-                        <span
-                          className={`absolute top-4 right-4 h-2.5 w-2.5 rounded-full ${
-                            state === 'free' ? 'bg-brand-500' : 'bg-white/70'
-                          }`}
-                        />
+                        {problemTables.has(table.id) ? (
+                          <span
+                            data-testid={`table-problem-${table.id}`}
+                            title="Sunucuya geçmeyen işlem var"
+                            className="absolute top-3 right-3 flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-sm font-black text-white"
+                          >
+                            !
+                          </span>
+                        ) : (
+                          <span
+                            className={`absolute top-4 right-4 h-2.5 w-2.5 rounded-full ${
+                              state === 'free' ? 'bg-brand-500' : 'bg-white/70'
+                            }`}
+                          />
+                        )}
                         <div>
                           <span className="block text-xl font-black tracking-tight">
                             {table.name}

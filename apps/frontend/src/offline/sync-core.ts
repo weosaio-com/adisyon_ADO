@@ -15,6 +15,8 @@ export interface OutboxEntry {
   seq?: number;
   /** Ekranda gosterilecek adisyon adi (masa); sunucuya gonderilmez. */
   label?: string;
+  /** Kaydin ait oldugu masa (sorun isareti icin); sunucuya gonderilmez. */
+  tableId?: string | null;
 }
 
 /** Gonderim sirasi: seq; seq'siz eski kayitlar once (ULID sirasiyla). OFFLINE_DESIGN.md §6 */
@@ -112,7 +114,15 @@ export function buildAddLine(
   const entry: OutboxEntry = {
     clientOpId: lineId,
     type: 'ADD_LINE',
-    payload: { orderClientOpId: draft.clientOpId, productId: product.id, quantity: qtyMilis },
+    // unitPrice: garsonun gordugu fiyat; sunucu farkliysa kalemi onaya alir (OFF-3).
+    // productName: onay ekraninda ve sorun listesinde urun adi (sunucu yok sayar).
+    payload: {
+      orderClientOpId: draft.clientOpId,
+      productId: product.id,
+      quantity: qtyMilis,
+      unitPrice: product.salePrice,
+      productName: product.name,
+    },
     localOrderId: draft.id,
     status: 'pending',
     retryCount: 0,
@@ -217,9 +227,17 @@ export interface SyncProblem {
   message: string; // garsona gosterilen Turkce aciklama
   what: string; // "2 × Ayran" / "Masa açma" gibi kisa tanim
   localOrderId: string; // taslak ('local:...') ya da sunucu adisyon id'si
+  /** Sunucu adisyonu (biliniyorsa): taslak sunucuya gecince isaret orada da gorunur. */
+  serverOrderId?: string;
+  tableId?: string | null;
   orderLabel: string; // "Masa 5" / "Adisyon"
   reviewId?: string;
   createdAt: number;
+}
+
+/** Bu adisyona (taslak ya da sunucu id'si) ait sorunlar. */
+export function problemsForOrder(problems: SyncProblem[], orderId: string): SyncProblem[] {
+  return problems.filter((p) => p.localOrderId === orderId || p.serverOrderId === orderId);
 }
 
 const QTY = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 3 });
@@ -250,6 +268,7 @@ const REJECT_TEXT: Record<string, string> = {
   PRODUCT_INACTIVE: 'ürün satışa kapalı olduğu için eklenemedi',
   PRODUCT_UNAVAILABLE: 'ürün tükendiği için eklenemedi',
   LICENSE_LOCKED: 'lisans kilitli olduğu için yeni adisyon açılamadı',
+  ORDER_NOT_OPENED: 'adisyon açılamadığı için eklenemedi',
   AMOUNT_LIMIT_EXCEEDED: 'tutar sınırı aşıldığı için kabul edilmedi',
 };
 
