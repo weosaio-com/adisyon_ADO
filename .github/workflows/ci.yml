@@ -116,7 +116,8 @@ jobs:
         run: pnpm --filter @ado/backend run test:e2e:updates
 
       # Kendi backend'ini (ve gerekirse sahte bulutunu) acan e2e'ler: test/*.spawn.e2e.mjs.
-      # Her dosyanin kendi portu ve veri dizini var (test/spawn-backend.mjs).
+      # Her dosyanin kendi portu ve veri dizini var (test/spawn-backend.mjs). Yuk testi de burada:
+      # load.spawn.e2e.mjs (12 eszamanli yazar hatasiz, en uzun istek sinirli; kisa kilit beklenir).
       - name: Spawned e2e (kendi backend'i)
         run: pnpm --filter @ado/backend run test:e2e:spawned
 

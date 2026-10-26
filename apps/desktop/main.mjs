@@ -3,13 +3,13 @@
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import { join } from 'node:path';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { rotatingLog } from './rotating-log.mjs';
-import { applyPendingRestore, ensureSecrets } from './restore.mjs';
+import { EVENTS_LOG_MAX_BYTES, isEventLine, lineSplitter, rotatingLog } from './rotating-log.mjs';
+import { applyPendingRestore, ensureSecrets, restoreSkippedDialog } from './restore.mjs';
 import { appConfigEnv, loadAppConfig } from './app-config.mjs';
 import { applyMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
 import updaterPackage from 'electron-updater';
-import { createUpdater } from './updater.mjs';
+import { createUpdater, INSTALL_ERROR_GRACE_MS } from './updater.mjs';
 import {
   BACKEND_START_TIMEOUT_MS,
   outputTail,
@@ -19,6 +19,11 @@ import {
 } from './startup.mjs';
 import {
   allowReload,
+  HEALTH_CHECK_INTERVAL_MS,
+  HEALTH_CHECK_TIMEOUT_MS,
+  HEALTH_MAX_FAILURES,
+  installFailedDialog,
+  livenessProbe,
   planRestart,
   restartGiveUpDialog,
   UNRESPONSIVE_PROMPT_MS,
@@ -31,6 +36,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let backend = null;
 let backendExit = null;
 let writeLog = () => {};
+// Uzun omurlu olaylar kaydi (ado-olaylar.log): kabuk satirlari + backend uyari/hata satirlari.
+let writeEvents = () => {};
 let mainWindow = null;
 let appConfig = null;
 let updater = null;
@@ -41,10 +48,15 @@ let backendReady = false;
 let shuttingDown = false;
 const restartHistory = [];
 let restartTimer = null;
+// Yeniden baslatilan backend acilirken bekci yoklamaz (acilis beklemesi kendi suresini uygular).
+let backendStarting = false;
+let livenessTimer = null;
 const reloadHistory = [];
 let unresponsiveTimer = null;
 // Acilis basarisiz olursa hata penceresinde gosterilecek son backend ciktisi.
 const recentOutput = outputTail();
+// Bekleyen yedek geri yuklemesi uygulanamadiysa (bozuk isaret, takas hatasi) pencere acilinca soylenir.
+let restoreProblem = null;
 
 // /health yalniz veritabanini denetler (disk dolu olsa da 200). Asili istek beklemeyi uzatmasin.
 const isUp = () =>
@@ -52,8 +64,19 @@ const isUp = () =>
     .then((r) => r.ok)
     .catch(() => false);
 
+// Askida kalma bekcisi icin: yalniz olay dongusunu yoklar, veritabanina dokunmaz (PLT-12).
+const isAlive = () =>
+  fetch(`${BASE}/api/v1/health/live`, { signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS) })
+    .then((r) => r.ok)
+    .catch(() => false);
+
 const isLocal = (url) => url === BASE || url.startsWith(`${BASE}/`);
-const log = (line) => writeLog(Buffer.from(`[desktop] ${line}\n`));
+// Kabuk satirlari zaman damgali: donma aninin izi backend satirlariyla eslestirilebilsin.
+const log = (line) => {
+  const text = `${new Date().toISOString()} [desktop] ${line}\n`;
+  writeLog(Buffer.from(text));
+  writeEvents(text);
+};
 
 // Paketli surumde: DB userData'da yasar (kurulum dizini yazilabilir degil),
 // gizli anahtarlar ilk aciliste uretilip userData/secrets.json'da saklanir.
@@ -66,7 +89,18 @@ function packagedEnv() {
   mkdirSync(dataDir, { recursive: true }); // ilk aciliste henuz yok
   const dbPath = join(dataDir, 'ado.db');
   const secretsPath = join(dataDir, 'secrets.json');
-  applyPendingRestore(dataDir, dbPath, secretsPath);
+  applyPendingRestore(dataDir, dbPath, secretsPath, {
+    log,
+    onProblem: (problem) => {
+      const next = problem.setAside
+        ? `; isaret kenara alindi: ${problem.setAside}`
+        : problem.retry
+          ? '; sonraki acilista yeniden denenecek'
+          : '';
+      log(`geri yukleme uygulanamadi: ${problem.reason}${next}`);
+      restoreProblem = problem;
+    },
+  });
   if (!existsSync(dbPath)) {
     copyFileSync(join(process.resourcesPath, 'template.db'), dbPath);
   }
@@ -83,6 +117,8 @@ function packagedEnv() {
   appConfig = config;
   return {
     NODE_ENV: 'production',
+    // Duz dosya yolu: backend bunu yol olarak da okur (veri dizini). Tek baglanti siniri
+    // (connection_limit=1, SQLite tek yazar) backend'in Prisma istemcisinde eklenir (tek kaynak).
     DATABASE_URL: 'file:' + dbPath.replaceAll('\\', '/'),
     ADO_DATA_DIR: dataDir,
     API_PORT: PORT,
@@ -100,13 +136,18 @@ function startBackend() {
     : join(import.meta.dirname, '..', 'backend');
   // ELECTRON_RUN_AS_NODE: electron.exe'yi duz node olarak kullan (sistemde node gerekmez).
   // IPC kanali: kapanista duzgun durdurma; kabuk cokerse backend kendini kapatir.
+  const events = {
+    stdout: lineSplitter((line) => isEventLine(line, 'stdout') && writeEvents(`${line}\n`)),
+    stderr: lineSplitter((line) => isEventLine(line, 'stderr') && writeEvents(`${line}\n`)),
+  };
   backend = startBackendProcess({
     execPath: process.execPath,
     entry: join(base, 'dist', 'main.js'),
     env: { ...process.env, ...(app.isPackaged ? packagedEnv() : {}), ELECTRON_RUN_AS_NODE: '1' },
-    onOutput: (chunk) => {
+    onOutput: (chunk, stream) => {
       writeLog(chunk);
       recentOutput.push(chunk);
+      (stream === 'stderr' ? events.stderr : events.stdout)(chunk);
     },
   });
   // Acilis beklemesi bununla yarisir: backend coker ya da baslatilamazsa hemen anlasilir.
@@ -159,18 +200,54 @@ async function restartBackend() {
     return;
   }
   const child = backend;
+  backendStarting = true;
+  liveness.reset();
   const result = await waitForBackend({
     isUp,
     exited: backendExit,
     timeoutMs: BACKEND_START_TIMEOUT_MS,
+  }).finally(() => {
+    backendStarting = false;
   });
   if (result.ok) {
     log('backend yeniden acildi');
+    showRestoreProblem();
+    // Yeni backend guncelleme durumunu bilmez (Ayarlar > Guncelleme karti): yeniden bildirilir.
+    if (updater) sendToBackend({ type: 'update-status', ...updater.status() });
     return;
   }
   log(`backend yeniden acilamadi: ${JSON.stringify(result)}`);
   // Asili kaldiysa kapat: cikis dinleyicisi sonraki denemeyi planlar.
   if (child && child === backend && child.exitCode === null) child.kill();
+}
+
+function showRestoreProblem() {
+  if (!restoreProblem) return;
+  const { title, message } = restoreSkippedDialog(restoreProblem, logPath);
+  restoreProblem = null;
+  void showMessage({ type: 'warning', title, message, buttons: ['Tamam'] });
+}
+
+// Askida kalan backend (surec ayakta, olay dongusu kilitli): cokme yalniz `exit` ile anlasiliyordu,
+// boylece pencere ve tabletler programi kapatip acana kadar "cevrimdisi" kaliyordu. Art arda
+// HEALTH_MAX_FAILURES yanitsiz yoklamada (~1 dk) kayda yazilip durdurulur; cikis dinleyicisi
+// cokmedeki gibi planRestart sinirlariyla yeniden baslatir (PLT-12).
+const liveness = livenessProbe({
+  isAlive,
+  canProbe: () => Boolean(backend) && !shuttingDown && !backendStarting && !restartTimer,
+  onFailing: (count) => log(`backend yanit vermiyor (${count}/${HEALTH_MAX_FAILURES})`),
+  onRecovered: () => log('backend yeniden yanit veriyor'),
+  onHung: async () => {
+    const child = backend;
+    log(`backend ${HEALTH_MAX_FAILURES} denetimdir yanit vermiyor (askida); yeniden baslatilacak`);
+    log(`askidaki backend durduruldu: ${await stopBackendProcess(child)}`);
+  },
+});
+
+function startLivenessWatch() {
+  // Dev'de backend'i kabuk baslatmadiysa (elle calisiyor) yeniden de baslatamaz: bekci yok.
+  if (livenessTimer || !backend) return;
+  livenessTimer = setInterval(() => void liveness.probe(), HEALTH_CHECK_INTERVAL_MS);
 }
 
 // Ana surecten acilan pencereden sonra klavye odagi pencereye donsun (Windows'ta kaybolabiliyor).
@@ -246,6 +323,18 @@ async function prepareInstall() {
   }
 }
 
+// Guncelleme kurulamadi (yukleyici baslamadi ya da program kapanmadi): eskiden pencere "Program
+// guncelleniyor"da, backend kapali kaliyordu. Backend yeniden baslar, pencere arayuze doner ve
+// kullaniciya soylenir; kasa eski surumle calismayi surdurur (PLT-6).
+async function recoverFailedInstall(reason) {
+  log(`guncelleme kurulamadi (${reason}); program eski surumle devam ediyor`);
+  shuttingDown = false;
+  if (!backend) await restartBackend();
+  await mainWindow?.loadURL(BASE).catch((err) => log(`pencere yuklenemedi: ${err}`));
+  const { title, message } = installFailedDialog(logPath);
+  await showMessage({ type: 'error', title, message, buttons: ['Tamam'] });
+}
+
 // Paketli surumde guncelleyici: durum backend'e iletilir (kart), denetim kendiliginden.
 function startUpdater() {
   if (!app.isPackaged || !appConfig) return;
@@ -255,6 +344,7 @@ function startUpdater() {
     log,
     onStatus: (status) => sendToBackend({ type: 'update-status', ...status }),
     autoUpdater: updaterPackage.autoUpdater,
+    onInstallFailed: (reason) => void recoverFailedInstall(reason),
   });
   sendToBackend({ type: 'update-status', ...updater.status() });
   updater.start();
@@ -305,9 +395,11 @@ async function openWindow() {
 }
 
 async function start() {
-  // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin.
+  // Boyut sinirli (10 MB, .1'e doner): surekli acik kasada disk dolmasin. Olaylar kaydi kucuk
+  // (2 MB x 2) ama yalniz uyari/hata ve kabuk satirlarini tuttugu icin haftalarca geriye gider.
   logPath = join(app.getPath('userData'), 'backend-error.log');
   writeLog = rotatingLog(logPath);
+  writeEvents = rotatingLog(join(app.getPath('userData'), 'ado-olaylar.log'), EVENTS_LOG_MAX_BYTES);
   try {
     if (app.isPackaged || !(await isUp())) {
       // Dev'de backend'i kendin calistiriyorsan buraya dusmez.
@@ -333,7 +425,9 @@ async function start() {
     }
     backendReady = true;
     await openWindow();
+    showRestoreProblem();
     startUpdater();
+    startLivenessWatch();
   } catch (err) {
     // Sessiz cikis olmasin: hatayi goster, sonra kapan.
     dialog.showErrorBox('Uygulama başlatılamadı', String(err && err.stack ? err.stack : err));
@@ -360,9 +454,23 @@ if (!app.requestSingleInstanceLock()) {
   // Kapanista backend'e duzgun kapanma firsati (en fazla 10 sn): acik istekler biter, veritabani
   // kapanir. Sonra cikis tamamlanir.
   let stopping = false;
+  let installQuitDelayed = false;
   app.on('before-quit', (event) => {
+    // Guncelleme kurulumu: yukleyici baslatilamazsa electron-updater hatayi birkac sn icinde
+    // bildirir. Kapanis o kadar bekletilir; hata gelirse program kapanmaz, geri acilir (PLT-6).
+    if (updater?.installing() && !installQuitDelayed) {
+      event.preventDefault();
+      installQuitDelayed = true;
+      setTimeout(() => {
+        if (updater.installing()) app.quit();
+        else installQuitDelayed = false;
+      }, INSTALL_ERROR_GRACE_MS);
+      return;
+    }
+    updater?.quitting();
     updater?.stop();
     shuttingDown = true;
+    clearInterval(livenessTimer);
     clearTimeout(restartTimer);
     clearTimeout(unresponsiveTimer);
     if (!backend || stopping) return;

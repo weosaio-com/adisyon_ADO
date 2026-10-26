@@ -52,9 +52,14 @@ Environment secret'ından geçici dosyaya yazar.
    - şifreli yedek (`pre_update`);
    - `UpdateHistory` kaydı (`ready`) ve denetim kaydı (`update.approve`);
    - kabuğa `update-install` komutu.
-5. **Kurulum (kabuk):** dosyanın özeti bir kez daha denetlenir. Pencerede "Program güncelleniyor"
-   sayfası açılır, backend düzgün kapatılır (`shutdown`, en fazla 10 sn). Ardından sessiz NSIS
-   kurulumu başlar ve program yeniden açılır (`quitAndInstall(true, true)`).
+5. **Kurulum (kabuk):** backend durdurulmadan önce kurulum dosyası denetlenir (yerinde, boyutu ve
+   özeti imzalı bilgiyle aynı, electron-updater aynı dosyayı kuracak); tutmazsa kurulum hiç
+   başlamaz, kart hata gösterir. Pencerede "Program güncelleniyor" sayfası açılır, backend düzgün
+   kapatılır (`shutdown`, en fazla 10 sn). Ardından sessiz NSIS kurulumu başlar ve program yeniden
+   açılır (`quitAndInstall(true, true)`). Kapanış 3 sn bekletilir: yükleyici başlatılamazsa
+   (`autoUpdater` `error` olayı) ya da program 30 sn içinde kapanmaya başlamazsa kurulum başarısız
+   sayılır; backend yeniden başlatılır, pencere arayüze döner ve "Güncelleme kurulamadı" gösterilir
+   (program eski sürümle çalışır, dosya bir sonraki denetimde yeniden indirilir).
 6. **Yeni sürümün açılışı:** migration'lardan önce `userData/pre-migrate`'e veritabanı kopyası alınır
    (son 3). Backend açılınca `UpdateHistory` kaydı sürüm yeni sürümse `applied`, değilse `failed`
    olur.

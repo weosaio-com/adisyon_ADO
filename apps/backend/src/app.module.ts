@@ -39,6 +39,7 @@ import { InstallMetricsModule } from './common/metrics/install-metrics.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { CloudBackupModule } from './cloud-backup/cloud-backup.module';
 import { API_PREFIX } from './common/http/api-prefix';
+import { pinoRequestLevel } from './common/http/request-log';
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -60,6 +61,8 @@ const isUnloggedRequest = (req: IncomingMessage): boolean => {
           censor: '[redacted]',
         },
         autoLogging: { ignore: isUnloggedRequest },
+        // Paketli surumde basarili istekler kayda yazilmaz; hatali ve yavas istekler kalir (PLT-14).
+        customLogLevel: pinoRequestLevel(isProd),
         genReqId: (_req: IncomingMessage, res: ServerResponse): string => {
           const id = newId();
           res.setHeader('x-request-id', id);

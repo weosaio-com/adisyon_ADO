@@ -13,8 +13,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { rotatingLog } from './rotating-log.mjs';
-import { applyPendingRestore, ensureSecrets } from './restore.mjs';
+import { isEventLine, lineSplitter, rotatingLog } from './rotating-log.mjs';
+import { applyPendingRestore, ensureSecrets, restoreSkippedDialog } from './restore.mjs';
+import { spawnSync } from 'node:child_process';
 import {
   appConfigEnv,
   cloudOrigin,
@@ -24,7 +25,7 @@ import {
 } from './app-config.mjs';
 import { applyMigrations, backupBeforeMigrate, pendingMigrations } from './migrations.mjs';
 import { startBackendProcess, stopBackendProcess } from './backend-process.mjs';
-import { createUpdater } from './updater.mjs';
+import { createUpdater, INSTALL_FAILED_MESSAGE } from './updater.mjs';
 import { generateUpdateKeyPair, signManifest } from '../../scripts/update-manifest.mjs';
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
@@ -57,6 +58,32 @@ const tempDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
   assert.ok(tail.endsWith('SON-KAYIT'), 'en yeni kayitlar korunur');
   assert.ok(!existsSync(path) || readFileSync(path).length === 0, 'dev dosya silinir');
   rmSync(dir, { recursive: true, force: true });
+}
+
+// --- Olaylar kaydi (PLT-14): yalniz uyari/hata satirlari, parca sinirlarinda satir bozulmaz ---
+{
+  const warn = JSON.stringify({ level: 40, time: 1, msg: 'DB_BUSY POST /api/v1/orders' });
+  const info = JSON.stringify({ level: 30, time: 1, msg: 'request completed' });
+  assert.strictEqual(isEventLine(warn, 'stdout'), true);
+  assert.strictEqual(isEventLine(JSON.stringify({ level: 50, msg: 'x' }), 'stdout'), true);
+  assert.strictEqual(isEventLine(info, 'stdout'), false, 'basarili istek olaylara girmez');
+  assert.strictEqual(isEventLine('[Nest] duz metin', 'stdout'), false);
+  assert.strictEqual(isEventLine('{bozuk', 'stdout'), false);
+  assert.strictEqual(isEventLine('TypeError: x\n    at y', 'stderr'), true, 'stderr (yigin) girer');
+  assert.strictEqual(isEventLine('   ', 'stderr'), false);
+
+  const lines = [];
+  const split = lineSplitter((line) => lines.push(line));
+  const turkish = Buffer.from(`${warn.replace('DB_BUSY', 'Sistem meşgul')}\n${info}\nyar`);
+  const cut = turkish.indexOf(Buffer.from('ş')) + 1; // cok baytli karakterin ortasindan bol
+  split(turkish.subarray(0, cut));
+  split(turkish.subarray(cut));
+  assert.deepStrictEqual(lines, [warn.replace('DB_BUSY', 'Sistem meşgul'), info]);
+  split('im satir\n');
+  assert.strictEqual(lines[2], 'yarim satir', 'yarim satir sonraki parcayla birlesir');
+  const long = [];
+  lineSplitter((line) => long.push(line), 32)('x'.repeat(40));
+  assert.deepStrictEqual(long, ['x'.repeat(40)], 'asiri uzun satir sinirda verilir');
 }
 
 // --- ensureSecrets: eksikler uretilir, mevcutlar korunur ---
@@ -113,17 +140,166 @@ const restoreFixture = (marker) => {
   assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
   rmSync(f.dir, { recursive: true, force: true });
 }
+// Gecersiz isaret programi acilmaz hale getirmez (PLT-3): takas yapilmaz, isaret kenara alinir,
+// her acilista ayni hata tekrarlanmaz, sorun bildirilir.
+const asideFiles = (dir) =>
+  readdirSync(dir).filter((n) => /^restore-pending\.invalid-.+\.json$/.test(n));
+const invalidMarker = (f, content) => {
+  const before = asideFiles(f.dir);
+  writeFileSync(join(f.dir, 'restore-pending.json'), content);
+  const problems = [];
+  const applied = applyPendingRestore(f.dir, f.dbPath, f.secretsPath, {
+    onProblem: (problem) => problems.push(problem),
+  });
+  assert.strictEqual(applied, false, 'takas yapilmaz');
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB', 'DB degismedi');
+  assert.strictEqual(problems.length, 1);
+  assert.strictEqual(problems[0].retry, false);
+  assert.ok(!existsSync(join(f.dir, 'restore-pending.json')), 'isaret yerinde kalmaz');
+  const aside = asideFiles(f.dir).filter((n) => !before.includes(n));
+  assert.strictEqual(
+    aside.length,
+    1,
+    'isaret restore-pending.invalid-<zaman>.json olarak saklanir',
+  );
+  assert.strictEqual(problems[0].setAside, join(f.dir, aside[0]));
+  assert.strictEqual(
+    readFileSync(join(f.dir, aside[0]), 'utf8'),
+    content,
+    'icerik korunur (destek)',
+  );
+  // Sonraki acilis normal: isaret yok.
+  assert.strictEqual(applyPendingRestore(f.dir, f.dbPath, f.secretsPath), false);
+  return problems[0];
+};
 {
-  // Veri dizini disini gosteren staging reddedilir, DB'ye dokunulmaz.
+  // Veri dizini disini gosteren staging reddedilir, DB'ye ve anahtara dokunulmaz.
   const f = restoreFixture({ backupKey: 'bbbb'.repeat(16) });
   const outside = join(tempDir('ado-outside-'), 'evil.db');
   writeFileSync(outside, 'KOTU');
-  writeFileSync(join(f.dir, 'restore-pending.json'), JSON.stringify({ stagePath: outside }));
-  assert.throws(() => applyPendingRestore(f.dir, f.dbPath, f.secretsPath), /Gecersiz restore/);
-  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB', 'DB degismedi');
+  const problem = invalidMarker(
+    f,
+    JSON.stringify({ stagePath: outside, backupKey: 'bbbb'.repeat(16) }),
+  );
+  assert.match(problem.reason, /Gecersiz restore/);
   assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
   rmSync(f.dir, { recursive: true, force: true });
 }
+{
+  // Yarim yazilmis isaret (elektrik kesintisi) ve silinmis staging (antivirus, elle temizlik).
+  const f = restoreFixture({});
+  assert.match(invalidMarker(f, '{"stagePath":"C:\\\\Us').reason, /okunamadi/);
+  rmSync(f.stagePath);
+  const missing = invalidMarker(f, JSON.stringify({ stagePath: f.stagePath }));
+  assert.match(missing.reason, /bulunamadi/);
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // Takas sirasinda hata (or. disk dolu): geri alinir, anahtar eski haline doner, isaret sonraki
+  // acilis icin kalir; engel kalkinca takas yapilir.
+  const f = restoreFixture({ backupKey: 'cccc'.repeat(16) });
+  mkdirSync(join(f.dir, 'ado.restore-incoming.db')); // kopya yazilamaz
+  const problems = [];
+  const applied = applyPendingRestore(f.dir, f.dbPath, f.secretsPath, {
+    onProblem: (problem) => problems.push(problem),
+  });
+  assert.strictEqual(applied, false);
+  assert.strictEqual(problems[0]?.retry, true, 'sonraki acilista yeniden denenir');
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'ESKI-DB');
+  assert.strictEqual(JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY, 'eski');
+  assert.ok(existsSync(join(f.dir, 'restore-pending.json')), 'isaret kalir');
+  assert.ok(!readdirSync(f.dir).some((n) => n.startsWith('ado.pre-restore-')), 'yarim takas yok');
+  rmSync(join(f.dir, 'ado.restore-incoming.db'), { recursive: true });
+  assert.strictEqual(applyPendingRestore(f.dir, f.dbPath, f.secretsPath), true);
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'YEDEK-DB');
+  assert.strictEqual(
+    JSON.parse(readFileSync(f.secretsPath, 'utf8')).BACKUP_ENCRYPTION_KEY,
+    'cccc'.repeat(16),
+  );
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // PLT-2: canli DB yarim kalmis bir yazmanin sicak gunlugunu tasiyor (zorla kapatma). Gunluk
+  // yeni DB'ye uygulanmamali: geri yuklenen veri tam yedek, geri donus kopyasi tutarli olmali.
+  const f = restoreFixture({});
+  const fill = (path, label) => {
+    rmSync(path, { force: true });
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA journal_mode=DELETE; CREATE TABLE sales(id INTEGER PRIMARY KEY, note TEXT)');
+    const insert = db.prepare('INSERT INTO sales(note) VALUES (?)');
+    db.exec('BEGIN');
+    for (let i = 0; i < 2000; i++) insert.run(`${label}-${i}-${'-'.repeat(200)}`);
+    db.exec('COMMIT');
+    db.close();
+  };
+  fill(f.stagePath, 'YEDEK');
+  fill(f.dbPath, 'CANLI');
+  const crash =
+    "const { DatabaseSync } = require('node:sqlite');" +
+    `const db = new DatabaseSync(${JSON.stringify(f.dbPath)});` +
+    "db.exec('PRAGMA cache_size=1'); db.exec('BEGIN');" +
+    "db.exec(\"UPDATE sales SET note='YARIM-'||id\"); process.kill(process.pid, 'SIGKILL');";
+  spawnSync(process.execPath, ['-e', crash]);
+  assert.ok(existsSync(`${f.dbPath}-journal`), 'sicak gunluk olustu (deney gecerli)');
+  const logged = [];
+  assert.strictEqual(
+    applyPendingRestore(f.dir, f.dbPath, f.secretsPath, { log: (line) => logged.push(line) }),
+    true,
+  );
+  assert.ok(!existsSync(`${f.dbPath}-journal`), 'yeni DB yaninda eski gunluk kalmaz');
+  const prefixes = (path) => {
+    const db = new DatabaseSync(path);
+    const rows = db.prepare('SELECT substr(note, 1, 5) p, count(*) c FROM sales GROUP BY p').all();
+    db.close();
+    return Object.fromEntries(rows.map((row) => [row.p, row.c]));
+  };
+  assert.deepStrictEqual(prefixes(f.dbPath), { YEDEK: 2000 }, 'geri yuklenen veri tam yedek');
+  const rollback = readdirSync(f.dir).find((n) => /^ado\.pre-restore-\d+\.db$/.test(n));
+  assert.deepStrictEqual(
+    prefixes(join(f.dir, rollback)),
+    { CANLI: 2000 },
+    'geri donus kopyasi yarim islem olmadan',
+  );
+  assert.ok(logged.some((line) => /geri alindi/.test(line)));
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // Bozuk eski DB'nin gecersiz yan dosyalarini SQLite temizler; yeni DB'nin yaninda kalmaz.
+  const f = restoreFixture({});
+  writeFileSync(`${f.dbPath}-journal`, 'ESKI-GUNLUK');
+  writeFileSync(`${f.dbPath}-wal`, 'ESKI-WAL');
+  assert.strictEqual(applyPendingRestore(f.dir, f.dbPath, f.secretsPath), true);
+  assert.ok(!existsSync(`${f.dbPath}-journal`) && !existsSync(`${f.dbPath}-wal`));
+  assert.strictEqual(readFileSync(f.dbPath, 'utf8'), 'YEDEK-DB');
+  rmSync(f.dir, { recursive: true, force: true });
+}
+{
+  // Eski DB hic acilamiyorsa (kilitli/okunamaz) gunluk eski DB ile birlikte tasinir, kayda yazilir.
+  const f = restoreFixture({});
+  rmSync(f.dbPath);
+  mkdirSync(f.dbPath); // acilamayan "veritabani"
+  writeFileSync(`${f.dbPath}-journal`, 'ESKI-GUNLUK');
+  const logged = [];
+  assert.strictEqual(
+    applyPendingRestore(f.dir, f.dbPath, f.secretsPath, { log: (line) => logged.push(line) }),
+    true,
+  );
+  assert.ok(!existsSync(`${f.dbPath}-journal`), 'yeni DB yaninda eski gunluk kalmaz');
+  const rollback = readdirSync(f.dir).find((n) => /^ado\.pre-restore-\d+\.db$/.test(n));
+  assert.strictEqual(readFileSync(join(f.dir, `${rollback}-journal`), 'utf8'), 'ESKI-GUNLUK');
+  assert.ok(
+    logged.some((line) => /uygulanamadi/.test(line)),
+    'kayda yazilir',
+  );
+  rmSync(f.dir, { recursive: true, force: true });
+}
+// Kullaniciya pencere: iki durum ayri anlatilir, kayit dosyasi yolu var.
+assert.match(restoreSkippedDialog({ retry: true }, 'C:/k.log').message, /bir sonraki/);
+assert.match(
+  restoreSkippedDialog({ retry: false }, 'C:/k.log').message,
+  /yeniden\s+başlatabilirsiniz/,
+);
+assert.match(restoreSkippedDialog({ retry: false }, 'C:/k.log').message, /C:\/k\.log/);
 
 // --- Derleme profili (app-config) ---
 {
@@ -389,6 +565,17 @@ const restoreFixture = (marker) => {
       env: process.env,
       onOutput: () => {},
     });
+  // Cikti akis adiyla gelir (olaylar kaydi stderr'i ayri suzer).
+  const streams = new Set();
+  const noisy = startBackendProcess({
+    execPath: process.execPath,
+    entry: script('noisy.cjs', "console.log('o'); console.error('e');\n"),
+    env: process.env,
+    onOutput: (_chunk, stream) => streams.add(stream),
+  });
+  await new Promise((resolve) => noisy.once('exit', resolve));
+  assert.deepStrictEqual([...streams].sort(), ['stderr', 'stdout']);
+
   const polite = start(
     script(
       'polite.cjs',
@@ -401,6 +588,17 @@ const restoreFixture = (marker) => {
     script('stubborn.cjs', "process.on('message', () => {});\nsetInterval(() => {}, 1000);\n"),
   );
   assert.strictEqual(await stopBackendProcess(stubborn, 300), 'killed', 'sure dolunca zorla');
+
+  // Askida kalan surec (PLT-12): mesaji da SIGTERM'i de islemez; kesin sonlandirilir.
+  if (process.platform !== 'win32') {
+    const frozen = start(
+      script('frozen.cjs', "process.on('message', () => {});\nsetInterval(() => {}, 1000);\n"),
+    );
+    await new Promise((resolve) => frozen.once('spawn', resolve));
+    process.kill(frozen.pid, 'SIGSTOP');
+    assert.strictEqual(await stopBackendProcess(frozen, 200, 200), 'killed', 'donmus surec biter');
+    assert.strictEqual(frozen.signalCode, 'SIGKILL');
+  }
 
   const gone = start(script('gone.cjs', 'process.exit(0);\n'));
   await new Promise((resolve) => gone.once('exit', resolve));
@@ -438,12 +636,21 @@ const restoreFixture = (marker) => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const cloudUrl = `http://127.0.0.1:${server.address().port}`;
 
-  // electron-updater sahtesi: latest.yml bilgisi ve indirme ayarlanabilir.
-  const fakeUpdater = (latest = { version: '0.3.1', sha512 }, bytes = installer) => {
+  // electron-updater sahtesi: latest.yml bilgisi, indirme ve kurulum davranisi ayarlanabilir.
+  // installerPath: electron-updater'in kuracagi dosya (null: yolu kaybolmus).
+  const fakeUpdater = (
+    latest = { version: '0.3.1', sha512 },
+    bytes = installer,
+    { installerPath, onQuitAndInstall } = {},
+  ) => {
     const listeners = {};
     const calls = { feed: null, installed: null, downloaded: null };
     return {
       calls,
+      listeners,
+      get installerPath() {
+        return installerPath === undefined ? calls.downloaded : installerPath;
+      },
       on: (event, fn) => (listeners[event] = fn),
       setFeedURL: (options) => (calls.feed = options),
       checkForUpdates: async () => ({
@@ -456,12 +663,16 @@ const restoreFixture = (marker) => {
         calls.downloaded = path;
         return [path];
       },
-      quitAndInstall: (...args) => (calls.installed = args),
+      quitAndInstall: (...args) => {
+        calls.installed = args;
+        onQuitAndInstall?.(listeners);
+      },
     };
   };
   const config = { cloudUrl, channel: 'stable', updatePublicKeys: [key.publicKeyB64] };
   const make = (overrides = {}) => {
     const states = [];
+    const failures = [];
     const autoUpdater = overrides.autoUpdater ?? fakeUpdater();
     const updater = createUpdater({
       currentVersion: overrides.currentVersion ?? '0.3.0',
@@ -469,9 +680,12 @@ const restoreFixture = (marker) => {
       log: () => {},
       onStatus: (status) => states.push(status.state),
       autoUpdater,
+      onInstallFailed: (reason) => failures.push(reason),
+      installTimeoutMs: 30,
     });
-    return { updater, autoUpdater, states };
+    return { updater, autoUpdater, states, failures };
   };
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const disabled = make({ config: { updatePublicKeys: [] } });
   assert.strictEqual((await disabled.updater.check()).state, 'disabled', 'anahtarsiz: kapali');
@@ -494,6 +708,62 @@ const restoreFixture = (marker) => {
   );
   assert.ok(prepared, 'kurulumdan once hazirlik (backend kapanisi) beklenir');
   assert.deepStrictEqual(fresh.autoUpdater.calls.installed, [true, true], 'sessiz kur, yeniden ac');
+  assert.ok(fresh.updater.installing());
+  fresh.updater.quitting(); // before-quit: program kapaniyor, zaman asimi beklenmez
+  await wait(60);
+  assert.deepStrictEqual(fresh.failures, [], 'kapanan kurulum basarisiz sayilmaz');
+
+  // PLT-6: kurulum baslamazsa program "guncelleniyor"da kapali kalmaz.
+  // a) electron-updater dosyanin yolunu kaybetmis: backend durdurulmadan reddedilir.
+  const lost = make({ autoUpdater: fakeUpdater(undefined, installer, { installerPath: null }) });
+  await lost.updater.check();
+  let stopped = false;
+  const stopBackend = async () => {
+    stopped = true;
+  };
+  assert.strictEqual(await lost.updater.install('0.3.1', stopBackend), false);
+  assert.strictEqual(stopped, false, 'kurulum dosyasi hazir degilse backend durdurulmaz');
+  assert.match(lost.updater.status().error, /hazır değil/);
+  assert.strictEqual(lost.autoUpdater.calls.installed, null);
+  // b) Yarim/eksik dosya (boyut imzali bilgiden farkli): backend durdurulmaz.
+  const short = make();
+  await short.updater.check();
+  writeFileSync(short.autoUpdater.calls.downloaded, installer.subarray(0, 1000));
+  assert.strictEqual(await short.updater.install('0.3.1', stopBackend), false);
+  assert.strictEqual(stopped, false);
+  assert.match(short.updater.status().error, /eksik ya da değişmiş/);
+  // c) quitAndInstall kurulumu baslatamadi (electron-updater 'error' olayi, program kapanmaz).
+  const failing = make({
+    autoUpdater: fakeUpdater(undefined, installer, {
+      onQuitAndInstall: (listeners) =>
+        listeners.error?.(new Error("No update filepath provided, can't quit and install")),
+    }),
+  });
+  await failing.updater.check();
+  assert.strictEqual(await failing.updater.install('0.3.1', stopBackend), false);
+  assert.ok(stopped, 'backend durdurulmustu');
+  assert.deepStrictEqual(failing.failures, ["No update filepath provided, can't quit and install"]);
+  assert.strictEqual(failing.updater.status().state, 'error');
+  assert.strictEqual(failing.updater.status().error, INSTALL_FAILED_MESSAGE);
+  assert.strictEqual(failing.updater.installing(), false);
+  await wait(60);
+  assert.strictEqual(failing.failures.length, 1, 'tek kez bildirilir (zaman asimi iptal)');
+  assert.strictEqual(
+    (await failing.updater.check()).state,
+    'ready',
+    'yeniden indirilip denenebilir',
+  );
+  // d) quitAndInstall sessizce dondu, program kapanmadi: zaman asiminda basarisiz sayilir.
+  const silent = make();
+  await silent.updater.check();
+  assert.strictEqual(await silent.updater.install('0.3.1', async () => {}), true);
+  await wait(60);
+  assert.deepStrictEqual(silent.failures, ['program kurulum icin kapanmadi']);
+  assert.strictEqual(silent.updater.status().state, 'error');
+  // e) Kurulum disindaki hata olayi kurulum basarisizligi sayilmaz.
+  const idle = make();
+  idle.autoUpdater.listeners.error?.(new Error('net::ERR_INTERNET_DISCONNECTED'));
+  assert.deepStrictEqual(idle.failures, []);
 
   const current = make({ currentVersion: '0.3.1' });
   assert.strictEqual((await current.updater.check()).state, 'idle', 'ayni surum: guncel');
