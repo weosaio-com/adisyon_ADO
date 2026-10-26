@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   api,
   ApiError,
@@ -36,6 +36,16 @@ export default function TablesScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Garson siparisi gonderip doner: kisa onay (URN-15).
+  const location = useLocation();
+  const [sent, setSent] = useState<string | null>(
+    () => (location.state as { sent?: string } | null)?.sent ?? null,
+  );
+  useEffect(() => {
+    if (!sent) return;
+    const timer = window.setTimeout(() => setSent(null), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [sent]);
   // Paket / gel-al iptali: gerekce secilmeden iptal edilmez (sunucu da gerekce ister).
   const [cancelFor, setCancelFor] = useState<Order | null>(null);
   const [cancelError, setCancelError] = useState('');
@@ -249,6 +259,17 @@ export default function TablesScreen() {
             </div>
           </div>
         </div>
+        {sent && (
+          <div className="mx-auto max-w-[1600px] px-4 pb-3 sm:px-6">
+            <p
+              role="status"
+              data-testid="sent-toast"
+              className="rounded-2xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm font-bold text-brand-800"
+            >
+              {sent}: mutfağa gönderildi ✓
+            </p>
+          </div>
+        )}
         {notice && (
           <div className="mx-auto max-w-[1600px] px-4 pb-3 sm:px-6">
             <div

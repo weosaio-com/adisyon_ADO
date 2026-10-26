@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError, hasPerm, isConnectivityError } from '../lib/api';
+import { api, ApiError, getUser, hasPerm, isConnectivityError } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus, formatQty } from '../lib/format';
 import type { Hall, Order, OrderItem, Product, Table } from '../lib/types';
@@ -66,6 +66,13 @@ export default function OrderScreen() {
   // Mutfaga gitmis kalemin iptali: onay + gerekce penceresi (URN-3). Tek dokunusla iptal olmaz.
   const [voidFor, setVoidFor] = useState<OrderItem | null>(null);
   const [voidError, setVoidError] = useState('');
+  // "Mutfağa gönderildi" kisa onayi (URN-15); garson masa planina doner ve onay orada gorunur.
+  const [sentNote, setSentNote] = useState(false);
+  useEffect(() => {
+    if (!sentNote) return;
+    const timer = window.setTimeout(() => setSentNote(false), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [sentNote]);
   // Telefonda (md alti) urunler ve adisyon ayni ekrana sigmaz: ikisi arasinda gecilir. Cevrimdisi
   // taslak sunucuya gecince yeni adrese yonlendirilir (ekran yeniden kurulur); gorunum korunur.
   const location = useLocation();
@@ -160,7 +167,19 @@ export default function OrderScreen() {
         await api(`/orders/${id}/send-kitchen`, { method: 'POST' });
       }
     },
-    onSuccess: refresh,
+    onSuccess: () => {
+      refresh();
+      setError('');
+      // Garsonun en sik isi "siparis al -> gonder -> sonraki masa": cevrimici sunucu
+      // adisyonunda masa planina donulur, onay orada gosterilir (URN-15). Yonetici ve
+      // cevrimdisi taslak adisyonda kalir (kisa onay burada).
+      if (getUser()?.role === 'waiter' && !local && !isOffline()) {
+        qc.invalidateQueries({ queryKey: ['orders'] });
+        nav('/', { replace: true, state: { sent: place.title } });
+        return;
+      }
+      setSentNote(true);
+    },
     onError: fail,
   });
   // Taslak ve golge (cevrimdisi eklenen) kalemler yerelde; sunucu kalemleri sunucuda duzenlenir.
@@ -689,6 +708,17 @@ export default function OrderScreen() {
           {error && (
             <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
               {error}
+            </p>
+          )}
+          {sentNote && (
+            <p
+              role="status"
+              data-testid="sent-toast"
+              className="mb-3 rounded-xl bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800"
+            >
+              {local || offline
+                ? 'Sipariş bu tablette saklandı; bağlantı gelince mutfağa gidecek.'
+                : 'Mutfağa gönderildi ✓'}
             </p>
           )}
           {isOpen && canPay && activeItems.length > 0 && (currentOrder?.grandTotal ?? 0) <= 0 && (
