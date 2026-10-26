@@ -13,6 +13,7 @@ import {
   compareOutbox,
   describeEntry,
   problemMessage,
+  shadowDraft,
   wireSize,
   type OutboxEntry,
 } from './sync-core.ts';
@@ -105,6 +106,18 @@ assert.equal(
 );
 assert.match(problemMessage('conflict', 'cash_closed', 'Masa açma'), /yönetici onayı bekliyor/);
 assert.match(problemMessage('failed', 'VALIDATION_ERROR', 'Not'), /kabul etmedi/);
+
+// --- OFF-4: sunucuda acik adisyona cevrimdisi ekleme: kayit sunucu id'sine baglanir.
+const shadow = shadowDraft({ id: 'O1', label: 'Masa 5', tableId: 't5' });
+assert.equal(shadow.id, 'shadow:O1');
+const srvAdd = buildAddLine(shadow, 'op7', { id: 'p1', name: 'Cay', salePrice: 1500 });
+assert.equal(srvAdd.entry.payload.orderId, 'O1');
+assert.equal(srvAdd.entry.payload.orderClientOpId, undefined);
+assert.equal(srvAdd.entry.payload.unitPrice, 1500, 'garsonun gordugu fiyat (OFF-3)');
+assert.equal(srvAdd.entry.localOrderId, 'shadow:O1');
+assert.equal(srvAdd.entry.tableId, 't5');
+assert.deepEqual(buildSubmit(srvAdd.draft, 'op8').entry.payload, { orderId: 'O1' });
+assert.equal(add.entry.payload.orderId, undefined, 'taslakta OPEN_TABLE referansi');
 
 // Rozet: sorun varsa "Sorun var"; baglanti hatasi her seyin onunde.
 assert.equal(badgeView({ mode: 'online', problems: 0 }).mode, 'online');

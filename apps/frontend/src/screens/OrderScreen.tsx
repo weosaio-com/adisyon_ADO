@@ -21,16 +21,28 @@ import { ulid } from '../offline/ids';
 import {
   isLocalId,
   offlineAddLine,
+  offlineAddToServerOrder,
   offlineSubmit,
+  offlineSubmitServerOrder,
   offlineUpdateQty,
   offlineRemoveLine,
   readLocalOrder,
 } from '../offline/actions';
-import { readCategories, readHalls, readProducts, readTables } from '../offline/read';
+import {
+  readCategories,
+  readHalls,
+  readProducts,
+  readServerOrder,
+  readTables,
+  type ShownItem,
+} from '../offline/read';
+import { SHADOW_PREFIX } from '../offline/sync-core';
 
 type PhoneView = 'products' | 'order';
-// Sunucu kaleminin arayuzde kullanilan ek alanlari (lib/types OrderItem'da yok).
-type ServerItem = OrderItem & { voidReason?: string | null; clientOpId?: string | null };
+// Sunucu kaleminin arayuzde kullanilan ek alanlari (lib/types OrderItem'da yok). offline:
+// cevrimdisi eklenip henuz sunucuya gecmemis kalem (golge taslak, OFF-4).
+type ServerItem = OrderItem & ShownItem & { voidReason?: string | null };
+const isShadow = (item: OrderItem) => (item as ServerItem).offline === true;
 
 // Yazma istegi yanitsiz kaldi (Wi-Fi koptu): islem sunucuya ulasmis olabilir; adisyon tazelenir.
 const UNCERTAIN_ORDER_MESSAGE =
@@ -65,8 +77,9 @@ export default function OrderScreen() {
   useLiveEvents();
   const order = useQuery({
     queryKey: ['order', id],
-    queryFn: (): Promise<Order & { serverId?: string }> =>
-      local ? readLocalOrder(id) : api<Order>(`/orders/${id}`),
+    // Sunucu adisyonu baglanti yoksa snapshot'tan; cevrimdisi eklenen kalemlerle (OFF-4).
+    queryFn: (): Promise<Order & { serverId?: string; fromSnapshot?: boolean }> =>
+      local ? readLocalOrder(id) : readServerOrder(id),
     refetchInterval: local ? 2_000 : 30_000,
   });
   const categories = useQuery({ queryKey: ['categories'], queryFn: readCategories });
@@ -108,11 +121,12 @@ export default function OrderScreen() {
           name: product.name,
           salePrice: product.salePrice,
         });
+      // Baglanti yok: acik adisyona ekleme kuyruga yazilir (ADD_LINE {orderId}), bekliyor
+      // olarak gosterilir; baglanti gelince sunucuya gider. OFF-4
       if (isOffline())
-        throw new ApiError(
-          0,
-          'OFFLINE',
-          'Bağlantı yok — çevrimiçi açılan adisyona ekleme için bağlantı bekleniyor.',
+        return offlineAddToServerOrder(
+          { id, label: place.title, tableId: currentOrder?.tableId ?? null },
+          { id: product.id, name: product.name, salePrice: product.salePrice },
         );
       const prev = pendingAdd.current;
       const key = prev?.productId === product.id ? prev.key : ulid();
@@ -134,24 +148,47 @@ export default function OrderScreen() {
     },
   });
   const sendKitchen = useMutation({
-    mutationFn: () =>
-      local ? offlineSubmit(id) : api(`/orders/${id}/send-kitchen`, { method: 'POST' }),
+    mutationFn: async () => {
+      if (local) return offlineSubmit(id);
+      const items = currentOrder?.items ?? [];
+      const shadowPending = items.some((i) => isShadow(i) && i.status === 'pending');
+      // Cevrimdisi eklenenler kuyruga (SUBMIT_ORDER {orderId}); sunucudakiler dogrudan.
+      if (isOffline()) return offlineSubmitServerOrder(id);
+      if (shadowPending) await offlineSubmitServerOrder(id);
+      if (items.some((i) => !isShadow(i) && i.status === 'pending') || !shadowPending) {
+        await api(`/orders/${id}/send-kitchen`, { method: 'POST' });
+      }
+    },
     onSuccess: refresh,
     onError: fail,
   });
+  // Taslak ve golge (cevrimdisi eklenen) kalemler yerelde; sunucu kalemleri sunucuda duzenlenir.
+  const draftIdFor = (shadow: boolean) => (local ? id : shadow ? SHADOW_PREFIX + id : null);
   const updateQty = useMutation({
-    mutationFn: ({ itemId, quantity }: { itemId: string; quantity: number }) =>
-      local
-        ? offlineUpdateQty(id, itemId, quantity)
-        : api(`/orders/${id}/items/${itemId}`, { method: 'PATCH', body: { quantity } }),
+    mutationFn: ({
+      itemId,
+      quantity,
+      shadow,
+    }: {
+      itemId: string;
+      quantity: number;
+      shadow: boolean;
+    }) => {
+      const draftId = draftIdFor(shadow);
+      return draftId
+        ? offlineUpdateQty(draftId, itemId, quantity)
+        : api(`/orders/${id}/items/${itemId}`, { method: 'PATCH', body: { quantity } });
+    },
     onSuccess: refresh,
     onError: fail,
   });
   const removeItem = useMutation({
-    mutationFn: (itemId: string) =>
-      local
-        ? offlineRemoveLine(id, itemId)
-        : api(`/orders/${id}/items/${itemId}`, { method: 'DELETE' }),
+    mutationFn: ({ itemId, shadow }: { itemId: string; shadow: boolean }) => {
+      const draftId = draftIdFor(shadow);
+      return draftId
+        ? offlineRemoveLine(draftId, itemId)
+        : api(`/orders/${id}/items/${itemId}`, { method: 'DELETE' });
+    },
     onSuccess: refresh,
     onError: fail,
   });
@@ -457,7 +494,7 @@ export default function OrderScreen() {
             </div>
             <SyncBadge />
           </div>
-          {currentOrder?.status === 'open' && currentOrder.tableId && !local && (
+          {currentOrder?.status === 'open' && currentOrder.tableId && !local && !offline && (
             <div className="mt-3 grid grid-cols-3 gap-2">
               <SmallAction onClick={() => setTransfer('move')}>Taşı</SmallAction>
               <SmallAction onClick={() => setTransfer('merge')}>Birleştir</SmallAction>
@@ -472,6 +509,15 @@ export default function OrderScreen() {
         </header>
 
         <ul className="min-h-0 flex-1 space-y-2 overflow-auto bg-stone-50/70 p-3">
+          {!local && currentOrder?.fromSnapshot && (
+            <li
+              data-testid="order-from-snapshot"
+              className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+            >
+              Bağlantı yok: adisyonun son bilinen hali gösteriliyor. Eklediğiniz ürünler bu tablette
+              saklanır, bağlantı gelince gönderilir.
+            </li>
+          )}
           {local && (currentOrder as { review?: unknown } | undefined)?.review !== undefined && (
             <li
               data-testid="draft-review"
@@ -491,6 +537,9 @@ export default function OrderScreen() {
           {(currentOrder?.items ?? []).map((item: ServerItem) => {
             const pending = item.status === 'pending';
             const cancelled = item.status === 'cancelled';
+            const shadow = isShadow(item);
+            // Baglanti yokken sunucu kalemi degistirilemez (cevrimdisi eklenenler degistirilir).
+            const locked = offline && !local && !shadow;
             return (
               <li
                 key={item.id}
@@ -514,7 +563,16 @@ export default function OrderScreen() {
                         Not: {(item.notes ?? []).map((n) => n.note).join('; ')}
                       </span>
                     )}
-                    {cancelled ? (
+                    {shadow ? (
+                      <span
+                        data-testid="item-offline"
+                        className="mt-0.5 block text-[10px] font-bold tracking-wide text-amber-700 uppercase"
+                      >
+                        {pending
+                          ? 'Bu tablette · bağlantı gelince eklenecek'
+                          : 'Bağlantı gelince mutfağa gidecek'}
+                      </span>
+                    ) : cancelled ? (
                       <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-red-600 uppercase">
                         İptal edildi{item.voidReason ? ` · ${item.voidReason}` : ''}
                       </span>
@@ -541,13 +599,14 @@ export default function OrderScreen() {
                         label="Azalt"
                         onClick={() =>
                           item.quantity <= 1000
-                            ? removeItem.mutate(item.id)
+                            ? removeItem.mutate({ itemId: item.id, shadow })
                             : updateQty.mutate({
                                 itemId: item.id,
                                 quantity: item.quantity - 1000,
+                                shadow,
                               })
                         }
-                        disabled={busy}
+                        disabled={busy || locked}
                       >
                         −
                       </QtyButton>
@@ -560,26 +619,27 @@ export default function OrderScreen() {
                           updateQty.mutate({
                             itemId: item.id,
                             quantity: item.quantity + 1000,
+                            shadow,
                           })
                         }
-                        disabled={busy || item.quantity + 1000 > MAX_QUANTITY_MILLI}
+                        disabled={busy || locked || item.quantity + 1000 > MAX_QUANTITY_MILLI}
                       >
                         +
                       </QtyButton>
-                      {!local && (
+                      {!local && !shadow && (
                         <button
                           data-testid="item-note-button"
                           onClick={() => setNoteItem(item)}
-                          disabled={busy}
+                          disabled={busy || locked}
                           className="ml-auto min-h-10 rounded-xl px-3 text-xs font-bold text-ink-700 hover:bg-stone-100"
                         >
                           Not
                         </button>
                       )}
                       <button
-                        onClick={() => removeItem.mutate(item.id)}
-                        disabled={busy}
-                        className={`${local ? 'ml-auto ' : ''}min-h-10 rounded-xl px-3 text-xs font-bold text-red-600 hover:bg-red-50`}
+                        onClick={() => removeItem.mutate({ itemId: item.id, shadow })}
+                        disabled={busy || locked}
+                        className={`${local || shadow ? 'ml-auto ' : ''}min-h-10 rounded-xl px-3 text-xs font-bold text-red-600 hover:bg-red-50`}
                       >
                         Sil
                       </button>
@@ -589,13 +649,13 @@ export default function OrderScreen() {
                       <span className="text-xs font-semibold text-stone-500">
                         {formatQty(item.quantity)} adet
                       </span>
-                      {canVoid && !cancelled && (
+                      {canVoid && !cancelled && !shadow && (
                         <button
                           onClick={() => {
                             setVoidError('');
                             setVoidFor(item);
                           }}
-                          disabled={busy}
+                          disabled={busy || locked}
                           className="ml-auto min-h-11 rounded-xl px-4 text-xs font-bold text-red-600 hover:bg-red-50"
                         >
                           İptal
@@ -650,14 +710,19 @@ export default function OrderScreen() {
           <div className={`mb-2 grid gap-2 ${canVoid ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <SmallAction
               onClick={() => setDiscountOpen(true)}
-              disabled={busy || local || !currentOrder || currentOrder.status !== 'open'}
+              disabled={busy || local || offline || !currentOrder || currentOrder.status !== 'open'}
             >
               İndirim
             </SmallAction>
             <SmallAction
               onClick={() => hold.mutate()}
               disabled={
-                busy || local || hold.isPending || !currentOrder || currentOrder.status !== 'open'
+                busy ||
+                local ||
+                offline ||
+                hold.isPending ||
+                !currentOrder ||
+                currentOrder.status !== 'open'
               }
             >
               Beklet
@@ -667,6 +732,7 @@ export default function OrderScreen() {
               disabled={
                 busy ||
                 local ||
+                offline ||
                 printBill.isPending ||
                 !currentOrder ||
                 (currentOrder?.items ?? []).length === 0
@@ -680,7 +746,7 @@ export default function OrderScreen() {
                   setCancelError('');
                   setCancelOpen(true);
                 }}
-                disabled={!isOpen || activeItems.length === 0 || cancelOrder.isPending}
+                disabled={!isOpen || offline || activeItems.length === 0 || cancelOrder.isPending}
               >
                 İptal et
               </SmallAction>

@@ -20,6 +20,7 @@ import {
 } from './db';
 import {
   CHUNK_MAX_BYTES,
+  SHADOW_PREFIX,
   applyResults,
   chunkEntries,
   classifyFailure,
@@ -130,9 +131,10 @@ async function problemFor(
   reason: string,
   reviewId?: string,
 ): Promise<SyncProblem> {
-  const draft = entry.localOrderId.startsWith('local:')
-    ? await draftGet(entry.localOrderId)
-    : undefined;
+  const draft =
+    entry.localOrderId.startsWith('local:') || entry.localOrderId.startsWith(SHADOW_PREFIX)
+      ? await draftGet(entry.localOrderId)
+      : undefined;
   const what = describeEntry(entry, draft);
   const serverOrderId =
     draft?.serverId ??
@@ -176,6 +178,20 @@ async function applyChunk(chunk: OutboxEntry[], results: MutationResult[]): Prom
     problems.push(await problemFor(entry, kind, r.reason ?? r.status, r.reviewId));
   }
   await problemsAdd(problems, oc.remove);
+  // Sunucu adisyonuna cevrimdisi eklenen kalem islendi (uygulandi / reddedildi / onaya dustu):
+  // golge taslaktan duser; ekran sunucu adisyonunu (ya da sorun kutusunu) gosterir. OFF-4
+  const shadowIds = new Set(
+    chunk
+      .filter((e) => e.localOrderId.startsWith(SHADOW_PREFIX) && oc.remove.includes(e.clientOpId))
+      .map((e) => e.localOrderId),
+  );
+  for (const shadowId of shadowIds) {
+    const shadow = await draftGet(shadowId);
+    if (!shadow) continue;
+    const items = shadow.items.filter((item) => !oc.remove.includes(item.id));
+    const total = items.reduce((sum, item) => sum + item.lineTotal, 0);
+    await draftPut({ ...shadow, items, subtotal: total, grandTotal: total });
+  }
   // OPEN_TABLE onaya dustu: taslak "onayda" (masa planinda hayalet "Senkron bekliyor" kalmaz);
   // reddedildi: taslak silinir (garson sorun listesinden ogrenir). OFF-8
   for (const r of [...oc.conflicts, ...oc.rejections]) {
@@ -245,9 +261,12 @@ async function cleanupDrafts(): Promise<void> {
   const [drafts, entries] = await Promise.all([draftAll(), outboxAll()]);
   const busy = new Set(entries.map((entry) => entry.localOrderId));
   for (const draft of drafts) {
-    if (draft.serverId && !busy.has(draft.id) && Date.now() - (draft.syncedAt ?? 0) > 60_000) {
-      await draftDelete(draft.id);
-    }
+    if (busy.has(draft.id)) continue;
+    // Golge taslak: tum kalemleri sunucuya gecince silinir.
+    const stale = draft.id.startsWith(SHADOW_PREFIX)
+      ? draft.items.length === 0
+      : draft.serverId && Date.now() - (draft.syncedAt ?? 0) > 60_000;
+    if (stale) await draftDelete(draft.id);
   }
 }
 

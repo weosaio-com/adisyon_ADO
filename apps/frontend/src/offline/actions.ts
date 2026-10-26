@@ -1,6 +1,14 @@
 // Ekranlarin cagirdigi offline aksiyonlar: draft yaz + outbox'a kuyrukla + drain tetikle.
 import { ulid } from './ids';
-import { buildOpenTable, buildAddLine, buildSubmit, recompute, type DraftOrder } from './sync-core';
+import {
+  buildOpenTable,
+  buildAddLine,
+  buildSubmit,
+  recompute,
+  shadowDraft,
+  SHADOW_PREFIX,
+  type DraftOrder,
+} from './sync-core';
 import { draftGet, enqueue, outboxGet, saveDraftAndOutbox } from './db';
 import { kick } from './engine';
 
@@ -75,6 +83,27 @@ export async function offlineRemoveLine(orderId: string, itemId: string): Promis
   // gonderilmemis satir -> outbox'tan da cikar (ayni islemde)
   await saveDraftAndOutbox({ ...d, items, ...recompute(items) }, { remove: [itemId] });
   void kick();
+}
+
+/**
+ * Sunucuda acik adisyona cevrimdisi kalem ekle (OFF-4): ADD_LINE {orderId} kuyruga yazilir,
+ * kalem golge taslakta "bekliyor" olarak gosterilir.
+ */
+export async function offlineAddToServerOrder(
+  order: { id: string; label: string; tableId: string | null },
+  product: { id: string; name: string; salePrice: number },
+): Promise<void> {
+  const shadow = (await draftGet(SHADOW_PREFIX + order.id)) ?? shadowDraft(order);
+  const { draft, entry } = buildAddLine(shadow, ulid(), product);
+  await commit(draft, entry);
+}
+
+/** Sunucu adisyonuna cevrimdisi eklenen kalemleri mutfaga gonder: SUBMIT_ORDER {orderId}. */
+export async function offlineSubmitServerOrder(orderId: string): Promise<void> {
+  const shadow = await draftGet(SHADOW_PREFIX + orderId);
+  if (!shadow) throw new Error('Gönderilecek çevrimdışı kalem yok');
+  const { draft, entry } = buildSubmit(shadow, ulid());
+  await commit(draft, entry);
 }
 
 export async function readLocalOrder(orderId: string): Promise<DraftOrder> {

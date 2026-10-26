@@ -65,6 +65,37 @@ export function lineTotal(salePrice: number, qtyMilis: number): number {
   return Math.round((salePrice * qtyMilis) / 1000);
 }
 
+/**
+ * Sunucuda acik adisyona cevrimdisi eklenen kalemlerin yerel kaydi ("golge" taslak, OFF-4):
+ * id = 'shadow:<sunucu adisyon id>', serverId = sunucu adisyonu. Kalemler sunucuya gecince
+ * golgeden silinir; ekran sunucu (ya da snapshot) adisyonunu golge kalemleriyle birlestirir.
+ */
+export const SHADOW_PREFIX = 'shadow:';
+export function shadowDraft(order: {
+  id: string;
+  label: string;
+  tableId: string | null;
+}): DraftOrder {
+  return {
+    id: SHADOW_PREFIX + order.id,
+    clientOpId: '',
+    orderNo: order.label,
+    tableId: order.tableId,
+    status: 'open',
+    items: [],
+    subtotal: 0,
+    discountTotal: 0,
+    grandTotal: 0,
+    serverId: order.id,
+  };
+}
+/** Golge taslakta adisyon referansi sunucu id'si, taslakta OPEN_TABLE'in clientOpId'si. */
+function orderRef(draft: DraftOrder): Record<string, string> {
+  return draft.id.startsWith(SHADOW_PREFIX) && draft.serverId
+    ? { orderId: draft.serverId }
+    : { orderClientOpId: draft.clientOpId };
+}
+
 type Totals = Pick<DraftOrder, 'subtotal' | 'discountTotal' | 'grandTotal'>;
 // Offline draft toplamlari yaklasiktir (KDV/indirim sunucuda kesinlesir). §5.2
 export function recompute(items: DraftItem[]): Totals {
@@ -121,13 +152,14 @@ export function buildAddLine(
     // unitPrice: garsonun gordugu fiyat; sunucu farkliysa kalemi onaya alir (OFF-3).
     // productName: onay ekraninda ve sorun listesinde urun adi (sunucu yok sayar).
     payload: {
-      orderClientOpId: draft.clientOpId,
+      ...orderRef(draft),
       productId: product.id,
       quantity: qtyMilis,
       unitPrice: product.salePrice,
       productName: product.name,
     },
     localOrderId: draft.id,
+    tableId: draft.tableId,
     status: 'pending',
     retryCount: 0,
     createdAt: Date.now(),
@@ -143,8 +175,9 @@ export function buildSubmit(
   const entry: OutboxEntry = {
     clientOpId: opId,
     type: 'SUBMIT_ORDER',
-    payload: { orderClientOpId: draft.clientOpId },
+    payload: orderRef(draft),
     localOrderId: draft.id,
+    tableId: draft.tableId,
     status: 'pending',
     retryCount: 0,
     createdAt: Date.now(),
