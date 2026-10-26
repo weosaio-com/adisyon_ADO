@@ -10,6 +10,7 @@ import type { CashSession, Order } from '../lib/types';
 import { readOpenOrders, readTables } from '../offline/read';
 import { pickKasaPanel } from './kasa-panel';
 import { keyReuser, moneyLimitError } from './payment-input';
+import { looseOrderLabel } from './order-label';
 
 // TL metnini kurusa cevir (PaymentModal ile ayni kalip). Gecersizse NaN.
 
@@ -118,9 +119,12 @@ function OpenOrdersPanel() {
   });
   const tables = useQuery({ queryKey: ['tables', 'active'], queryFn: readTables });
   const tableName = (id: string) => tables.data?.find((t) => t.id === id)?.name ?? 'Masa';
-  const label = (o: Order) =>
-    o.tableId ? tableName(o.tableId) : o.type === 'delivery' ? '🛵 Paket' : '🥡 Gel-Al';
   const list = orders.data ?? [];
+  // Masasiz adisyon: paket / gel-al ya da bolunen "Ayrı hesap · Masa X" (SAT-20).
+  const label = (o: Order) =>
+    o.tableId
+      ? tableName(o.tableId)
+      : looseOrderLabel(o, list, (id) => tables.data?.find((t) => t.id === id)?.name);
 
   return (
     <div className="mt-6">

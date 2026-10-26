@@ -1,11 +1,13 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { formatKurus, formatQty } from '../lib/format';
 import type { Order, OrderItem } from '../lib/types';
 import { useState } from 'react';
+import { readHeldOrders, readOpenOrders, readTables } from '../offline/read';
 
-// Adisyon bol: secili kalemler yeni (masasiz) bir adisyona tasinir; kaynakta
-// en az bir kalem kalmali. Bolme sonrasi olusan adisyona yonlenir (ayri hesap).
+// Adisyon bol: secili kalemler yeni bir adisyona tasinir; kaynakta en az bir kalem kalmali.
+// Yeni hesap ayni masada "ayri hesap" (masasiz, kaynak masasiyla etiketlenir) ya da bos bir
+// masaya acilir (SAT-20). Bolme sonrasi olusan adisyona yonlenir.
 export default function SplitModal({
   orderId,
   items,
@@ -20,6 +22,16 @@ export default function SplitModal({
   const qc = useQueryClient();
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [target, setTarget] = useState('');
+  const tables = useQuery({ queryKey: ['tables', 'active'], queryFn: readTables });
+  const openOrders = useQuery({ queryKey: ['orders', 'open'], queryFn: readOpenOrders });
+  const heldOrders = useQuery({ queryKey: ['orders', 'held'], queryFn: readHeldOrders });
+  const busyTables = new Set(
+    [...(openOrders.data ?? []), ...(heldOrders.data ?? [])].flatMap((o) =>
+      o.tableId ? [o.tableId] : [],
+    ),
+  );
+  const freeTables = (tables.data ?? []).filter((t) => !busyTables.has(t.id));
 
   const toggle = (itemId: string) =>
     setSelected((prev) => {
@@ -33,7 +45,7 @@ export default function SplitModal({
     mutationFn: (itemIds: string[]) =>
       api<{ created: Order }>(`/orders/${orderId}/split`, {
         method: 'POST',
-        body: { itemIds },
+        body: { itemIds, ...(target ? { targetTableId: target } : {}) },
       }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['orders'] });
@@ -51,7 +63,10 @@ export default function SplitModal({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-sm flex-col rounded-2xl bg-white p-6 shadow-xl">
+      <div
+        data-testid="split-modal"
+        className="flex max-h-[80vh] w-full max-w-sm flex-col rounded-2xl bg-white p-6 shadow-xl"
+      >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-800">Adisyon Böl</h2>
           <button onClick={onClose} className="rounded-lg bg-slate-200 px-3 py-1 font-medium">
@@ -69,8 +84,9 @@ export default function SplitModal({
             return (
               <li key={it.id}>
                 <button
+                  data-testid="split-item"
                   onClick={() => toggle(it.id)}
-                  className={`flex w-full items-center justify-between border-b px-2 py-2 text-left ${
+                  className={`flex min-h-11 w-full items-center justify-between border-b px-2 py-2 text-left ${
                     on ? 'bg-blue-50' : ''
                   }`}
                 >
@@ -93,12 +109,30 @@ export default function SplitModal({
           })}
         </ul>
 
+        <label className="mb-3 block text-sm font-semibold text-slate-600">
+          Yeni hesap
+          <select
+            data-testid="split-target"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base"
+          >
+            <option value="">Aynı masada ayrı hesap</option>
+            {freeTables.map((t) => (
+              <option key={t.id} value={t.id}>
+                Boş masaya taşı: {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-500">Seçilen: {formatKurus(selectedTotal)}</span>
           <button
+            data-testid="split-submit"
             onClick={() => split.mutate([...selected])}
             disabled={!canSplit}
-            className="rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white disabled:opacity-40"
+            className="min-h-11 rounded-lg bg-blue-600 px-5 font-semibold text-white disabled:opacity-40"
           >
             Böl
           </button>

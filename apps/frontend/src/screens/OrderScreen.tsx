@@ -880,6 +880,8 @@ function orderPlace(
   const no = `#${order.orderNo?.split('-')[1] ?? order.orderNo ?? ''}`;
   if (order.type === 'delivery') return { caption: 'Paket sipariş', title: no };
   if (order.type === 'takeaway') return { caption: 'Gel-al sipariş', title: no };
+  // Bolunerek ayrilan hesap (masasiz salon adisyonu): "Masa" degil (SAT-20).
+  if (!order.tableId && order.type === 'dine_in') return { caption: 'Ayrı hesap', title: no };
   const table = order.table ?? tables?.find((t) => t.id === order.tableId);
   const tableHallId = tables?.find((t) => t.id === order.tableId)?.hallId;
   const hall = order.table?.hall?.name ?? halls?.find((h) => h.id === tableHallId)?.name;

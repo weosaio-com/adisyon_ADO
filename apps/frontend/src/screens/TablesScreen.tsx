@@ -12,6 +12,7 @@ import {
 import { useLiveEvents } from '../lib/useLiveEvents';
 import ReasonModal from './ReasonModal';
 import { CANCEL_REASONS } from './reason';
+import { looseOrderLabel } from './order-label';
 import { formatKurus } from '../lib/format';
 import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
@@ -392,8 +393,12 @@ export default function TablesScreen() {
                     }`}
                   >
                     <span className="text-xs font-bold tracking-wider text-white/75 uppercase">
-                      {order.type === 'delivery' ? 'Paket' : 'Gel-al'} · #
-                      {order.orderNo.split('-')[1] ?? order.orderNo}
+                      {looseOrderLabel(
+                        order,
+                        openOrders.data ?? [],
+                        (id) => tables.data?.find((t) => t.id === id)?.name,
+                      )}{' '}
+                      · #{order.orderNo.split('-')[1] ?? order.orderNo}
                     </span>
                     <span className="text-lg font-black">{formatKurus(order.grandTotal)}</span>
                   </button>
