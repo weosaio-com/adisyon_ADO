@@ -52,7 +52,7 @@ devam eder**. Bağlantı gelince siparişler otomatik ve kayıpsız senkronlanı
 ## 3. Kurulum (Ana Makine)
 
 1. Size verilen **kurulum dosyasını** (`Adisyon-POS-Setup-<sürüm>.exe`, ör.
-   `Adisyon-POS-Setup-0.4.1.exe`) ana makinede çalıştırın.
+   `Adisyon-POS-Setup-0.4.2.exe`) ana makinede çalıştırın.
 2. Windows "Windows bilgisayarınızı korudu" uyarısı gösterirse **Ek bilgi › Yine de çalıştır** deyin
    (program henüz kod imzalama sertifikasıyla imzalı değil).
 3. Kurulum kendiliğinden tamamlanır ve program açılır. Sonraki açılışlarda masaüstündeki **Adisyon
