@@ -12,13 +12,18 @@ export default defineConfig({
     tailwindcss(),
     // PWA: app-shell precache -> tablet offline'da uygulama acilir. OFFLINE_DESIGN.md §3, K5
     VitePWA({
-      registerType: 'autoUpdate',
+      // Yeni surum arkada kurulur ve bekler (prompt): uygulama bekleyen gonderim / yarim is
+      // yokken kendiliginden, varsa garsonun onayiyla yeniler (src/offline/sw-update.ts).
+      // Kayit uygulamadan yapilir (virtual:pwa-register); otomatik registerSW.js eklenmez.
+      registerType: 'prompt',
+      injectRegister: false,
       // public/icons (kaynak: icon.svg) -> app-shell ile birlikte onbellege alinir.
       includeAssets: ['icons/*.png', 'icons/*.svg'],
       workbox: {
-        // Yeni SW aktif olunca acik sayfalari HEMEN kontrol et -> ilk yenileme offline calisir.
+        // Ilk kurulumda SW acik sayfalari HEMEN kontrol eder -> ilk yenileme offline calisir.
+        // Guncellemede bekler (skipWaiting yok): eski sayfa tutarli eski onbellekle calisir.
         clientsClaim: true,
-        skipWaiting: true,
+        cleanupOutdatedCaches: true,
         // Offline'da rota yenilemesi -> app-shell (index.html). /api haric.
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api/],
