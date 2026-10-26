@@ -15,6 +15,7 @@ import { CANCEL_REASONS } from './reason';
 import { formatKurus } from '../lib/format';
 import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
+import { SyncProblemsBanner } from '../offline/SyncPanel';
 import { offlineOpenTable } from '../offline/actions';
 import { isOffline } from '../offline/engine';
 import { draftAll } from '../offline/db';
@@ -291,6 +292,7 @@ export default function TablesScreen() {
             </button>
           </div>
         )}
+        <SyncProblemsBanner />
         {cashBlocked && (
           <div className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center">
             <div>

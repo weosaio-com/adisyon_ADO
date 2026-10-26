@@ -1,7 +1,7 @@
 // Ekranlarin cagirdigi offline aksiyonlar: draft yaz + outbox'a kuyrukla + drain tetikle.
 import { ulid } from './ids';
 import { buildOpenTable, buildAddLine, buildSubmit, recompute, type DraftOrder } from './sync-core';
-import { draftGet, draftPut, outboxPut, outboxGet, outboxDelete } from './db';
+import { draftGet, enqueue, outboxGet, saveDraftAndOutbox } from './db';
 import { kick } from './engine';
 
 export const LOCAL_PREFIX = 'local:';
@@ -9,9 +9,12 @@ export function isLocalId(id: string): boolean {
   return id.startsWith(LOCAL_PREFIX);
 }
 
-async function commit(draft: DraftOrder, entry: Parameters<typeof outboxPut>[0]): Promise<void> {
-  await draftPut(draft);
-  await outboxPut(entry);
+/** Gonderilmekte olan kalem degistirilemez: sunucu eski hali uygulamis olabilir (OFF-11). */
+export const INFLIGHT_MESSAGE = 'Bu kalem şu an gönderiliyor; birkaç saniye sonra tekrar deneyin.';
+
+// Taslak + outbox kaydi tek IndexedDB isleminde yazilir (db.enqueue).
+async function commit(draft: DraftOrder, entry: Parameters<typeof enqueue>[1][number]) {
+  await enqueue(draft, [entry]);
   void kick();
 }
 
@@ -49,25 +52,28 @@ export async function offlineUpdateQty(
 ): Promise<void> {
   const d = await draftGet(orderId);
   if (!d) return;
+  const e = await outboxGet(itemId);
+  if (e?.status === 'inflight') throw new Error(INFLIGHT_MESSAGE);
   const items = d.items.map((i) =>
     i.id === itemId
       ? { ...i, quantity, lineTotal: Math.round((i.lineTotal / i.quantity) * quantity) }
       : i,
   );
-  await draftPut({ ...d, items, ...recompute(items) });
-  const e = await outboxGet(itemId);
-  if (e) {
-    e.payload = { ...e.payload, quantity };
-    await outboxPut(e);
-  }
+  await saveDraftAndOutbox(
+    { ...d, items, ...recompute(items) },
+    e ? { put: [{ ...e, payload: { ...e.payload, quantity } }] } : {},
+  );
+  void kick();
 }
 
 export async function offlineRemoveLine(orderId: string, itemId: string): Promise<void> {
   const d = await draftGet(orderId);
   if (!d) return;
+  const e = await outboxGet(itemId);
+  if (e?.status === 'inflight') throw new Error(INFLIGHT_MESSAGE);
   const items = d.items.filter((i) => i.id !== itemId);
-  await draftPut({ ...d, items, ...recompute(items) });
-  await outboxDelete([itemId]); // gonderilmemis satir -> outbox'tan da cikar
+  // gonderilmemis satir -> outbox'tan da cikar (ayni islemde)
+  await saveDraftAndOutbox({ ...d, items, ...recompute(items) }, { remove: [itemId] });
   void kick();
 }
 

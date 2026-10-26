@@ -1,32 +1,43 @@
-import { useSyncExternalStore } from 'react';
-import { subscribe, getState, type SyncMode } from './engine';
+import { useState, useSyncExternalStore } from 'react';
+import { subscribe, getState } from './engine';
+import { badgeView } from './sync-view';
+import SyncPanel from './SyncPanel';
 
 // Her zaman gorunur baglanti durumu. OFFLINE_DESIGN.md §11, SYSTEM_ANALYSIS.md §12
 export function useSyncState() {
   return useSyncExternalStore(subscribe, getState, getState);
 }
 
-const LABEL: Record<SyncMode, { text: string; cls: string }> = {
-  online: { text: 'Çevrimiçi', cls: 'bg-green-100 text-green-700' },
-  offline: { text: 'Çevrimdışı', cls: 'bg-red-100 text-red-700' },
-  syncing: { text: 'Senkronlanıyor', cls: 'bg-amber-100 text-amber-700' },
-  degraded: { text: 'Owner onayı bekliyor', cls: 'bg-orange-100 text-orange-700' },
-};
-
 // Ayni ekranda ikinci rozet (telefon basligi) ayri test kimligi alir: e2e seciciler tek ogeye cozulsun.
+// Dokununca gonderim ayrintisi ve senkron sorunlari acilir.
 export default function SyncBadge({ testId = 'sync-badge' }: { testId?: string }) {
-  const { mode, pending } = useSyncState();
-  const l = LABEL[mode];
+  const sync = useSyncState();
+  const [open, setOpen] = useState(false);
+  const view = badgeView(sync);
   return (
-    <span
-      data-testid={testId}
-      data-mode={mode}
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${l.cls}`}
-      title="Bağlantı durumu"
-    >
-      <span className="h-2 w-2 rounded-full bg-current" />
-      {l.text}
-      {pending > 0 && <span className="ml-1 rounded-full bg-white/70 px-1">{pending}</span>}
-    </span>
+    <>
+      <button
+        type="button"
+        data-testid={testId}
+        data-mode={view.mode}
+        onClick={() => setOpen(true)}
+        className={`inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-xs font-medium ${view.cls}`}
+        title="Bağlantı durumu — ayrıntı için dokunun"
+      >
+        <span className="h-2 w-2 rounded-full bg-current" />
+        {view.text}
+        {sync.pending > 0 && (
+          <span className="ml-1 rounded-full bg-white/70 px-1" aria-label="bekleyen işlem">
+            {sync.pending}
+          </span>
+        )}
+        {sync.problems > 0 && view.mode !== 'degraded' && (
+          <span className="ml-1 rounded-full bg-orange-500 px-1 text-white" aria-label="sorun">
+            !
+          </span>
+        )}
+      </button>
+      {open && <SyncPanel onClose={() => setOpen(false)} />}
+    </>
   );
 }
