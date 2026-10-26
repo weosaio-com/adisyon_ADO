@@ -84,4 +84,4 @@ Tümü **framework primitifleriyle** (elle yeniden icat yok), mevcut mimariyi bo
 | Boşluk | Neden önemli | Plan |
 |--------|--------------|------|
 | **Test / CI** | ✅ **Tamamlandı** — birim self-check (payments/orders/reports calc) + e2e smoke (30 kontrol) + CI kapısı | Yeni kritik modül geldikçe smoke'a kontrol eklenir |
-| **Hata izleme / telemetri** | Müşteri PC'sinde çalışan üründe sahadaki çökmeleri görmek şart | 🟡 **0.4.0:** heartbeat sağlık özetini gönderir (phone-home). **0.4.1:** masaüstü kendini toparlar (backend yeniden başlatma, pencere yenileme) ve çökmeleri kayıt dosyasına yazar. Eksik: çökme raporunun buluta gitmesi, yapısal log (pino) |
+| **Hata izleme / telemetri** | Müşteri PC'sinde çalışan üründe sahadaki çökmeleri görmek şart | 🟡 **0.4.0:** heartbeat sağlık özetini gönderir (phone-home). **0.4.2:** masaüstü kendini toparlar (çöken ya da yanıt vermeyen backend'i yeniden başlatma, pencere yenileme); uyarı ve hatalar ayrı `ado-olaylar.log` dosyasında. Eksik: çökme raporunun buluta gitmesi, yapısal log (pino) |
