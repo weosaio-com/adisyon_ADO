@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError, hasPerm } from '../lib/api';
+import { api, ApiError, hasPerm, isConnectivityError } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus, formatQty } from '../lib/format';
 import type { Hall, Order, OrderItem, Product, Table } from '../lib/types';
@@ -15,6 +15,7 @@ import SplitModal from './SplitModal';
 import SyncBadge, { useSyncState } from '../offline/SyncBadge';
 import { isOffline } from '../offline/engine';
 import { draftDelete } from '../offline/db';
+import { ulid } from '../offline/ids';
 import {
   isLocalId,
   offlineAddLine,
@@ -27,7 +28,11 @@ import { readCategories, readHalls, readProducts, readTables } from '../offline/
 
 type PhoneView = 'products' | 'order';
 // Sunucu kaleminin arayuzde kullanilan ek alanlari (lib/types OrderItem'da yok).
-type ServerItem = OrderItem & { voidReason?: string | null };
+type ServerItem = OrderItem & { voidReason?: string | null; clientOpId?: string | null };
+
+// Yazma istegi yanitsiz kaldi (Wi-Fi koptu): islem sunucuya ulasmis olabilir; adisyon tazelenir.
+const UNCERTAIN_ORDER_MESSAGE =
+  'Bağlantı koptu; işlem sunucuya ulaşmış olabilir. Adisyonu kontrol edip gerekirse tekrar deneyin.';
 
 export default function OrderScreen() {
   const { id = '' } = useParams();
@@ -74,8 +79,24 @@ export default function OrderScreen() {
     refetchInterval: 30_000,
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ['order', id] });
-  const fail = (value: unknown) =>
-    setError(value instanceof ApiError ? value.message : 'İşlem başarısız.');
+  // Her hatada adisyon tazelenir: ORDER_CHANGED (baska cihaz degistirdi) ya da yaniti kaybolan
+  // istekte ekran sunucudaki gercek durumu gostersin.
+  const fail = (value: unknown) => {
+    refresh();
+    if (value instanceof ApiError && value.code === 'PRODUCT_INACTIVE') {
+      qc.invalidateQueries({ queryKey: ['products'] });
+    }
+    setError(
+      isConnectivityError(value)
+        ? UNCERTAIN_ORDER_MESSAGE
+        : value instanceof ApiError
+          ? value.message
+          : 'İşlem başarısız.',
+    );
+  };
+  // Cevrimici kalem ekleme tekrar korumasi (OFF-6): yaniti kaybolan istekten sonra ayni urune
+  // tekrar dokunulursa ayni clientOpId gider; sunucu ilk istegi uyguladiysa ikinci kalem acmaz.
+  const pendingAdd = useRef<{ productId: string; key: string } | null>(null);
 
   const addItem = useMutation({
     mutationFn: (product: Product) => {
@@ -91,13 +112,24 @@ export default function OrderScreen() {
           'OFFLINE',
           'Bağlantı yok — çevrimiçi açılan adisyona ekleme için bağlantı bekleniyor.',
         );
+      const prev = pendingAdd.current;
+      const key = prev?.productId === product.id ? prev.key : ulid();
+      pendingAdd.current = { productId: product.id, key };
       return api(`/orders/${id}/items`, {
         method: 'POST',
-        body: { productId: product.id, quantity: 1000 },
+        body: { productId: product.id, quantity: 1000, clientOpId: key },
       });
     },
-    onSuccess: refresh,
-    onError: fail,
+    onSuccess: () => {
+      pendingAdd.current = null;
+      setError('');
+      refresh();
+    },
+    onError: (value) => {
+      // Kesin ret (4xx): anahtar birakilir. Yanitsiz kalan istek: anahtar tekrar icin saklanir.
+      if (!isConnectivityError(value)) pendingAdd.current = null;
+      fail(value);
+    },
   });
   const sendKitchen = useMutation({
     mutationFn: () =>
@@ -175,6 +207,14 @@ export default function OrderScreen() {
   });
 
   const currentOrder = order.data;
+  // Yaniti kaybolan ekleme sunucuda uygulanmissa (tazelenen adisyonda o anahtar var) anahtar
+  // birakilir: garsonun ayni urune bilerek yapacagi ikinci dokunus yeni kalem acar.
+  useEffect(() => {
+    const key = pendingAdd.current?.key;
+    if (key && currentOrder?.items.some((item: ServerItem) => item.clientOpId === key)) {
+      pendingAdd.current = null;
+    }
+  }, [currentOrder]);
   useEffect(() => {
     if (local && currentOrder?.serverId) {
       void draftDelete(id);

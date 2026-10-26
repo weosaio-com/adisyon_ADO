@@ -1,7 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, ApiError, getUser, hasPerm, LICENSE_LOCKED_CODE } from '../lib/api';
+import {
+  api,
+  ApiError,
+  getUser,
+  hasPerm,
+  isConnectivityError,
+  LICENSE_LOCKED_CODE,
+} from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import ReasonModal from './ReasonModal';
 import { CANCEL_REASONS } from './reason';
@@ -11,6 +18,7 @@ import SyncBadge from '../offline/SyncBadge';
 import { offlineOpenTable } from '../offline/actions';
 import { isOffline } from '../offline/engine';
 import { draftAll } from '../offline/db';
+import { ulid } from '../offline/ids';
 import { readHalls, readTables, readOpenOrders, readHeldOrders } from '../offline/read';
 import type { DraftOrder } from '../offline/sync-core';
 
@@ -84,22 +92,65 @@ export default function TablesScreen() {
     if (error instanceof ApiError && error.code === LICENSE_LOCKED_CODE) return;
     showError(error, 'Adisyon açılamadı.');
   };
+  // Masa/paket acma tekrar korumasi (OFF-6): yaniti kaybolan istekten sonra ayni masaya (ayni
+  // siparis turune) tekrar dokunulursa ayni clientOpId gider; sunucu ayni adisyonu dondurur.
+  const pendingOpen = useRef<{ target: string; key: string } | null>(null);
+  const openKey = (target: string) => {
+    const prev = pendingOpen.current;
+    const key = prev?.target === target ? prev.key : ulid();
+    pendingOpen.current = { target, key };
+    return key;
+  };
+  const openFailed = (error: unknown) => {
+    if (!isConnectivityError(error)) pendingOpen.current = null;
+    qc.invalidateQueries({ queryKey: ['orders'] });
+  };
+  const opened = (order: Order) => {
+    pendingOpen.current = null;
+    qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+    nav(`/orders/${order.id}`);
+  };
+  // Baska cihaz masayi ayni anda acti (TABLE_HAS_OPEN_ORDER): o adisyona gecilir. Sunucu
+  // adisyonun kimligini hata baglaminda (`error.data.orderId`) verirse dogrudan, vermezse arayarak.
+  const goToTableOrder = async (tableId: string, known: unknown): Promise<boolean> => {
+    if (typeof known === 'string' && known) {
+      nav(`/orders/${known}`);
+      return true;
+    }
+    const open = await api<Order[]>(`/orders?tableId=${encodeURIComponent(tableId)}&open=true`);
+    const current = open.find((order) => order.status === 'open');
+    if (current) {
+      nav(`/orders/${current.id}`);
+      return true;
+    }
+    const held = await api<Order[]>(`/orders?tableId=${encodeURIComponent(tableId)}&status=held`);
+    if (held[0]) {
+      resumeOrder.mutate(held[0].id);
+      return true;
+    }
+    return false;
+  };
   const createOrder = useMutation({
-    mutationFn: (tableId: string) => api<Order>('/orders', { method: 'POST', body: { tableId } }),
-    onSuccess: (order) => {
-      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
-      nav(`/orders/${order.id}`);
+    mutationFn: (tableId: string) =>
+      api<Order>('/orders', { method: 'POST', body: { tableId, clientOpId: openKey(tableId) } }),
+    onSuccess: opened,
+    onError: async (error, tableId) => {
+      openFailed(error);
+      if (error instanceof ApiError && error.code === 'TABLE_HAS_OPEN_ORDER') {
+        const moved = await goToTableOrder(tableId, error.data.orderId).catch(() => false);
+        if (moved) return;
+      }
+      orderOpenError(error);
     },
-    onError: orderOpenError,
   });
   const createTakeaway = useMutation({
     mutationFn: (type: 'takeaway' | 'delivery') =>
-      api<Order>('/orders', { method: 'POST', body: { type } }),
-    onSuccess: (order) => {
-      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
-      nav(`/orders/${order.id}`);
+      api<Order>('/orders', { method: 'POST', body: { type, clientOpId: openKey(type) } }),
+    onSuccess: opened,
+    onError: (error) => {
+      openFailed(error);
+      orderOpenError(error);
     },
-    onError: orderOpenError,
   });
   const cancelOrder = useMutation({
     mutationFn: ({ orderId, reason }: { orderId: string; reason: string }) =>
