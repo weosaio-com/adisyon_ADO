@@ -8,12 +8,24 @@ import * as express from 'express';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env.schema';
 import { API_PREFIX } from './common/http/api-prefix';
+import { bodyParserException } from './common/http/all-exceptions.filter';
+import { webStatic } from './common/http/web-static';
 import { resolveDataDir } from './common/util/data-dir';
 import { currentTlsHosts, ensureTlsMaterial } from './tls/tls.certs';
 import { DesktopBridgeService } from './desktop/desktop-bridge.service';
 
 // Ucuz kontrol (birkac kucuk dosya): acilista ag henuz yoksa LAN IP'si en gec 1 dk'da eklenir.
 const TLS_RECHECK_MS = 60_000;
+
+/**
+ * JSON govde sinirlari (GUV-2/GUV-3). Genel sinir kucuk: kimliksiz uclara (giris) buyuk govdeyle
+ * bellek ve kayit sisirilemez. Tablet kuyrugunun toplu gonderimi (/sync/mutations, en cok 200
+ * islem) icin acik ve daha genis sinir. Asim 413 PAYLOAD_TOO_LARGE doner (istemci parcayi
+ * kucultur), bozuk JSON 400 BAD_JSON (all-exceptions.filter). Gorsel/yedek yuklemeleri
+ * (application/octet-stream) govdeyi kendisi okur, bu sinirlara girmez.
+ */
+const JSON_BODY_LIMIT = '100kb';
+const SYNC_BODY_LIMIT = '1mb';
 
 /**
  * Tabletler icin yerel HTTPS (ayni Express ornegi, ayri port). Tarayici LAN IP'sini
@@ -64,9 +76,11 @@ async function bootstrap(): Promise<void> {
   const env = loadEnv(); // fail-fast: gecersiz .env ile baslamaz.
 
   // forceCloseConnections: kapanista acik baglantilar (SSE, keep-alive) beklenmeden kesilir.
+  // bodyParser: false -> govde ayristiricilari asagida acik sinirlarla kurulur.
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
     forceCloseConnections: true,
+    bodyParser: false,
   });
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix(API_PREFIX);
@@ -94,19 +108,36 @@ async function bootstrap(): Promise<void> {
     next();
   });
 
+  // Canlilik (masaustu bekcisi, PLT-12): veritabanina dokunmaz, yalniz surecin ve olay dongusunun
+  // yanit verdigini gosterir. Uzun yedek/rapor sirasinda veritabani mesgul olsa da hemen 200 doner;
+  // bekci yalniz gercekten askida kalan backend'i yeniden baslatir. Nest yonlendiricisinden once:
+  // kimlik denetimi ve istek kaydi yok.
+  app.use(
+    `/${API_PREFIX}/health/live`,
+    (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ success: true, data: { status: 'ok', uptimeSec: Math.round(process.uptime()) } });
+    },
+  );
+
+  // Govde ayristiricilari: once ozel sinirli uc (govdeyi o okur), sonra genel sinir.
+  app.use(`/${API_PREFIX}/sync/mutations`, express.json({ limit: SYNC_BODY_LIMIT }));
+  app.use(express.json({ limit: JSON_BODY_LIMIT }));
+  app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
+  // Ayristirici hatasi kendi koduyla (413 PAYLOAD_TOO_LARGE, 400 BAD_JSON) genel filtreye gider.
+  app.use(
+    (err: unknown, _req: express.Request, _res: express.Response, next: express.NextFunction) => {
+      next(bodyParserException(err) ?? err);
+    },
+  );
+
   // LAN tarayicilari icin build edilmis frontend'i ayni porttan sun (varsa).
   // Hem src/ (ts-node) hem dist/ (build) ayni derinlikte -> ../../frontend/dist.
   const webDist = join(__dirname, '..', '..', 'frontend', 'dist');
   if (existsSync(webDist)) {
-    app.use(express.static(webDist));
-    // SPA fallback: /api disindaki GET istekleri index.html'e duser.
-    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-      if (req.method === 'GET' && !req.path.startsWith('/api')) {
-        res.sendFile(join(webDist, 'index.html'));
-      } else {
-        next();
-      }
-    });
+    // Dosyalar; eksik paket dosyasina 404; /api disindaki diger GET'ler index.html (SPA).
+    app.use(...webStatic(webDist));
     app.get(Logger).log(`Frontend sunuluyor: ${webDist}`);
   }
 
