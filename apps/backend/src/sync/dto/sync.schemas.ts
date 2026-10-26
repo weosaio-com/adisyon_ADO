@@ -71,9 +71,27 @@ export const submitOrderPayload = z.object({ ...orderRef }).refine(hasOrderRef, 
   message: 'orderId veya orderClientOpId gerekli',
 });
 
-// --- POST /sync/reviews/:id/resolve ---
-export const resolveReviewSchema = z.object({
-  resolution: z.enum(['yeni_adisyon', 'yeniden_ac', 'reddet']),
-  targetTableId: z.string().min(1).nullish(), // yeni_adisyon icin istege bagli masa
-});
+// --- POST /offline-reviews/:id/resolve ve /offline-reviews/resolve-group ---
+// uygula: asil adisyon aciksa ona, degilse hedef masaya (varsayilan: siparisin masasi; masa
+// doluysa acik adisyonuna) uygulanir. yeni_adisyon: hedef masada yeni adisyon. yeniden_ac:
+// bekletilen (odenmemis) asil adisyon yeniden acilir. reddet: hicbiri uygulanmaz.
+const resolution = z.enum(['uygula', 'yeni_adisyon', 'yeniden_ac', 'reddet']);
+// undefined: varsayilan masa; null: masasiz (paket/gel-al gibi).
+const targetTableId = z.string().min(1).nullish();
+
+export const resolveReviewSchema = z.object({ resolution, targetTableId });
 export type ResolveReviewDto = z.infer<typeof resolveReviewSchema>;
+
+/** Bir siparisin (OPEN_TABLE + kalemleri + mutfaga gonder) tum review'lari tek kararla. OFF-2 */
+export const resolveGroupSchema = z.object({
+  reviewIds: z.array(z.string().min(1)).min(1).max(500),
+  resolution,
+  targetTableId,
+});
+export type ResolveGroupDto = z.infer<typeof resolveGroupSchema>;
+
+// --- POST /sync/reviews/status: tabletin onaya dusen kayitlarinin sonucu (OFF-8) ---
+export const reviewStatusSchema = z.object({
+  clientOpIds: z.array(z.string().min(1)).min(1).max(500),
+});
+export type ReviewStatusDto = z.infer<typeof reviewStatusSchema>;

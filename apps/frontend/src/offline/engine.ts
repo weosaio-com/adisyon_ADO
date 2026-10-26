@@ -3,6 +3,8 @@ import type { QueryClient } from '@tanstack/react-query';
 import { api, ApiError, getAccess } from '../lib/api';
 import {
   deviceId,
+  draftAll,
+  draftDelete,
   draftGet,
   draftPut,
   metaGet,
@@ -11,6 +13,8 @@ import {
   outboxCount,
   outboxMark,
   outboxResetInflight,
+  problemDeleteOne,
+  problemPut,
   problemsAdd,
   problemsAll,
 } from './db';
@@ -161,7 +165,7 @@ async function applyChunk(chunk: OutboxEntry[], results: MutationResult[]): Prom
     const sid = oc.serverIdByOpId[entry.clientOpId];
     if (sid && entry.type === 'OPEN_TABLE') {
       const draft = await draftGet(entry.localOrderId);
-      if (draft) await draftPut({ ...draft, serverId: sid });
+      if (draft) await draftPut({ ...draft, serverId: sid, syncedAt: Date.now() });
     }
   }
   const problems: SyncProblem[] = [];
@@ -172,6 +176,79 @@ async function applyChunk(chunk: OutboxEntry[], results: MutationResult[]): Prom
     problems.push(await problemFor(entry, kind, r.reason ?? r.status, r.reviewId));
   }
   await problemsAdd(problems, oc.remove);
+  // OPEN_TABLE onaya dustu: taslak "onayda" (masa planinda hayalet "Senkron bekliyor" kalmaz);
+  // reddedildi: taslak silinir (garson sorun listesinden ogrenir). OFF-8
+  for (const r of [...oc.conflicts, ...oc.rejections]) {
+    const entry = byId.get(r.clientOpId);
+    if (entry?.type !== 'OPEN_TABLE') continue;
+    const draft = await draftGet(entry.localOrderId);
+    if (!draft) continue;
+    if (r.status === 'conflict') {
+      await draftPut({
+        ...draft,
+        review: { reason: r.reason ?? 'other', ...(r.reviewId ? { reviewId: r.reviewId } : {}) },
+      });
+    } else {
+      await draftDelete(draft.id);
+    }
+  }
+}
+
+interface ReviewStatus {
+  clientOpId: string;
+  status: string; // open | resolved | rejected | unknown
+  orderId: string | null;
+}
+
+/**
+ * Onaya dusen kayitlarin sonucunu sorar (OFF-8): onaylanan masa acma taslagi sunucu adisyonuna
+ * baglanir (ekran oraya gecer), reddedilen taslak silinir ve garsona "yönetici reddetti" denir.
+ * Rozet acik onay sayisini izler: sonuclanan onay sorun listesinden duser.
+ */
+async function pollReviews(): Promise<void> {
+  const open = (await problemsAll()).filter((p) => p.kind === 'conflict');
+  if (open.length === 0) return;
+  const statuses = await api<ReviewStatus[]>('/sync/reviews/status', {
+    method: 'POST',
+    body: { clientOpIds: open.slice(0, 500).map((p) => p.id) },
+  });
+  let changed = false;
+  for (const s of statuses) {
+    const problem = open.find((p) => p.id === s.clientOpId);
+    if (!problem || (s.status !== 'resolved' && s.status !== 'rejected')) continue;
+    changed = true;
+    const draft = problem.type === 'OPEN_TABLE' ? await draftGet(problem.localOrderId) : undefined;
+    if (s.status === 'resolved') {
+      if (draft && s.orderId) {
+        const { review: _review, ...rest } = draft;
+        await draftPut({ ...rest, serverId: s.orderId, syncedAt: Date.now() });
+      }
+      await problemDeleteOne(problem.id);
+    } else {
+      if (draft) await draftDelete(draft.id);
+      await problemPut({
+        ...problem,
+        kind: 'rejected',
+        reason: 'REVIEW_REJECTED',
+        message: problemMessage('rejected', 'REVIEW_REJECTED', problem.what),
+      });
+    }
+  }
+  if (changed) {
+    await refreshPending();
+    qc?.invalidateQueries();
+  }
+}
+
+/** Sunucuya gecmis taslaklar bir dakika sonra silinir (bekleyen kaydi yoksa). */
+async function cleanupDrafts(): Promise<void> {
+  const [drafts, entries] = await Promise.all([draftAll(), outboxAll()]);
+  const busy = new Set(entries.map((entry) => entry.localOrderId));
+  for (const draft of drafts) {
+    if (draft.serverId && !busy.has(draft.id) && Date.now() - (draft.syncedAt ?? 0) > 60_000) {
+      await draftDelete(draft.id);
+    }
+  }
 }
 
 // Sunucunun istek olarak reddettigi tek kayit: kuyrugu kilitlemesin diye ayrilir.
@@ -296,6 +373,8 @@ export function startEngine(client: QueryClient): () => void {
       return;
     }
     const pending = await outboxCount();
+    if (state.problems > 0) await pollReviews().catch(() => {});
+    void cleanupDrafts().catch(() => {});
     if (pending > 0) {
       await drain();
     } else if (state.mode !== 'online') {

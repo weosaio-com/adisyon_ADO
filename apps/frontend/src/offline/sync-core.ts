@@ -46,6 +46,10 @@ export interface DraftOrder {
   discountTotal: number;
   grandTotal: number;
   serverId?: string; // sync sonrasi gercek order id
+  /** Sunucuya gecis zamani: bir sure sonra taslak silinir (ekran yonlenmis olur). */
+  syncedAt?: number;
+  /** OPEN_TABLE yonetici onayina dustu: masa planinda "senkron bekliyor" gosterilmez (OFF-8). */
+  review?: { reviewId?: string; reason: string };
 }
 
 // POST /sync/mutations yanit satiri. OFFLINE_DESIGN.md §7.1
@@ -269,6 +273,7 @@ const REJECT_TEXT: Record<string, string> = {
   PRODUCT_UNAVAILABLE: 'ürün tükendiği için eklenemedi',
   LICENSE_LOCKED: 'lisans kilitli olduğu için yeni adisyon açılamadı',
   ORDER_NOT_OPENED: 'adisyon açılamadığı için eklenemedi',
+  REVIEW_REJECTED: 'yönetici reddetti; müşteriye bilgi verin',
   AMOUNT_LIMIT_EXCEEDED: 'tutar sınırı aşıldığı için kabul edilmedi',
 };
 

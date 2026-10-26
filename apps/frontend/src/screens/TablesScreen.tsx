@@ -87,8 +87,10 @@ export default function TablesScreen() {
     (useSyncProblems().data ?? []).flatMap((problem) => (problem.tableId ? [problem.tableId] : [])),
   );
   const localByTable = new Map<string, DraftOrder>();
+  // Onaya dusen taslak masayi kilitlemez (OFF-8): masa sunucudaki haliyle gosterilir; sonuc
+  // gelince taslak sunucu adisyonuna baglanir ya da silinir.
   for (const draft of localDrafts.data ?? [])
-    if (draft.tableId && !draft.serverId) localByTable.set(draft.tableId, draft);
+    if (draft.tableId && !draft.serverId && !draft.review) localByTable.set(draft.tableId, draft);
 
   const showError = (error: unknown, fallback: string) =>
     setNotice({ tone: 'error', message: error instanceof ApiError ? error.message : fallback });

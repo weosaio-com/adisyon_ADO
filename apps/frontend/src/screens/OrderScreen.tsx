@@ -472,6 +472,15 @@ export default function OrderScreen() {
         </header>
 
         <ul className="min-h-0 flex-1 space-y-2 overflow-auto bg-stone-50/70 p-3">
+          {local && (currentOrder as { review?: unknown } | undefined)?.review !== undefined && (
+            <li
+              data-testid="draft-review"
+              className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+            >
+              Bu sipariş yönetici onayı bekliyor. Onaylanınca adisyon kendiliğinden açılır;
+              reddedilirse size bildirilir.
+            </li>
+          )}
           <OrderProblems orderId={id} />
           {(currentOrder?.items ?? []).length === 0 && (
             <li className="flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-white text-center">

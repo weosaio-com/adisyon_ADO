@@ -146,6 +146,9 @@ export async function problemsAll(): Promise<SyncProblem[]> {
 export async function problemPut(problem: SyncProblem): Promise<void> {
   await (await db()).put('problems', problem);
 }
+export async function problemDeleteOne(id: string): Promise<void> {
+  await (await db()).delete('problems', id);
+}
 export async function problemsDelete(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const tx = (await db()).transaction('problems', 'readwrite');

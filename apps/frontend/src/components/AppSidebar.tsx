@@ -38,9 +38,15 @@ const ITEMS: NavItem[] = [
 export default function AppSidebar() {
   const nav = useNavigate();
   const loc = useLocation();
+  // Onay bekleyen SIPARIS sayisi (bir siparisin kalemleri tek kart: OFF-2).
   const reviewCount = useQuery({
     queryKey: ['offline-reviews', 'count'],
-    queryFn: async () => (await api<OfflineReview[]>('/offline-reviews')).length,
+    queryFn: async () =>
+      new Set(
+        (
+          await api<(OfflineReview & { context?: { groupKey?: string } })[]>('/offline-reviews')
+        ).map((r) => r.context?.groupKey ?? r.id),
+      ).size,
     refetchInterval: 20_000,
     enabled: hasPerm('order.cancel'),
   });
