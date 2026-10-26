@@ -17,6 +17,8 @@ export interface OutboxEntry {
   label?: string;
   /** Kaydin ait oldugu masa (sorun isareti icin); sunucuya gonderilmez. */
   tableId?: string | null;
+  /** Kaydi olusturan kullanici + oturumu: sunucu dogrulayip onun adina yazar (OFF-5). */
+  actor?: { userId: string; sessionId: string };
 }
 
 /** Gonderim sirasi: seq; seq'siz eski kayitlar once (ULID sirasiyla). OFFLINE_DESIGN.md §6 */
@@ -198,8 +200,14 @@ export function wireMutation(entry: OutboxEntry): {
   clientOpId: string;
   type: MutationType;
   payload: Record<string, unknown>;
+  actor?: { userId: string; sessionId: string };
 } {
-  return { clientOpId: entry.clientOpId, type: entry.type, payload: entry.payload };
+  return {
+    clientOpId: entry.clientOpId,
+    type: entry.type,
+    payload: entry.payload,
+    ...(entry.actor ? { actor: entry.actor } : {}),
+  };
 }
 
 export function wireSize(entry: OutboxEntry): number {

@@ -11,6 +11,7 @@ import {
 } from './sync-core';
 import { draftGet, enqueue, outboxGet, saveDraftAndOutbox } from './db';
 import { kick } from './engine';
+import { sessionClaims } from '../lib/api';
 
 export const LOCAL_PREFIX = 'local:';
 export function isLocalId(id: string): boolean {
@@ -20,9 +21,11 @@ export function isLocalId(id: string): boolean {
 /** Gonderilmekte olan kalem degistirilemez: sunucu eski hali uygulamis olabilir (OFF-11). */
 export const INFLIGHT_MESSAGE = 'Bu kalem şu an gönderiliyor; birkaç saniye sonra tekrar deneyin.';
 
-// Taslak + outbox kaydi tek IndexedDB isleminde yazilir (db.enqueue).
+// Taslak + outbox kaydi tek IndexedDB isleminde yazilir (db.enqueue). Kayda olusturan
+// kullanici eklenir: cikis yapilip baska garson girse de siparis olusturanin adina gider.
 async function commit(draft: DraftOrder, entry: Parameters<typeof enqueue>[1][number]) {
-  await enqueue(draft, [entry]);
+  const actor = sessionClaims();
+  await enqueue(draft, [{ ...entry, ...(actor ? { actor } : {}) }]);
   void kick();
 }
 

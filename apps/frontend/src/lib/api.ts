@@ -72,6 +72,27 @@ export function clearSession(): void {
   localStorage.removeItem(USER_KEY);
 }
 
+/**
+ * Erisim belirtecindeki kullanici ve oturum kimligi (JWT govdesi yalniz okunur; dogrulamayi
+ * sunucu yapar). Cevrimdisi kayit olusturani tasir: garson degisse de siparis onun adina
+ * yazilir (OFF-5).
+ */
+export function sessionClaims(): { userId: string; sessionId: string } | null {
+  const body = getAccess()?.split('.')[1];
+  if (!body) return null;
+  try {
+    const json = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/'))) as {
+      sub?: unknown;
+      sid?: unknown;
+    };
+    return typeof json.sub === 'string' && typeof json.sid === 'string'
+      ? { userId: json.sub, sessionId: json.sid }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // Alanlar acikca atanir: `public status` gibi parametre-ozellikleri node'un
 // strip-only TS modunda calismaz, self-check bu dosyayi import edemez.
 export interface ErrorDetail {
@@ -361,6 +382,17 @@ export async function api<T = unknown>(
   }
   if (!isOk(reply.status)) throw toError(reply);
   return unwrapEnvelope(reply.json) as T;
+}
+
+/**
+ * Cikis: sunucudaki oturum da kapatilir (yenileme belirteci gecersiz olur). Sunucuya
+ * ulasilamazsa (cevrimdisi) yalniz bu cihazdaki oturum silinir; cikis engellenmez.
+ */
+export async function logout(): Promise<void> {
+  if (getAccess()) {
+    await api('/auth/logout', { method: 'POST', timeoutMs: 5_000 }, false).catch(() => {});
+  }
+  clearSession();
 }
 
 /** Urun gorselinin adresi (herkese acik, suresiz onbellekli; anahtar icerik ozetidir). */

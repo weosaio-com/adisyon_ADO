@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api, clearSession, hasPerm } from '../lib/api';
+import { api, hasPerm, logout } from '../lib/api';
 import type { OfflineReview } from '../lib/types';
+import { useDialogs } from './DialogProvider';
+import { outboxCount } from '../offline/db';
 
 type IconName =
   | 'tables'
@@ -38,6 +40,22 @@ const ITEMS: NavItem[] = [
 export default function AppSidebar() {
   const nav = useNavigate();
   const loc = useLocation();
+  const { confirmDialog } = useDialogs();
+  // Cikis (OFF-5): gonderilmemis cevrimdisi islem varsa garson bilerek cikar; islemler tablete
+  // bir sonraki giriste OLUSTURANIN adina gider. Sunucudaki oturum da kapatilir.
+  const signOut = async () => {
+    const pending = await outboxCount().catch(() => 0);
+    if (pending > 0) {
+      const ok = await confirmDialog({
+        title: 'Gönderilmemiş işlem var',
+        message: `Bu tablette ana bilgisayara gönderilmemiş ${pending} işlem var. Çıkış yaparsanız bağlantı gelince (tablete biri giriş yaptığında) sizin adınıza gönderilir.`,
+        confirmLabel: 'Çıkış yap',
+      });
+      if (!ok) return;
+    }
+    await logout();
+    nav('/login', { replace: true });
+  };
   // Onay bekleyen SIPARIS sayisi (bir siparisin kalemleri tek kart: OFF-2).
   const reviewCount = useQuery({
     queryKey: ['offline-reviews', 'count'],
@@ -90,10 +108,7 @@ export default function AppSidebar() {
       <SideButton
         icon="logout"
         label="Çıkış"
-        onClick={() => {
-          clearSession();
-          nav('/login', { replace: true });
-        }}
+        onClick={() => void signOut()}
         className="lg:mt-auto"
       />
     </nav>

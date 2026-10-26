@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ZodError } from 'zod';
+import { decodeTime } from 'ulid';
 import {
   newId,
   AuditOrigin,
@@ -45,6 +46,9 @@ interface MutationResult {
   reviewId?: string;
   reason?: string;
 }
+
+/** Oturum iptalinden (cikis) sonra olusturulmus sayilan kayda tanınan saat farki payi. */
+const ACTOR_CLOCK_SLACK_MS = 10 * 60_000;
 
 /** dispatch secenegi: review cozulurken cakisma yeni review acmaz, sonuc olarak doner. */
 interface DispatchOptions {
@@ -114,6 +118,7 @@ export class SyncService {
   // ===========================================================================
   async pushMutations(user: AuthUser, dto: PushMutationsDto) {
     const results: MutationResult[] = [];
+    const actors = new Map<string, AuthUser | null>();
     for (const m of dto.mutations) {
       const prior = await this.prisma.processedClientOp.findUnique({
         where: { clientOpId: m.clientOpId },
@@ -138,7 +143,9 @@ export class SyncService {
         });
         continue;
       }
-      const r = await this.dispatch(user, dto.deviceId, m);
+      // Kaydi olusturan garson (dogrulanirsa) adina uygulanir; aksi halde gonderen adina.
+      const actor = await this.mutationActor(user, dto.deviceId, m, actors);
+      const r = await this.dispatch(actor, dto.deviceId, m);
       await this.prisma.processedClientOp.create({
         data: {
           id: newId(),
@@ -154,6 +161,63 @@ export class SyncService {
       results.push(r);
     }
     return { results, serverTime: new Date().toISOString() };
+  }
+
+  /**
+   * Mutasyonu tablette olusturan kullanici (OFF-5). Ortak tablette A cevrimdisi siparis alip
+   * cikis yapar, B girer: kayitlar B'nin oturumuyla gelir ama A'nin adina yazilmali. Kanit:
+   * A'nin oturum kimligi (yalniz A'nin belirtecinde bulunur) A'ya ve ayni subeye ait olmali;
+   * oturum iptal edildiyse (cikis) kayit iptalden once olusturulmus olmali. Dogrulanamazsa
+   * kayit gonderen adina uygulanir (eski davranis). Aktarim denetim kaydina yazilir.
+   */
+  private async mutationActor(
+    user: AuthUser,
+    deviceId: string,
+    m: SyncMutation,
+    cache: Map<string, AuthUser | null>,
+  ): Promise<AuthUser> {
+    const claim = m.actor;
+    if (!claim || claim.userId === user.userId) return user;
+    const key = `${claim.userId}:${claim.sessionId}`;
+    if (!cache.has(key)) {
+      const session = await this.prisma.session.findFirst({
+        where: { id: claim.sessionId, userId: claim.userId, deletedAt: null },
+        include: { user: { include: { role: { select: { name: true } } } } },
+      });
+      let opTime: number | null = null;
+      try {
+        opTime = decodeTime(m.clientOpId);
+      } catch {
+        opTime = null;
+      }
+      const valid =
+        !!session &&
+        session.user.branchId === user.branchId &&
+        !session.user.deletedAt &&
+        (!session.revokedAt ||
+          (opTime !== null && opTime <= session.revokedAt.getTime() + ACTOR_CLOCK_SLACK_MS));
+      const actor: AuthUser | null = valid
+        ? {
+            ...user,
+            userId: session.userId,
+            username: session.user.username,
+            role: session.user.role.name,
+            sessionId: session.id,
+          }
+        : null;
+      cache.set(key, actor);
+      await this.audit.record({
+        branchId: user.branchId,
+        action: valid ? 'sync.relay' : 'sync.relay.unverified',
+        entityType: 'user',
+        entityId: claim.userId,
+        userId: user.userId,
+        newValue: { actorId: claim.userId, sessionId: claim.sessionId, deviceId },
+        origin: AuditOrigin.Offline,
+        clientOpId: m.clientOpId,
+      });
+    }
+    return cache.get(key) ?? user;
   }
 
   // ===========================================================================

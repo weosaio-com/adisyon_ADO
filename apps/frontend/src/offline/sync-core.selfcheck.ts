@@ -14,6 +14,7 @@ import {
   describeEntry,
   problemMessage,
   shadowDraft,
+  wireMutation,
   wireSize,
   type OutboxEntry,
 } from './sync-core.ts';
@@ -118,6 +119,12 @@ assert.equal(srvAdd.entry.localOrderId, 'shadow:O1');
 assert.equal(srvAdd.entry.tableId, 't5');
 assert.deepEqual(buildSubmit(srvAdd.draft, 'op8').entry.payload, { orderId: 'O1' });
 assert.equal(add.entry.payload.orderId, undefined, 'taslakta OPEN_TABLE referansi');
+
+// --- OFF-5: kaydi olusturan kullanici sunucuya gider (yalniz kimlik + oturum; tablo/etiket gitmez).
+const withActor = { ...entry(1), label: 'Masa 5', actor: { userId: 'u1', sessionId: 's1' } };
+assert.deepEqual(wireMutation(withActor).actor, { userId: 'u1', sessionId: 's1' });
+assert.equal('label' in wireMutation(withActor), false);
+assert.equal('actor' in wireMutation(entry(1)), false);
 
 // Rozet: sorun varsa "Sorun var"; baglanti hatasi her seyin onunde.
 assert.equal(badgeView({ mode: 'online', problems: 0 }).mode, 'online');

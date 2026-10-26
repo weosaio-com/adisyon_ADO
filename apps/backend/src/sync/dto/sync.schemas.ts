@@ -19,6 +19,11 @@ export const syncMutationSchema = z.object({
   type: z.nativeEnum(OfflineMutationType),
   payload: z.record(z.unknown()).default({}),
   baseVersion: z.number().int().optional(), // bilgi amacli; append-only merge'de zorunlu degil
+  // Kaydi tablette olusturan kullanici ve oturumu (OFF-5). Ortak tablette garson degisince
+  // onceki garsonun bekleyen siparisi yeni girenin adina yazilmasin; sunucu oturumu dogrular.
+  actor: z
+    .object({ userId: z.string().min(1).max(64), sessionId: z.string().min(1).max(64) })
+    .optional(),
 });
 export type SyncMutation = z.infer<typeof syncMutationSchema>;
 

@@ -232,6 +232,56 @@ try {
     state(cay.id) === 'sent' && state(ayran.id) === 'pending',
     `baska garsonun gonderilmemis kalemi mutfaga gitmez (cay=${state(cay.id)}, ayran=${state(ayran.id)})`,
   );
+
+  // --- OFF-5: kaydi olusturan garsonun adina yazilir (oturumu dogrulanir); sahte iddia yok sayilir.
+  const pin = String(100000 + Math.floor(Math.random() * 800000));
+  const garson = (
+    await call('POST', '/users', {
+      username: 'garson-a',
+      displayName: 'Garson A',
+      role: 'waiter',
+      pin,
+    })
+  ).data;
+  const loginA = await fetch(`${backend.base}/auth/login-pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'garson-a', pin }),
+  }).then((res) => res.json());
+  const tokenA = loginA.data.accessToken;
+  const sidA = JSON.parse(Buffer.from(tokenA.split('.')[1], 'base64url').toString()).sid;
+  // A cikis yapar (sunucu oturumu kapanir); ayni tablete giren yonetici A'nin kayitlarini gonderir.
+  const logout = await fetch(`${backend.base}/auth/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenA}` },
+  });
+  const [m5, m6] = [await table('M5'), await table('M6')];
+  const actorA = { userId: garson.id, sessionId: sidA };
+  const open6 = ulid();
+  const r6 = await push('dev-f', [
+    { clientOpId: open6, type: 'OPEN_TABLE', payload: { tableId: m5.id }, actor: actorA },
+    {
+      clientOpId: ulid(),
+      type: 'ADD_LINE',
+      payload: { orderClientOpId: open6, productId: cay.id, quantity: 1000, unitPrice: 1500 },
+      actor: actorA,
+    },
+  ]);
+  const o6 = await order(r6.data.results[0].serverId);
+  t.check(
+    logout.status < 300 && o6.openedBy === garson.id && o6.items[0]?.addedBy === garson.id,
+    `cikis yapan garsonun bekleyen siparisi onun adina yazilir (${o6.openedBy === garson.id})`,
+  );
+  const r7 = await push('dev-f', [
+    {
+      clientOpId: ulid(),
+      type: 'OPEN_TABLE',
+      payload: { tableId: m6.id },
+      actor: { userId: garson.id, sessionId: 'sahte-oturum' },
+    },
+  ]);
+  const o7 = await order(r7.data.results[0].serverId);
+  t.check(o7.openedBy !== garson.id, 'dogrulanamayan garson iddiasi yok sayilir (gonderen adina)');
 } finally {
   await backend.stop(child);
 }
