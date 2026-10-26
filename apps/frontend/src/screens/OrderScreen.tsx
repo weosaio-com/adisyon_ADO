@@ -8,6 +8,7 @@ import type { Hall, Order, OrderItem, Product, Table } from '../lib/types';
 import TextPromptModal from '../components/TextPromptModal';
 import ReasonModal from './ReasonModal';
 import { CANCEL_REASONS, VOID_REASONS } from './reason';
+import { MAX_QUANTITY_MILLI } from './payment-input';
 import PaymentModal from './PaymentModal';
 import DiscountModal from './DiscountModal';
 import TableTransferModal from './TableTransferModal';
@@ -193,6 +194,12 @@ export default function OrderScreen() {
   // Yanlislikla acilan bos adisyon: garson da kapatabilir, masa bosalir.
   const discard = useMutation({
     mutationFn: () => api(`/orders/${id}/discard`, { method: 'POST' }),
+    onSuccess: leave,
+    onError: fail,
+  });
+  // Toplami 0 olan adisyon (tam indirim/ikram, sifir fiyatli urun): odeme alinmadan kapatilir.
+  const closeOrder = useMutation({
+    mutationFn: () => api(`/orders/${id}/close`, { method: 'POST' }),
     onSuccess: leave,
     onError: fail,
   });
@@ -544,7 +551,7 @@ export default function OrderScreen() {
                             quantity: item.quantity + 1000,
                           })
                         }
-                        disabled={busy}
+                        disabled={busy || item.quantity + 1000 > MAX_QUANTITY_MILLI}
                       >
                         +
                       </QtyButton>
@@ -608,6 +615,16 @@ export default function OrderScreen() {
             <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
               {error}
             </p>
+          )}
+          {isOpen && canPay && activeItems.length > 0 && (currentOrder?.grandTotal ?? 0) <= 0 && (
+            <button
+              data-testid="close-order"
+              onClick={() => closeOrder.mutate()}
+              disabled={closeOrder.isPending || hasPending}
+              className="mb-2 min-h-12 w-full rounded-2xl bg-brand-600 text-sm font-black text-white transition hover:bg-brand-700 disabled:opacity-40"
+            >
+              {hasPending ? 'Önce mutfağa gönderin' : 'Adisyonu kapat (ödeme yok)'}
+            </button>
           )}
           {isOpen && activeItems.length === 0 && (
             <button

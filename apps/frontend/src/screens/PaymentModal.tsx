@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, isConnectivityError } from '../lib/api';
 import { formatKurus, parseTlToKurus } from '../lib/format';
 import { ulid } from '../offline/ids';
 import type { Customer, Order, Payment } from '../lib/types';
-import { cashChange, keyReuser, kurusToInput, netPaid } from './payment-input';
+import { keyReuser, kurusToInput, moneyLimitError, netPaid, planPayment } from './payment-input';
 
 const METHODS: { key: string; label: string }[] = [
   { key: 'cash', label: 'Nakit' },
@@ -13,11 +13,19 @@ const METHODS: { key: string; label: string }[] = [
   { key: 'debt', label: 'Veresiye' },
 ];
 
+// Odeme yanitindaki odeme satiri (para ustu sunucunun hesabi).
+interface ServerPayment {
+  idempotencyKey?: string | null;
+  change?: number;
+}
+
 // Musterinin uzattigi banknotlar (kurus): dokundukca "alinan nakit"e eklenir.
 const NOTES = [2000, 5000, 10000, 20000];
 
 // Parcali/split odeme: her odeme kalani azaltir; toplam >= grandTotal olunca
-// backend adisyonu tamamlar (status: completed) -> modal kapanir.
+// backend adisyonu tamamlar (status: completed) -> modal kapanir. Nakitte kalandan fazlasi para
+// ustu olur (sunucu `change` yazar, ekranda "Tamam"a basilana kadar gorunur); kart/havale/
+// veresiyede kalandan fazla tahsilat yapilamaz (sunucu 400 BILL_OVERPAY).
 export default function PaymentModal({
   orderId,
   grandTotal,
@@ -35,9 +43,10 @@ export default function PaymentModal({
   const [receivedTl, setReceivedTl] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [error, setError] = useState('');
-  const [overpayAck, setOverpayAck] = useState(false);
-  // Tamamlanan odemede para ustu varsa kasiyer gorsun diye ekranda tutulur.
-  const [doneChange, setDoneChange] = useState<number | null>(null);
+  // Para ustu (sunucunun yazdigi): kismi odemede de "Tamam"a basilana kadar ekranda kalir.
+  const [changeShown, setChangeShown] = useState<{ amount: number; completed: boolean } | null>(
+    null,
+  );
   // crypto.randomUUID HTTP'de (tablet LAN adresi) yok; ulid her baglamda calisir.
   const [keyFor] = useState(() => keyReuser(ulid));
   // Basarili odeme sayaci: ayni girisle ikinci (yeni) odeme yeni anahtar alsin.
@@ -63,9 +72,9 @@ export default function PaymentModal({
   // Alinan nakit bos birakilirsa tam para varsayilir (sunucu received = amount sayar).
   const receivedKurus = isCash && receivedTl.trim() ? parseTlToKurus(receivedTl) : null;
   const receivedShort = receivedKurus !== null && !(receivedKurus >= amountKurus);
-  const change =
-    receivedKurus !== null && !receivedShort ? cashChange(amountKurus, receivedKurus) : 0;
-  const isOverpay = amountValid && amountKurus > remaining;
+  const plan = planPayment({ method, remaining, amount: amountKurus, received: receivedKurus });
+  const change = !receivedShort && amountValid ? plan.change : 0;
+  const limitError = moneyLimitError(amountKurus) || moneyLimitError(receivedKurus ?? 0);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['payments', orderId] });
@@ -74,62 +83,94 @@ export default function PaymentModal({
 
   const pay = useMutation({
     mutationFn: async () => {
-      const order = await api<Order>(`/orders/${orderId}/payments`, {
-        method: 'POST',
-        body: {
-          method,
-          amount: amountKurus,
-          idempotencyKey: keyFor(
-            JSON.stringify([method, amountKurus, receivedKurus, customerId, succeeded]),
-          ),
-          ...(receivedKurus !== null ? { received: receivedKurus } : {}),
-          ...(isOverpay ? { allowOverpay: true } : {}),
-          ...(method === 'debt' ? { customerId } : {}),
+      const idempotencyKey = keyFor(
+        JSON.stringify([method, amountKurus, receivedKurus, customerId, succeeded]),
+      );
+      const order = await api<Order & { payments?: ServerPayment[] }>(
+        `/orders/${orderId}/payments`,
+        {
+          method: 'POST',
+          body: {
+            method,
+            // Nakitte kalandan fazlasi para ustu: adisyona kalan, verilen para `received`.
+            amount: plan.amount,
+            idempotencyKey,
+            ...(plan.received !== undefined ? { received: plan.received } : {}),
+            ...(method === 'debt' ? { customerId } : {}),
+          },
         },
-      });
-      return { order, change };
+      );
+      // Para ustu sunucunun kaydindan (yoksa ekrandaki onizlemeden).
+      const mine = order.payments?.find((p) => p.idempotencyKey === idempotencyKey);
+      return { order, change: typeof mine?.change === 'number' ? mine.change : change };
     },
     onSuccess: ({ order, change: given }) => {
       setSucceeded((n) => n + 1);
       refresh();
       setAmountTl('');
       setReceivedTl('');
-      setOverpayAck(false);
-      if (order.status === 'completed') {
-        qc.invalidateQueries({ queryKey: ['orders', 'open'] });
-        if (given > 0) setDoneChange(given);
-        else onCompleted();
-      }
+      const completed = order.status === 'completed';
+      if (completed) qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+      if (given > 0) setChangeShown({ amount: given, completed });
+      else if (completed) onCompleted();
     },
     onError: (e) => {
       // Istek sunucuya ulasip cevap kaybolduysa "odenen/kalan" gercek durumu gostersin.
       refresh();
-      setError(e instanceof ApiError ? e.message : 'Ödeme başarısız.');
+      setError(
+        isConnectivityError(e)
+          ? 'Bağlantı koptu; ödeme kaydedilmiş olabilir. Ödenen/kalan tutarı kontrol edip gerekirse tekrar basın (aynı ödeme iki kez alınmaz).'
+          : e instanceof ApiError
+            ? e.message
+            : 'Ödeme başarısız.',
+      );
+    },
+  });
+  // Kalan 0 ama adisyon acik (iptal/indirim sonrasi): odeme yerine adisyon kapatilir.
+  const closeOrder = useMutation({
+    mutationFn: () => api(`/orders/${orderId}/close`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+      onCompleted();
+    },
+    onError: (e) => {
+      refresh();
+      setError(e instanceof ApiError ? e.message : 'Adisyon kapatılamadı.');
     },
   });
 
   const valid =
     amountValid &&
     !receivedShort &&
-    (method !== 'debt' || customerId !== '') &&
-    (!isOverpay || overpayAck);
+    !plan.blocked &&
+    !limitError &&
+    remaining > 0 &&
+    (method !== 'debt' || customerId !== '');
 
   const addNote = (note: number) => {
     const base = receivedKurus !== null && Number.isFinite(receivedKurus) ? receivedKurus : 0;
     setReceivedTl(kurusToInput(base + note));
   };
 
-  if (doneChange !== null) {
+  if (changeShown !== null) {
     return (
       <Shell>
         <div className="py-4 text-center" data-testid="pay-done">
           <p className="text-sm font-bold tracking-wide text-brand-700 uppercase">Ödeme alındı</p>
           <p className="mt-4 text-sm text-stone-500">Müşteriye verilecek para üstü</p>
           <p className="mt-1 text-5xl font-black tracking-tight text-ink-900">
-            {formatKurus(doneChange)}
+            {formatKurus(changeShown.amount)}
           </p>
+          {!changeShown.completed && (
+            <p
+              className="mt-3 text-sm font-semibold text-amber-700"
+              data-testid="pay-done-remaining"
+            >
+              Adisyonda kalan: {formatKurus(remaining)}
+            </p>
+          )}
           <button
-            onClick={onCompleted}
+            onClick={() => (changeShown.completed ? onCompleted() : setChangeShown(null))}
             className="mt-8 min-h-14 w-full rounded-2xl bg-ink-900 text-base font-black text-white"
           >
             Tamam
@@ -265,35 +306,35 @@ export default function PaymentModal({
         </div>
       )}
 
-      {isOverpay && (
-        <div className="mb-3 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
-          {isCash && (
-            <div className="mb-2">
-              <p>Müşterinin verdiği parayı mı yazdınız? Para üstü ayrıca hesaplanır.</p>
-              <button
-                onClick={() => {
-                  setReceivedTl(amountTl);
-                  setAmountTl('');
-                  setOverpayAck(false);
-                }}
-                className="mt-2 min-h-10 rounded-xl bg-amber-900 px-3 text-sm font-bold text-white"
-              >
-                Alınan nakde taşı
-              </button>
-            </div>
-          )}
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              checked={overpayAck}
-              onChange={(e) => setOverpayAck(e.target.checked)}
-              className="mt-0.5 h-4 w-4"
-            />
-            <span>
-              Kalandan <b>{formatKurus(amountKurus - remaining)}</b> fazla tahsilat yapılıyor.
-              Onaylıyorum.
-            </span>
-          </label>
+      {limitError && <p className="mb-3 text-sm font-medium text-red-600">{limitError}</p>}
+      {plan.blocked && (
+        <p
+          data-testid="pay-overpay"
+          className="mb-3 rounded-2xl bg-red-50 p-3 text-sm text-red-800"
+        >
+          Kalan tutardan ({formatKurus(remaining)}) fazla tahsil edilemez; fazlası yalnız nakitte
+          para üstü olarak verilir.
+        </p>
+      )}
+      {isCash && plan.over && !receivedShort && (
+        <p className="mb-3 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
+          Kalandan fazlası para üstü olarak verilir; adisyona {formatKurus(plan.amount)} yazılır.
+        </p>
+      )}
+      {payments.isSuccess && remaining <= 0 && (
+        <div className="mb-3 rounded-2xl bg-brand-50 p-3 text-sm text-brand-900">
+          <p className="font-semibold">Ödeme tamam; adisyonu kapatabilirsiniz.</p>
+          <button
+            data-testid="pay-close-order"
+            onClick={() => {
+              setError('');
+              closeOrder.mutate();
+            }}
+            disabled={closeOrder.isPending}
+            className="mt-2 min-h-12 w-full rounded-xl bg-brand-700 font-black text-white disabled:opacity-40"
+          >
+            Adisyonu kapat
+          </button>
         </div>
       )}
 

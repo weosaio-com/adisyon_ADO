@@ -49,3 +49,40 @@ export function moneyLimitError(kurus: number): string {
     ? 'Tutar en fazla 10.000.000 TL olabilir.'
     : '';
 }
+
+export interface PaymentPlan {
+  /** Adisyona uygulanacak tutar (nakitte kalanla sinirli). */
+  amount: number;
+  /** Nakit verilen (para ustu icin); yoksa sunucu tam para sayar. */
+  received?: number;
+  /** Para ustu onizlemesi (sunucu yaniti esas alinir). */
+  change: number;
+  /** Girilen tutar kalandan fazla. */
+  over: boolean;
+  /** Nakit disinda kalandan fazla tahsilat: sunucu 400 BILL_OVERPAY ile reddeder. */
+  blocked: boolean;
+}
+
+/**
+ * Sunucunun ayirma kuraliyla ayni (payments.calc allocatePayment): nakitte kalandan fazlasi para
+ * ustu olur (adisyona kalan, verilen para `received`); kart/havale/veresiyede fazla tahsilat yok.
+ */
+export function planPayment(input: {
+  method: string;
+  remaining: number;
+  amount: number;
+  received: number | null;
+}): PaymentPlan {
+  const { method, remaining, amount, received } = input;
+  const over = Number.isFinite(amount) && remaining > 0 && amount > remaining;
+  if (method !== 'cash') return { amount, change: 0, over, blocked: over };
+  const applied = over ? remaining : amount;
+  const given = Math.max(received ?? amount, amount);
+  return {
+    amount: applied,
+    ...(given > applied || received !== null ? { received: given } : {}),
+    change: Math.max(0, given - applied),
+    over,
+    blocked: false,
+  };
+}

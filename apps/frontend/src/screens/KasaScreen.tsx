@@ -124,7 +124,8 @@ function OpenForm({ onDone, onError }: { onDone: () => void; onError: (e: unknow
     onError,
   });
   const kurus = toKurus(floatTl);
-  const valid = floatTl.trim() !== '' && Number.isFinite(kurus) && kurus >= 0;
+  const limit = moneyLimitError(kurus);
+  const valid = floatTl.trim() !== '' && Number.isFinite(kurus) && kurus >= 0 && !limit;
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
@@ -138,6 +139,7 @@ function OpenForm({ onDone, onError }: { onDone: () => void; onError: (e: unknow
         placeholder="0.00"
         className="mb-4 w-full rounded-lg border border-slate-300 px-3 py-3 text-lg"
       />
+      {limit && <p className="-mt-2 mb-3 text-sm text-red-600">{limit}</p>}
       <button
         onClick={() => open.mutate(kurus)}
         disabled={open.isPending || !valid}
