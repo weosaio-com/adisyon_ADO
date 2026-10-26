@@ -51,9 +51,11 @@ export interface SyncState {
   /** Sunucunun kabul etmedigi / onaya aldigi kayitlar (garson "Anladım" deyince silinir). */
   problems: number;
   note: string;
+  /** Tablet depolamasi doluluk yuzdesi; %80 altinda 0 (uyari yok). OFF-13 */
+  storageFull: number;
 }
 
-let state: SyncState = { mode: 'online', pending: 0, problems: 0, note: '' };
+let state: SyncState = { mode: 'online', pending: 0, problems: 0, note: '', storageFull: 0 };
 const listeners = new Set<() => void>();
 function emit() {
   for (const l of listeners) l();
@@ -64,7 +66,8 @@ function set(patch: Partial<SyncState>) {
     next.mode === state.mode &&
     next.pending === state.pending &&
     next.problems === state.problems &&
-    next.note === state.note
+    next.note === state.note &&
+    next.storageFull === state.storageFull
   ) {
     return;
   }
@@ -85,6 +88,7 @@ export function isOffline(): boolean {
 }
 
 let qc: QueryClient | null = null;
+let checkNow: (() => void) | null = null;
 let draining = false;
 let again = false;
 let lastSnapshot = 0; // katalog cache tazelik damgasi (offline reboot icin sicak tut)
@@ -372,6 +376,23 @@ export async function drain(): Promise<void> {
   }
 }
 
+/**
+ * Tablet depolamasi (OFF-13): kalici izin istenir (Android Chrome baski altinda izinsiz
+ * IndexedDB'yi silebilir; gonderilmemis siparis kaybolur) ve doluluk %80'i asinca uyarilir.
+ */
+async function checkStorage(): Promise<void> {
+  const storage = typeof navigator === 'undefined' ? undefined : navigator.storage;
+  if (!storage?.estimate) return;
+  const { usage = 0, quota = 0 } = await storage.estimate();
+  const ratio = quota > 0 ? usage / quota : 0;
+  set({ storageFull: ratio >= 0.8 ? Math.min(100, Math.round(ratio * 100)) : 0 });
+}
+
+/** Baglantiyi hemen yokla (or. canli akis koptu): rozet bir sonraki tiki beklemez. OFF-16 */
+export function requestCheck(): void {
+  checkNow?.();
+}
+
 // Aksiyonlar cagirir: outbox degisti -> sayaci tazele, hemen boslatmayi dene.
 export async function kick(): Promise<void> {
   await refreshPending();
@@ -384,6 +405,9 @@ export function startEngine(client: QueryClient): () => void {
   void outboxResetInflight()
     .catch(() => {})
     .then(refreshPending);
+  void navigator.storage?.persist?.().catch(() => false);
+  void checkStorage().catch(() => {});
+  const storageTimer = window.setInterval(() => void checkStorage().catch(() => {}), 10 * 60_000);
 
   const runTick = async () => {
     const online = await ping();
@@ -421,13 +445,16 @@ export function startEngine(client: QueryClient): () => void {
   };
 
   void tick();
+  checkNow = () => void tick();
   const iv = window.setInterval(() => void tick(), TICK_MS);
   const onOnline = () => void tick();
   const onOffline = () => set({ mode: 'offline', note: '' }); // navigator.onLine=false kesindir
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
   return () => {
+    checkNow = null;
     window.clearInterval(iv);
+    window.clearInterval(storageTimer);
     window.removeEventListener('online', onOnline);
     window.removeEventListener('offline', onOffline);
   };

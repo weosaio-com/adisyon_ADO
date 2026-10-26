@@ -195,9 +195,12 @@ export default function TablesScreen() {
     if (open) return nav(`/orders/${open.id}`);
     if (local) return nav(`/orders/${local.id}`);
     if (cashBlocked) {
+      // Garson kasayi acamaz: ne yapacagi yazilir (URN-17).
       setNotice({
         tone: 'warn',
-        message: 'Yeni adisyon açmak için önce kasa oturumunu açın.',
+        message: hasPerm('cash.manage')
+          ? 'Yeni adisyon açmak için önce kasa oturumunu açın.'
+          : 'Kasa kapalı: yeni sipariş için yöneticinizden kasayı açmasını isteyin.',
         cash: true,
       });
       return;
@@ -304,7 +307,9 @@ export default function TablesScreen() {
             <div>
               <p className="font-black">Kasa oturumu kapalı</p>
               <p className="text-sm text-amber-800">
-                Mevcut adisyonları görüntüleyebilirsiniz; yeni sipariş için kasayı açın.
+                {hasPerm('cash.manage')
+                  ? 'Mevcut adisyonları görüntüleyebilirsiniz; yeni sipariş için kasayı açın.'
+                  : 'Mevcut adisyonları görüntüleyebilirsiniz; yeni sipariş için yöneticinizden kasayı açmasını isteyin.'}
               </p>
             </div>
             {hasPerm('cash.manage') && (

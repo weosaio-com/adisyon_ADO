@@ -20,6 +20,7 @@ import { draftDelete } from '../offline/db';
 import { ulid } from '../offline/ids';
 import {
   isLocalId,
+  OfflineActionError,
   offlineAddLine,
   offlineAddToServerOrder,
   offlineSubmit,
@@ -104,7 +105,7 @@ export default function OrderScreen() {
     setError(
       isConnectivityError(value)
         ? UNCERTAIN_ORDER_MESSAGE
-        : value instanceof ApiError
+        : value instanceof ApiError || value instanceof OfflineActionError
           ? value.message
           : 'İşlem başarısız.',
     );
@@ -347,7 +348,10 @@ export default function OrderScreen() {
           />
           {cashBlocked && (
             <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <span>Kasa kapalı; bu adisyonda işlem yapılamaz.</span>
+              <span>
+                Kasa kapalı; bu adisyonda işlem yapılamaz.
+                {!hasPerm('cash.manage') && ' Yöneticinizden kasayı açmasını isteyin.'}
+              </span>
               {hasPerm('cash.manage') && (
                 <button onClick={() => nav('/cash')} className="shrink-0 font-black underline">
                   Kasaya git

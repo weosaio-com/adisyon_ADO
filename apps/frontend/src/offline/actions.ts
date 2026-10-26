@@ -18,14 +18,27 @@ export function isLocalId(id: string): boolean {
   return id.startsWith(LOCAL_PREFIX);
 }
 
+/** Garsona aynen gosterilecek hata (cevrimdisi islem yapilamadi). */
+export class OfflineActionError extends Error {}
+
 /** Gonderilmekte olan kalem degistirilemez: sunucu eski hali uygulamis olabilir (OFF-11). */
 export const INFLIGHT_MESSAGE = 'Bu kalem şu an gönderiliyor; birkaç saniye sonra tekrar deneyin.';
+const STORAGE_FULL_MESSAGE =
+  'Tablet depolaması dolu; sipariş bu cihaza kaydedilemedi. Cihazda yer açıp tekrar deneyin.';
 
 // Taslak + outbox kaydi tek IndexedDB isleminde yazilir (db.enqueue). Kayda olusturan
 // kullanici eklenir: cikis yapilip baska garson girse de siparis olusturanin adina gider.
 async function commit(draft: DraftOrder, entry: Parameters<typeof enqueue>[1][number]) {
   const actor = sessionClaims();
-  await enqueue(draft, [{ ...entry, ...(actor ? { actor } : {}) }]);
+  try {
+    await enqueue(draft, [{ ...entry, ...(actor ? { actor } : {}) }]);
+  } catch (error) {
+    // Kota doldu: garson siparisin kaydedilmedigini acikca gorsun (OFF-13).
+    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+      throw new OfflineActionError(STORAGE_FULL_MESSAGE);
+    }
+    throw error;
+  }
   void kick();
 }
 
@@ -64,7 +77,7 @@ export async function offlineUpdateQty(
   const d = await draftGet(orderId);
   if (!d) return;
   const e = await outboxGet(itemId);
-  if (e?.status === 'inflight') throw new Error(INFLIGHT_MESSAGE);
+  if (e?.status === 'inflight') throw new OfflineActionError(INFLIGHT_MESSAGE);
   const items = d.items.map((i) =>
     i.id === itemId
       ? { ...i, quantity, lineTotal: Math.round((i.lineTotal / i.quantity) * quantity) }
@@ -81,7 +94,7 @@ export async function offlineRemoveLine(orderId: string, itemId: string): Promis
   const d = await draftGet(orderId);
   if (!d) return;
   const e = await outboxGet(itemId);
-  if (e?.status === 'inflight') throw new Error(INFLIGHT_MESSAGE);
+  if (e?.status === 'inflight') throw new OfflineActionError(INFLIGHT_MESSAGE);
   const items = d.items.filter((i) => i.id !== itemId);
   // gonderilmemis satir -> outbox'tan da cikar (ayni islemde)
   await saveDraftAndOutbox({ ...d, items, ...recompute(items) }, { remove: [itemId] });

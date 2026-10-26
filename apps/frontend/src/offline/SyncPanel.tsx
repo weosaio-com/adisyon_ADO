@@ -192,27 +192,42 @@ export function OrderProblems({ orderId }: { orderId: string }) {
 export function SyncProblemsBanner() {
   const sync = useSyncState();
   const [open, setOpen] = useState(false);
-  if (sync.problems === 0) return null;
+  if (sync.problems === 0 && sync.storageFull === 0) return null;
   return (
     <>
-      <div
-        role="alert"
-        data-testid="sync-problems-banner"
-        className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-orange-950 sm:flex-row sm:items-center"
-      >
-        <div>
-          <p className="font-black">{sync.problems} işlem sunucuya geçmedi</p>
-          <p className="text-sm text-orange-900">
-            Reddedilen ya da yönetici onayı bekleyen siparişler var. Müşteriye bilgi verin.
+      {sync.storageFull > 0 && (
+        <div
+          role="alert"
+          data-testid="storage-warning"
+          className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-950"
+        >
+          <p className="font-black">Tablet depolaması %{sync.storageFull} dolu</p>
+          <p className="text-sm text-red-900">
+            Çevrimdışı siparişler kaybolmasın diye cihazda yer açın (gereksiz uygulama, fotoğraf,
+            video).
           </p>
         </div>
-        <button
-          onClick={() => setOpen(true)}
-          className="min-h-11 shrink-0 rounded-xl bg-orange-900 px-4 text-sm font-bold text-white"
+      )}
+      {sync.problems > 0 && (
+        <div
+          role="alert"
+          data-testid="sync-problems-banner"
+          className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-orange-950 sm:flex-row sm:items-center"
         >
-          Ayrıntılar
-        </button>
-      </div>
+          <div>
+            <p className="font-black">{sync.problems} işlem sunucuya geçmedi</p>
+            <p className="text-sm text-orange-900">
+              Reddedilen ya da yönetici onayı bekleyen siparişler var. Müşteriye bilgi verin.
+            </p>
+          </div>
+          <button
+            onClick={() => setOpen(true)}
+            className="min-h-11 shrink-0 rounded-xl bg-orange-900 px-4 text-sm font-bold text-white"
+          >
+            Ayrıntılar
+          </button>
+        </div>
+      )}
       {open && <SyncPanel onClose={() => setOpen(false)} />}
     </>
   );
