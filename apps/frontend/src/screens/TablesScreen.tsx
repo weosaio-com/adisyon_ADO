@@ -1,15 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { api, ApiError, getUser, hasPerm, LICENSE_LOCKED_CODE } from '../lib/api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  api,
+  ApiError,
+  getUser,
+  hasPerm,
+  isConnectivityError,
+  LICENSE_LOCKED_CODE,
+} from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
-import { useDialogs } from '../components/DialogProvider';
+import ReasonModal from './ReasonModal';
+import { CANCEL_REASONS } from './reason';
+import { looseOrderLabel } from './order-label';
 import { formatKurus } from '../lib/format';
 import type { Order, PrintJobRow, Table } from '../lib/types';
 import SyncBadge from '../offline/SyncBadge';
+import { SyncProblemsBanner, useSyncProblems } from '../offline/SyncPanel';
 import { offlineOpenTable } from '../offline/actions';
 import { isOffline } from '../offline/engine';
 import { draftAll } from '../offline/db';
+import { ulid } from '../offline/ids';
 import { readHalls, readTables, readOpenOrders, readHeldOrders } from '../offline/read';
 import type { DraftOrder } from '../offline/sync-core';
 
@@ -24,8 +35,20 @@ interface Notice {
 export default function TablesScreen() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const { confirmDialog } = useDialogs();
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Garson siparisi gonderip doner: kisa onay (URN-15).
+  const location = useLocation();
+  const [sent, setSent] = useState<string | null>(
+    () => (location.state as { sent?: string } | null)?.sent ?? null,
+  );
+  useEffect(() => {
+    if (!sent) return;
+    const timer = window.setTimeout(() => setSent(null), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [sent]);
+  // Paket / gel-al iptali: gerekce secilmeden iptal edilmez (sunucu da gerekce ister).
+  const [cancelFor, setCancelFor] = useState<Order | null>(null);
+  const [cancelError, setCancelError] = useState('');
   const user = getUser();
   const halls = useQuery({ queryKey: ['halls'], queryFn: readHalls });
   const tables = useQuery({ queryKey: ['tables', 'active'], queryFn: readTables });
@@ -70,9 +93,15 @@ export default function TablesScreen() {
   const heldByTable = new Map<string, Order>();
   for (const order of heldOrders.data ?? [])
     if (order.tableId) heldByTable.set(order.tableId, order);
+  // Senkron sorunu olan masalar (reddedilen / onay bekleyen kalem): masa kartinda "!" isareti.
+  const problemTables = new Set(
+    (useSyncProblems().data ?? []).flatMap((problem) => (problem.tableId ? [problem.tableId] : [])),
+  );
   const localByTable = new Map<string, DraftOrder>();
+  // Onaya dusen taslak masayi kilitlemez (OFF-8): masa sunucudaki haliyle gosterilir; sonuc
+  // gelince taslak sunucu adisyonuna baglanir ya da silinir.
   for (const draft of localDrafts.data ?? [])
-    if (draft.tableId && !draft.serverId) localByTable.set(draft.tableId, draft);
+    if (draft.tableId && !draft.serverId && !draft.review) localByTable.set(draft.tableId, draft);
 
   const showError = (error: unknown, fallback: string) =>
     setNotice({ tone: 'error', message: error instanceof ApiError ? error.message : fallback });
@@ -81,28 +110,77 @@ export default function TablesScreen() {
     if (error instanceof ApiError && error.code === LICENSE_LOCKED_CODE) return;
     showError(error, 'Adisyon açılamadı.');
   };
+  // Masa/paket acma tekrar korumasi (OFF-6): yaniti kaybolan istekten sonra ayni masaya (ayni
+  // siparis turune) tekrar dokunulursa ayni clientOpId gider; sunucu ayni adisyonu dondurur.
+  const pendingOpen = useRef<{ target: string; key: string } | null>(null);
+  const openKey = (target: string) => {
+    const prev = pendingOpen.current;
+    const key = prev?.target === target ? prev.key : ulid();
+    pendingOpen.current = { target, key };
+    return key;
+  };
+  const openFailed = (error: unknown) => {
+    if (!isConnectivityError(error)) pendingOpen.current = null;
+    qc.invalidateQueries({ queryKey: ['orders'] });
+  };
+  const opened = (order: Order) => {
+    pendingOpen.current = null;
+    qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+    nav(`/orders/${order.id}`);
+  };
+  // Baska cihaz masayi ayni anda acti (TABLE_HAS_OPEN_ORDER): o adisyona gecilir. Sunucu
+  // adisyonun kimligini hata baglaminda (`error.data.orderId`) verirse dogrudan, vermezse arayarak.
+  const goToTableOrder = async (tableId: string, known: unknown): Promise<boolean> => {
+    if (typeof known === 'string' && known) {
+      nav(`/orders/${known}`);
+      return true;
+    }
+    const open = await api<Order[]>(`/orders?tableId=${encodeURIComponent(tableId)}&open=true`);
+    const current = open.find((order) => order.status === 'open');
+    if (current) {
+      nav(`/orders/${current.id}`);
+      return true;
+    }
+    const held = await api<Order[]>(`/orders?tableId=${encodeURIComponent(tableId)}&status=held`);
+    if (held[0]) {
+      resumeOrder.mutate(held[0].id);
+      return true;
+    }
+    return false;
+  };
   const createOrder = useMutation({
-    mutationFn: (tableId: string) => api<Order>('/orders', { method: 'POST', body: { tableId } }),
-    onSuccess: (order) => {
-      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
-      nav(`/orders/${order.id}`);
+    mutationFn: (tableId: string) =>
+      api<Order>('/orders', { method: 'POST', body: { tableId, clientOpId: openKey(tableId) } }),
+    onSuccess: opened,
+    onError: async (error, tableId) => {
+      openFailed(error);
+      if (error instanceof ApiError && error.code === 'TABLE_HAS_OPEN_ORDER') {
+        const moved = await goToTableOrder(tableId, error.data.orderId).catch(() => false);
+        if (moved) return;
+      }
+      orderOpenError(error);
     },
-    onError: orderOpenError,
   });
   const createTakeaway = useMutation({
     mutationFn: (type: 'takeaway' | 'delivery') =>
-      api<Order>('/orders', { method: 'POST', body: { type } }),
-    onSuccess: (order) => {
-      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
-      nav(`/orders/${order.id}`);
+      api<Order>('/orders', { method: 'POST', body: { type, clientOpId: openKey(type) } }),
+    onSuccess: opened,
+    onError: (error) => {
+      openFailed(error);
+      orderOpenError(error);
     },
-    onError: orderOpenError,
   });
   const cancelOrder = useMutation({
-    mutationFn: (orderId: string) =>
-      api(`/orders/${orderId}/cancel`, { method: 'POST', body: { reason: 'İptal' } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['orders', 'open'] }),
-    onError: (error) => showError(error, 'İptal edilemedi.'),
+    mutationFn: ({ orderId, reason }: { orderId: string; reason: string }) =>
+      api(`/orders/${orderId}/cancel`, { method: 'POST', body: { reason } }),
+    onSuccess: () => {
+      setCancelFor(null);
+      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+    },
+    onError: (error) => {
+      qc.invalidateQueries({ queryKey: ['orders', 'open'] });
+      setCancelError(error instanceof ApiError ? error.message : 'İptal edilemedi.');
+    },
   });
   const resumeOrder = useMutation({
     mutationFn: (orderId: string) => api<Order>(`/orders/${orderId}/resume`, { method: 'POST' }),
@@ -114,15 +192,10 @@ export default function TablesScreen() {
   });
 
   const canCancel = hasPerm('order.cancel');
-  const askCancel = async (order: Order) => {
+  const askCancel = (order: Order) => {
     setNotice(null);
-    const type = order.type === 'delivery' ? 'paket' : 'gel-al';
-    const ok = await confirmDialog({
-      title: `Bu ${type} adisyonunu iptal etmek istiyor musunuz?`,
-      confirmLabel: 'Adisyonu iptal et',
-      danger: true,
-    });
-    if (ok) cancelOrder.mutate(order.id);
+    setCancelError('');
+    setCancelFor(order);
   };
 
   async function onTable(table: Table) {
@@ -133,9 +206,12 @@ export default function TablesScreen() {
     if (open) return nav(`/orders/${open.id}`);
     if (local) return nav(`/orders/${local.id}`);
     if (cashBlocked) {
+      // Garson kasayi acamaz: ne yapacagi yazilir (URN-17).
       setNotice({
         tone: 'warn',
-        message: 'Yeni adisyon açmak için önce kasa oturumunu açın.',
+        message: hasPerm('cash.manage')
+          ? 'Yeni adisyon açmak için önce kasa oturumunu açın.'
+          : 'Kasa kapalı: yeni sipariş için yöneticinizden kasayı açmasını isteyin.',
         cash: true,
       });
       return;
@@ -183,6 +259,17 @@ export default function TablesScreen() {
             </div>
           </div>
         </div>
+        {sent && (
+          <div className="mx-auto max-w-[1600px] px-4 pb-3 sm:px-6">
+            <p
+              role="status"
+              data-testid="sent-toast"
+              className="rounded-2xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm font-bold text-brand-800"
+            >
+              {sent}: mutfağa gönderildi ✓
+            </p>
+          </div>
+        )}
         {notice && (
           <div className="mx-auto max-w-[1600px] px-4 pb-3 sm:px-6">
             <div
@@ -236,12 +323,15 @@ export default function TablesScreen() {
             </button>
           </div>
         )}
+        <SyncProblemsBanner />
         {cashBlocked && (
           <div className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center">
             <div>
               <p className="font-black">Kasa oturumu kapalı</p>
               <p className="text-sm text-amber-800">
-                Mevcut adisyonları görüntüleyebilirsiniz; yeni sipariş için kasayı açın.
+                {hasPerm('cash.manage')
+                  ? 'Mevcut adisyonları görüntüleyebilirsiniz; yeni sipariş için kasayı açın.'
+                  : 'Mevcut adisyonları görüntüleyebilirsiniz; yeni sipariş için yöneticinizden kasayı açmasını isteyin.'}
               </p>
             </div>
             {hasPerm('cash.manage') && (
@@ -324,18 +414,24 @@ export default function TablesScreen() {
                     }`}
                   >
                     <span className="text-xs font-bold tracking-wider text-white/75 uppercase">
-                      {order.type === 'delivery' ? 'Paket' : 'Gel-al'} · #
-                      {order.orderNo.split('-')[1] ?? order.orderNo}
+                      {looseOrderLabel(
+                        order,
+                        openOrders.data ?? [],
+                        (id) => tables.data?.find((t) => t.id === id)?.name,
+                      )}{' '}
+                      · #{order.orderNo.split('-')[1] ?? order.orderNo}
                     </span>
                     <span className="text-lg font-black">{formatKurus(order.grandTotal)}</span>
                   </button>
                   {/* Iptal yalniz yetkiliye (sunucu da order.cancel ister); bos adisyonu garson icinden kapatir. */}
                   {canCancel && (
                     <button
-                      onClick={() => void askCancel(order)}
+                      data-testid={`takeaway-cancel-${order.id}`}
+                      onClick={() => askCancel(order)}
                       disabled={busy || cancelOrder.isPending}
                       title="İptal et"
-                      className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
+                      aria-label="Siparişi iptal et"
+                      className="absolute top-1 right-1 flex h-11 w-11 items-center justify-center rounded-full bg-black/15 text-lg text-white hover:bg-black/25 disabled:opacity-40"
                     >
                       ×
                     </button>
@@ -401,11 +497,21 @@ export default function TablesScreen() {
                                 : 'border-stone-200 bg-white text-ink-900'
                         }`}
                       >
-                        <span
-                          className={`absolute top-4 right-4 h-2.5 w-2.5 rounded-full ${
-                            state === 'free' ? 'bg-brand-500' : 'bg-white/70'
-                          }`}
-                        />
+                        {problemTables.has(table.id) ? (
+                          <span
+                            data-testid={`table-problem-${table.id}`}
+                            title="Sunucuya geçmeyen işlem var"
+                            className="absolute top-3 right-3 flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-sm font-black text-white"
+                          >
+                            !
+                          </span>
+                        ) : (
+                          <span
+                            className={`absolute top-4 right-4 h-2.5 w-2.5 rounded-full ${
+                              state === 'free' ? 'bg-brand-500' : 'bg-white/70'
+                            }`}
+                          />
+                        )}
                         <div>
                           <span className="block text-xl font-black tracking-tight">
                             {table.name}
@@ -440,6 +546,20 @@ export default function TablesScreen() {
           );
         })}
       </main>
+      {cancelFor && (
+        <ReasonModal
+          title={`${cancelFor.type === 'delivery' ? 'Paket' : 'Gel-al'} siparişini iptal et`}
+          description={`#${cancelFor.orderNo.split('-')[1] ?? cancelFor.orderNo} · ${formatKurus(
+            cancelFor.grandTotal,
+          )} — sipariş iptal edilir. Ödeme alınmışsa önce Kasa ekranından iade edin.`}
+          reasons={CANCEL_REASONS}
+          confirmLabel="Siparişi iptal et"
+          busy={cancelOrder.isPending}
+          error={cancelError}
+          onConfirm={(reason) => cancelOrder.mutate({ orderId: cancelFor.id, reason })}
+          onClose={() => setCancelFor(null)}
+        />
+      )}
     </div>
   );
 }

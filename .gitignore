@@ -55,6 +55,7 @@ apps/backend/images/
 # dosyalari yok say: apps/backend/src/tls kaynak kodu da "tls" adini tasiyor.
 *.pem
 **/tls/server.json
+**/tls/ca.json
 
 # Cloudflare (wrangler yerel durum + gizli degerler)
 .wrangler/

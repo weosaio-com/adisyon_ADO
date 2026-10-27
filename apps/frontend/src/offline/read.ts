@@ -4,6 +4,8 @@
 // (503 DB_BUSY, 5xx) snapshot varsa o gosterilir, yoksa hata (bos ekran yerine "Tekrar dene").
 import { api, ApiError, isConnectivityError } from '../lib/api';
 import { cachedSnapshot } from './engine';
+import { draftGet } from './db';
+import { SHADOW_PREFIX } from './sync-core';
 import type { Category, Hall, Order, Product, Table } from '../lib/types';
 
 interface Snapshot {
@@ -47,4 +49,42 @@ export function readCategories(): Promise<Category[]> {
 
 export function readProducts(): Promise<Product[]> {
   return read('/products?active=true', (s) => s?.products ?? []);
+}
+
+/** Ekranda gosterilen sunucu adisyonu: cevrimdisi eklenen (henuz gonderilmemis) kalemlerle. */
+export type ShownOrder = Order & { fromSnapshot?: boolean; offlineItems?: number };
+export interface ShownItem {
+  offline?: boolean;
+  clientOpId?: string | null;
+}
+
+/**
+ * Sunucu adisyonu (OFF-4): baglanti yoksa son snapshot'taki hali; bu tablette cevrimdisi
+ * eklenip henuz sunucuya gecmemis kalemler (golge taslak) "bekliyor" olarak eklenir. Sunucuya
+ * gecmis kalem (ayni clientOpId) iki kez gosterilmez.
+ */
+export async function readServerOrder(id: string): Promise<ShownOrder> {
+  let order: ShownOrder;
+  try {
+    order = await api<Order>(`/orders/${id}`);
+  } catch (error) {
+    if (!isConnectivityError(error)) throw error;
+    const found = (await cachedSnapshot<Snapshot>())?.orders.find((o) => o.id === id);
+    if (!found) throw error;
+    order = { ...found, fromSnapshot: true };
+  }
+  const shadow = await draftGet(SHADOW_PREFIX + id);
+  if (!shadow?.items.length) return order;
+  const known = new Set(order.items.map((item) => (item as ShownItem).clientOpId).filter(Boolean));
+  const extra = shadow.items
+    .filter((item) => !known.has(item.id))
+    .map((item) => ({ ...item, offline: true, notes: [] }));
+  const added = extra.reduce((sum, item) => sum + item.lineTotal, 0);
+  return {
+    ...order,
+    items: [...order.items, ...extra],
+    subtotal: order.subtotal + added,
+    grandTotal: order.grandTotal + added,
+    offlineItems: extra.length,
+  };
 }

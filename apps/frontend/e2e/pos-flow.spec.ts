@@ -200,7 +200,11 @@ test('garson tabletten sipariş girer, not ekler ve mutfağa gönderir', async (
   // Odeme kasada: garson "Ödeme al" gormez.
   await expect(waiter.getByRole('button', { name: 'Ödeme al' })).toHaveCount(0);
   await waiter.getByTestId('send-kitchen').click();
-  await expect(waiter.getByText('Mutfağa gönderildi')).toHaveCount(2);
+  // Garson gonderince masa planina doner; kisa onay orada gorunur (URN-15).
+  await expect(waiter).toHaveURL(/\/$/);
+  await expect(waiter.getByTestId('sent-toast')).toContainText(
+    `${fx.tables.a.name}: mutfağa gönderildi`,
+  );
 
   const place = `${fx.hall} · ${fx.tables.a.name}`;
   await expect
@@ -246,10 +250,14 @@ test('garson telefondan (390 px) sipariş girer ve mutfağa gönderir', async ({
   await expect(waiter.getByTestId(`product-${fx.kofte.id}`)).toBeHidden();
   await expectNoHorizontalScroll(waiter);
   await waiter.getByTestId('send-kitchen').click();
-  await expect(waiter.getByText('Mutfağa gönderildi')).toHaveCount(2);
+  // Garson gonderince masa planina doner; kisa onay orada (URN-15).
+  await expect(waiter).toHaveURL(/\/$/);
+  await expect(waiter.getByTestId('sent-toast')).toBeVisible();
+  await expectNoHorizontalScroll(waiter);
 
-  // Urun eklemeye donulur.
-  await waiter.getByTestId('show-products').click();
+  // Masaya donunce urunler acilir; adisyon ozeti gonderilmis kalemleri gosterir.
+  await waiter.getByTestId(`table-${fx.tables.e.id}`).click();
+  await waiter.getByTestId(`category-${fx.categoryId}`).click();
   await expect(waiter.getByTestId(`product-${fx.kofte.id}`)).toBeVisible();
   await expect(waiter.getByTestId('show-order')).toContainText('2 kalem');
   await expect(waiter.getByTestId('show-order')).not.toContainText('gönderilmedi');

@@ -5,6 +5,8 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import { startEngine } from './offline/engine';
+import { startUpdates } from './offline/sw-update';
+import UpdateBanner from './offline/UpdateBanner';
 import { DialogProvider } from './components/DialogProvider';
 
 const queryClient = new QueryClient({
@@ -18,6 +20,8 @@ const queryClient = new QueryClient({
 
 // Baglanti izleme + outbox drain (istemci-offline). OFFLINE_DESIGN.md §10
 startEngine(queryClient);
+// Yeni surum acik tabletlere ulassin: periyodik yoklama + guvenli anda yenileme. OFF-7
+startUpdates();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -26,6 +30,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         {/* Onay/bilgi pencereleri (yerel alert/confirm yerine) tum ekranlarda ortak. */}
         <DialogProvider>
           <App />
+          <UpdateBanner />
         </DialogProvider>
       </BrowserRouter>
     </QueryClientProvider>

@@ -19,6 +19,11 @@ export const syncMutationSchema = z.object({
   type: z.nativeEnum(OfflineMutationType),
   payload: z.record(z.unknown()).default({}),
   baseVersion: z.number().int().optional(), // bilgi amacli; append-only merge'de zorunlu degil
+  // Kaydi tablette olusturan kullanici ve oturumu (OFF-5). Ortak tablette garson degisince
+  // onceki garsonun bekleyen siparisi yeni girenin adina yazilmasin; sunucu oturumu dogrular.
+  actor: z
+    .object({ userId: z.string().min(1).max(64), sessionId: z.string().min(1).max(64) })
+    .optional(),
 });
 export type SyncMutation = z.infer<typeof syncMutationSchema>;
 
@@ -41,6 +46,9 @@ export const addLinePayload = z
     productId: z.string().min(1),
     quantity: z.number().int().positive(), // milis (x1000)
     note: z.string().nullish(),
+    // Garsonun cevrimdisi gordugu birim fiyat (kurus). Sunucudaki fiyat farkliysa kalem
+    // sessizce baska fiyatla yazilmaz: Owner onayina (price_changed) alinir. OFF-3
+    unitPrice: z.number().int().nonnegative().optional(),
   })
   .refine(hasOrderRef, { message: 'orderId veya orderClientOpId gerekli' });
 
@@ -68,9 +76,27 @@ export const submitOrderPayload = z.object({ ...orderRef }).refine(hasOrderRef, 
   message: 'orderId veya orderClientOpId gerekli',
 });
 
-// --- POST /sync/reviews/:id/resolve ---
-export const resolveReviewSchema = z.object({
-  resolution: z.enum(['yeni_adisyon', 'yeniden_ac', 'reddet']),
-  targetTableId: z.string().min(1).nullish(), // yeni_adisyon icin istege bagli masa
-});
+// --- POST /offline-reviews/:id/resolve ve /offline-reviews/resolve-group ---
+// uygula: asil adisyon aciksa ona, degilse hedef masaya (varsayilan: siparisin masasi; masa
+// doluysa acik adisyonuna) uygulanir. yeni_adisyon: hedef masada yeni adisyon. yeniden_ac:
+// bekletilen (odenmemis) asil adisyon yeniden acilir. reddet: hicbiri uygulanmaz.
+const resolution = z.enum(['uygula', 'yeni_adisyon', 'yeniden_ac', 'reddet']);
+// undefined: varsayilan masa; null: masasiz (paket/gel-al gibi).
+const targetTableId = z.string().min(1).nullish();
+
+export const resolveReviewSchema = z.object({ resolution, targetTableId });
 export type ResolveReviewDto = z.infer<typeof resolveReviewSchema>;
+
+/** Bir siparisin (OPEN_TABLE + kalemleri + mutfaga gonder) tum review'lari tek kararla. OFF-2 */
+export const resolveGroupSchema = z.object({
+  reviewIds: z.array(z.string().min(1)).min(1).max(500),
+  resolution,
+  targetTableId,
+});
+export type ResolveGroupDto = z.infer<typeof resolveGroupSchema>;
+
+// --- POST /sync/reviews/status: tabletin onaya dusen kayitlarinin sonucu (OFF-8) ---
+export const reviewStatusSchema = z.object({
+  clientOpIds: z.array(z.string().min(1)).min(1).max(500),
+});
+export type ReviewStatusDto = z.infer<typeof reviewStatusSchema>;

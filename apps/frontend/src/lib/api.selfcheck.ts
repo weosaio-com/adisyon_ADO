@@ -26,6 +26,7 @@ const {
   SESSION_EXPIRED_EVENT,
   SESSION_EXPIRED_MESSAGE,
   TIMEOUT_MESSAGE,
+  UNCERTAIN_WRITE_MESSAGE,
   getAccess,
   isConnectivityError,
   login,
@@ -290,5 +291,51 @@ await assert.rejects(login('owner', 'yanlis'), { status: 401, code: 'INVALID_CRE
 assert.equal(refreshCalls, 0);
 assert.equal(expiredEvents, before);
 sessionKept('A1');
+
+// --- 8) Dogrulama hatasi: genel "Dogrulama hatasi." yerine sunucunun Turkce alan aciklamasi ---
+signIn('A1');
+handler = async () =>
+  json(422, {
+    success: false,
+    error: {
+      code: 'VALIDATION_ERROR',
+      message: 'Dogrulama hatasi.',
+      details: [
+        { field: 'value', issue: 'İndirim en fazla 10.000.000 TL olabilir.' },
+        { field: 'value', issue: 'İndirim en fazla 10.000.000 TL olabilir.' },
+      ],
+    },
+  });
+await assert.rejects(api('/orders/o1/discounts', { method: 'POST', body: {} }), (err: unknown) => {
+  assert.ok(err instanceof ApiError);
+  assert.equal(err.code, 'VALIDATION_ERROR');
+  assert.equal(err.message, 'İndirim en fazla 10.000.000 TL olabilir.');
+  assert.equal(err.details.length, 2);
+  return true;
+});
+
+// --- 8b) Ek baglam: yeni sunucu `error.data`, eski sunucu dogrudan `error` icinde ---
+for (const error of [
+  { code: 'TABLE_HAS_OPEN_ORDER', message: 'Masa dolu.', data: { orderId: 'O9' } },
+  { code: 'TABLE_HAS_OPEN_ORDER', message: 'Masa dolu.', orderId: 'O9', requestId: 'r1' },
+]) {
+  handler = async () => json(409, { success: false, error });
+  await assert.rejects(api('/orders', { method: 'POST', body: {} }), (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.code, 'TABLE_HAS_OPEN_ORDER');
+    assert.equal(err.data.orderId, 'O9');
+    return true;
+  });
+}
+
+// --- 9) Yazma isteginde baglanti koptu: "tekrar deneyin" degil, "ulasmis olabilir" (cift kayit) ---
+handler = async () => Promise.reject(new TypeError('Failed to fetch'));
+await assert.rejects(api('/orders/o1/items', { method: 'POST', body: {} }), (err: unknown) => {
+  assert.ok(err instanceof ApiError);
+  assert.equal(err.code, 'NETWORK_ERROR');
+  assert.equal(err.message, UNCERTAIN_WRITE_MESSAGE);
+  assert.equal(isConnectivityError(err), true);
+  return true;
+});
 
 console.log('api self-check OK');

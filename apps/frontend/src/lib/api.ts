@@ -26,6 +26,12 @@ export const BUSY_MESSAGE = 'Sistem şu an meşgul, birkaç saniye sonra tekrar 
 export const TIMEOUT_MESSAGE =
   'Sunucu zamanında yanıt vermedi; bağlantıyı kontrol edip tekrar deneyin.';
 export const NETWORK_MESSAGE = 'Sunucuya ulaşılamadı; bağlantıyı kontrol edip tekrar deneyin.';
+/**
+ * Yazma istegi (POST/PATCH/PUT/DELETE) baglanti koptugu icin yanitsiz kaldi: istek sunucuya ulasip
+ * islenmis olabilir. "Tekrar deneyin" demek cift kayit urettirir; once ekrani kontrol ettirilir.
+ */
+export const UNCERTAIN_WRITE_MESSAGE =
+  'Bağlantı koptu; işlem sunucuya ulaşmış olabilir. Ekranı kontrol edip gerekirse tekrar deneyin.';
 export const SESSION_EXPIRED_MESSAGE = 'Oturumunuz sona erdi; lütfen yeniden giriş yapın.';
 
 /** Oturum gercekten bitti (belirtecler silindi): uygulama giris ekranina gecer. */
@@ -66,18 +72,60 @@ export function clearSession(): void {
   localStorage.removeItem(USER_KEY);
 }
 
+/**
+ * Erisim belirtecindeki kullanici ve oturum kimligi (JWT govdesi yalniz okunur; dogrulamayi
+ * sunucu yapar). Cevrimdisi kayit olusturani tasir: garson degisse de siparis onun adina
+ * yazilir (OFF-5).
+ */
+export function sessionClaims(): { userId: string; sessionId: string } | null {
+  const body = getAccess()?.split('.')[1];
+  if (!body) return null;
+  try {
+    const json = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/'))) as {
+      sub?: unknown;
+      sid?: unknown;
+    };
+    return typeof json.sub === 'string' && typeof json.sid === 'string'
+      ? { userId: json.sub, sessionId: json.sid }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // Alanlar acikca atanir: `public status` gibi parametre-ozellikleri node'un
 // strip-only TS modunda calismaz, self-check bu dosyayi import edemez.
+export interface ErrorDetail {
+  field: string;
+  issue: string;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
   /** Gecici hata (ag, zaman asimi, 5xx, DB_BUSY): ayni istek biraz sonra tekrar denenebilir. */
   retryable: boolean;
-  constructor(status: number, code: string, message: string, retryable = false) {
+  /** Dogrulama hatasinin alan bazli aciklamalari (422 VALIDATION_ERROR). */
+  details: ErrorDetail[];
+  /**
+   * Hatanin ek baglami (orn. TABLE_HAS_OPEN_ORDER -> masadaki adisyonun orderId'si). Sunucu
+   * `error.data` altinda ya da (eski surum) dogrudan `error` icinde dondurebilir.
+   */
+  data: Record<string, unknown>;
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    retryable = false,
+    details: ErrorDetail[] = [],
+    data: Record<string, unknown> = {},
+  ) {
     super(message);
     this.status = status;
     this.code = code;
     this.retryable = retryable;
+    this.details = details;
+    this.data = data;
   }
 }
 
@@ -126,10 +174,46 @@ function parseJson(text: string): unknown {
 }
 
 // Hata zarfi { success:false, error:{ code, message, details? } }; zarfsiz govde de okunur.
-function errorBody(json: unknown): { code?: unknown; message?: unknown } | null {
+function errorBody(
+  json: unknown,
+): { code?: unknown; message?: unknown; details?: unknown; data?: unknown } | null {
   const body = json as { error?: unknown } | null;
   const err = body && typeof body === 'object' && body.error ? body.error : json;
-  return err && typeof err === 'object' ? (err as { code?: unknown; message?: unknown }) : null;
+  return err && typeof err === 'object'
+    ? (err as { code?: unknown; message?: unknown; details?: unknown; data?: unknown })
+    : null;
+}
+
+// Ek baglam: `error.data` (yeni sunucu) + zarfin diger alanlari (eski sunucu `orderId` vb.).
+function errorData(json: unknown): Record<string, unknown> {
+  const body = errorBody(json);
+  if (!body) return {};
+  const {
+    code: _code,
+    message: _message,
+    details: _details,
+    data,
+    ...rest
+  } = body as Record<string, unknown>;
+  return {
+    ...rest,
+    ...(data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : {}),
+  };
+}
+
+// Dogrulama hatasinin alan aciklamalari (sunucu Turkce yazar: "İndirim en fazla 10.000.000 TL
+// olabilir."). Genel "Dogrulama hatasi." yerine kullaniciya bunlar gosterilir.
+function errorDetails(json: unknown): ErrorDetail[] {
+  const details = errorBody(json)?.details;
+  if (!Array.isArray(details)) return [];
+  return details.flatMap((d: unknown) => {
+    const row = d as { field?: unknown; issue?: unknown } | null;
+    return row && typeof row.issue === 'string' && row.issue
+      ? [{ field: typeof row.field === 'string' ? row.field : '', issue: row.issue }]
+      : [];
+  });
 }
 
 function errorCode(json: unknown): string {
@@ -143,11 +227,15 @@ function toError(reply: Reply): ApiError {
   // Veritabani kisa sure mesgul (backend 503 DB_BUSY): oturuma dokunulmaz, tekrar denenebilir.
   if (code === DB_BUSY_CODE) return new ApiError(reply.status, code, BUSY_MESSAGE, true);
   const message = errorBody(reply.json)?.message;
+  const details = errorDetails(reply.json);
+  const issues = [...new Set(details.map((d) => d.issue))].join(' ');
   return new ApiError(
     reply.status,
     code,
-    typeof message === 'string' && message ? message : reply.statusText,
+    issues || (typeof message === 'string' && message ? message : reply.statusText),
     reply.status >= 500 || reply.status === 429,
+    details,
+    errorData(reply.json),
   );
 }
 
@@ -161,8 +249,17 @@ async function exchange(url: string, init: RequestInit, timeoutMs: number): Prom
     const text = await res.text();
     return { status: res.status, statusText: res.statusText, json: parseJson(text) };
   } catch {
-    if (controller.signal.aborted) throw new ApiError(0, TIMEOUT_CODE, TIMEOUT_MESSAGE, true);
-    throw new ApiError(0, NETWORK_ERROR_CODE, NETWORK_MESSAGE, true);
+    // Yazma isteginde yanit gelmedi: islem sunucuda uygulanmis olabilir (bkz. UNCERTAIN_WRITE_MESSAGE).
+    const write = (init.method ?? 'GET').toUpperCase() !== 'GET';
+    if (controller.signal.aborted) {
+      throw new ApiError(0, TIMEOUT_CODE, write ? UNCERTAIN_WRITE_MESSAGE : TIMEOUT_MESSAGE, true);
+    }
+    throw new ApiError(
+      0,
+      NETWORK_ERROR_CODE,
+      write ? UNCERTAIN_WRITE_MESSAGE : NETWORK_MESSAGE,
+      true,
+    );
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -285,6 +382,17 @@ export async function api<T = unknown>(
   }
   if (!isOk(reply.status)) throw toError(reply);
   return unwrapEnvelope(reply.json) as T;
+}
+
+/**
+ * Cikis: sunucudaki oturum da kapatilir (yenileme belirteci gecersiz olur). Sunucuya
+ * ulasilamazsa (cevrimdisi) yalniz bu cihazdaki oturum silinir; cikis engellenmez.
+ */
+export async function logout(): Promise<void> {
+  if (getAccess()) {
+    await api('/auth/logout', { method: 'POST', timeoutMs: 5_000 }, false).catch(() => {});
+  }
+  clearSession();
 }
 
 /** Urun gorselinin adresi (herkese acik, suresiz onbellekli; anahtar icerik ozetidir). */

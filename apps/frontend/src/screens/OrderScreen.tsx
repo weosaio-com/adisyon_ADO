@@ -1,29 +1,53 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError, hasPerm } from '../lib/api';
+import { api, ApiError, getUser, hasPerm, isConnectivityError } from '../lib/api';
 import { useLiveEvents } from '../lib/useLiveEvents';
 import { formatKurus, formatQty } from '../lib/format';
 import type { Hall, Order, OrderItem, Product, Table } from '../lib/types';
 import TextPromptModal from '../components/TextPromptModal';
+import ReasonModal from './ReasonModal';
+import { CANCEL_REASONS, VOID_REASONS } from './reason';
+import { MAX_QUANTITY_MILLI } from './payment-input';
 import PaymentModal from './PaymentModal';
 import DiscountModal from './DiscountModal';
 import TableTransferModal from './TableTransferModal';
 import SplitModal from './SplitModal';
 import SyncBadge, { useSyncState } from '../offline/SyncBadge';
+import { OrderProblems } from '../offline/SyncPanel';
 import { isOffline } from '../offline/engine';
 import { draftDelete } from '../offline/db';
+import { ulid } from '../offline/ids';
 import {
   isLocalId,
+  OfflineActionError,
   offlineAddLine,
+  offlineAddToServerOrder,
   offlineSubmit,
+  offlineSubmitServerOrder,
   offlineUpdateQty,
   offlineRemoveLine,
   readLocalOrder,
 } from '../offline/actions';
-import { readCategories, readHalls, readProducts, readTables } from '../offline/read';
+import {
+  readCategories,
+  readHalls,
+  readProducts,
+  readServerOrder,
+  readTables,
+  type ShownItem,
+} from '../offline/read';
+import { SHADOW_PREFIX } from '../offline/sync-core';
 
 type PhoneView = 'products' | 'order';
+// Sunucu kaleminin arayuzde kullanilan ek alanlari (lib/types OrderItem'da yok). offline:
+// cevrimdisi eklenip henuz sunucuya gecmemis kalem (golge taslak, OFF-4).
+type ServerItem = OrderItem & ShownItem & { voidReason?: string | null };
+const isShadow = (item: OrderItem) => (item as ServerItem).offline === true;
+
+// Yazma istegi yanitsiz kaldi (Wi-Fi koptu): islem sunucuya ulasmis olabilir; adisyon tazelenir.
+const UNCERTAIN_ORDER_MESSAGE =
+  'Bağlantı koptu; işlem sunucuya ulaşmış olabilir. Adisyonu kontrol edip gerekirse tekrar deneyin.';
 
 export default function OrderScreen() {
   const { id = '' } = useParams();
@@ -38,6 +62,17 @@ export default function OrderScreen() {
   const [splitOpen, setSplitOpen] = useState(false);
   const [noteItem, setNoteItem] = useState<OrderItem | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState('');
+  // Mutfaga gitmis kalemin iptali: onay + gerekce penceresi (URN-3). Tek dokunusla iptal olmaz.
+  const [voidFor, setVoidFor] = useState<OrderItem | null>(null);
+  const [voidError, setVoidError] = useState('');
+  // "Mutfağa gönderildi" kisa onayi (URN-15); garson masa planina doner ve onay orada gorunur.
+  const [sentNote, setSentNote] = useState(false);
+  useEffect(() => {
+    if (!sentNote) return;
+    const timer = window.setTimeout(() => setSentNote(false), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [sentNote]);
   // Telefonda (md alti) urunler ve adisyon ayni ekrana sigmaz: ikisi arasinda gecilir. Cevrimdisi
   // taslak sunucuya gecince yeni adrese yonlendirilir (ekran yeniden kurulur); gorunum korunur.
   const location = useLocation();
@@ -50,8 +85,9 @@ export default function OrderScreen() {
   useLiveEvents();
   const order = useQuery({
     queryKey: ['order', id],
-    queryFn: (): Promise<Order & { serverId?: string }> =>
-      local ? readLocalOrder(id) : api<Order>(`/orders/${id}`),
+    // Sunucu adisyonu baglanti yoksa snapshot'tan; cevrimdisi eklenen kalemlerle (OFF-4).
+    queryFn: (): Promise<Order & { serverId?: string; fromSnapshot?: boolean }> =>
+      local ? readLocalOrder(id) : readServerOrder(id),
     refetchInterval: local ? 2_000 : 30_000,
   });
   const categories = useQuery({ queryKey: ['categories'], queryFn: readCategories });
@@ -66,8 +102,24 @@ export default function OrderScreen() {
     refetchInterval: 30_000,
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ['order', id] });
-  const fail = (value: unknown) =>
-    setError(value instanceof ApiError ? value.message : 'İşlem başarısız.');
+  // Her hatada adisyon tazelenir: ORDER_CHANGED (baska cihaz degistirdi) ya da yaniti kaybolan
+  // istekte ekran sunucudaki gercek durumu gostersin.
+  const fail = (value: unknown) => {
+    refresh();
+    if (value instanceof ApiError && value.code === 'PRODUCT_INACTIVE') {
+      qc.invalidateQueries({ queryKey: ['products'] });
+    }
+    setError(
+      isConnectivityError(value)
+        ? UNCERTAIN_ORDER_MESSAGE
+        : value instanceof ApiError || value instanceof OfflineActionError
+          ? value.message
+          : 'İşlem başarısız.',
+    );
+  };
+  // Cevrimici kalem ekleme tekrar korumasi (OFF-6): yaniti kaybolan istekten sonra ayni urune
+  // tekrar dokunulursa ayni clientOpId gider; sunucu ilk istegi uyguladiysa ikinci kalem acmaz.
+  const pendingAdd = useRef<{ productId: string; key: string } | null>(null);
 
   const addItem = useMutation({
     mutationFn: (product: Product) => {
@@ -77,50 +129,100 @@ export default function OrderScreen() {
           name: product.name,
           salePrice: product.salePrice,
         });
+      // Baglanti yok: acik adisyona ekleme kuyruga yazilir (ADD_LINE {orderId}), bekliyor
+      // olarak gosterilir; baglanti gelince sunucuya gider. OFF-4
       if (isOffline())
-        throw new ApiError(
-          0,
-          'OFFLINE',
-          'Bağlantı yok — çevrimiçi açılan adisyona ekleme için bağlantı bekleniyor.',
+        return offlineAddToServerOrder(
+          { id, label: place.title, tableId: currentOrder?.tableId ?? null },
+          { id: product.id, name: product.name, salePrice: product.salePrice },
         );
+      const prev = pendingAdd.current;
+      const key = prev?.productId === product.id ? prev.key : ulid();
+      pendingAdd.current = { productId: product.id, key };
       return api(`/orders/${id}/items`, {
         method: 'POST',
-        body: { productId: product.id, quantity: 1000 },
+        body: { productId: product.id, quantity: 1000, clientOpId: key },
       });
+    },
+    onSuccess: () => {
+      pendingAdd.current = null;
+      setError('');
+      refresh();
+    },
+    onError: (value) => {
+      // Kesin ret (4xx): anahtar birakilir. Yanitsiz kalan istek: anahtar tekrar icin saklanir.
+      if (!isConnectivityError(value)) pendingAdd.current = null;
+      fail(value);
+    },
+  });
+  const sendKitchen = useMutation({
+    mutationFn: async () => {
+      if (local) return offlineSubmit(id);
+      const items = currentOrder?.items ?? [];
+      const shadowPending = items.some((i) => isShadow(i) && i.status === 'pending');
+      // Cevrimdisi eklenenler kuyruga (SUBMIT_ORDER {orderId}); sunucudakiler dogrudan.
+      if (isOffline()) return offlineSubmitServerOrder(id);
+      if (shadowPending) await offlineSubmitServerOrder(id);
+      if (items.some((i) => !isShadow(i) && i.status === 'pending') || !shadowPending) {
+        await api(`/orders/${id}/send-kitchen`, { method: 'POST' });
+      }
+    },
+    onSuccess: () => {
+      refresh();
+      setError('');
+      // Garsonun en sik isi "siparis al -> gonder -> sonraki masa": cevrimici sunucu
+      // adisyonunda masa planina donulur, onay orada gosterilir (URN-15). Yonetici ve
+      // cevrimdisi taslak adisyonda kalir (kisa onay burada).
+      if (getUser()?.role === 'waiter' && !local && !isOffline()) {
+        qc.invalidateQueries({ queryKey: ['orders'] });
+        nav('/', { replace: true, state: { sent: place.title } });
+        return;
+      }
+      setSentNote(true);
+    },
+    onError: fail,
+  });
+  // Taslak ve golge (cevrimdisi eklenen) kalemler yerelde; sunucu kalemleri sunucuda duzenlenir.
+  const draftIdFor = (shadow: boolean) => (local ? id : shadow ? SHADOW_PREFIX + id : null);
+  const updateQty = useMutation({
+    mutationFn: ({
+      itemId,
+      quantity,
+      shadow,
+    }: {
+      itemId: string;
+      quantity: number;
+      shadow: boolean;
+    }) => {
+      const draftId = draftIdFor(shadow);
+      return draftId
+        ? offlineUpdateQty(draftId, itemId, quantity)
+        : api(`/orders/${id}/items/${itemId}`, { method: 'PATCH', body: { quantity } });
     },
     onSuccess: refresh,
     onError: fail,
   });
-  const sendKitchen = useMutation({
-    mutationFn: () =>
-      local ? offlineSubmit(id) : api(`/orders/${id}/send-kitchen`, { method: 'POST' }),
-    onSuccess: refresh,
-    onError: fail,
-  });
-  const updateQty = useMutation({
-    mutationFn: ({ itemId, quantity }: { itemId: string; quantity: number }) =>
-      local
-        ? offlineUpdateQty(id, itemId, quantity)
-        : api(`/orders/${id}/items/${itemId}`, { method: 'PATCH', body: { quantity } }),
-    onSuccess: refresh,
-    onError: fail,
-  });
   const removeItem = useMutation({
-    mutationFn: (itemId: string) =>
-      local
-        ? offlineRemoveLine(id, itemId)
-        : api(`/orders/${id}/items/${itemId}`, { method: 'DELETE' }),
+    mutationFn: ({ itemId, shadow }: { itemId: string; shadow: boolean }) => {
+      const draftId = draftIdFor(shadow);
+      return draftId
+        ? offlineRemoveLine(draftId, itemId)
+        : api(`/orders/${id}/items/${itemId}`, { method: 'DELETE' });
+    },
     onSuccess: refresh,
     onError: fail,
   });
   const voidItem = useMutation({
-    mutationFn: (itemId: string) =>
-      api(`/orders/${id}/items/${itemId}/void`, {
-        method: 'POST',
-        body: { reason: 'düzeltme' },
-      }),
-    onSuccess: refresh,
-    onError: fail,
+    mutationFn: ({ itemId, reason }: { itemId: string; reason: string }) =>
+      api(`/orders/${id}/items/${itemId}/void`, { method: 'POST', body: { reason } }),
+    onSuccess: () => {
+      setVoidFor(null);
+      refresh();
+    },
+    onError: (value) => {
+      refresh();
+      setVoidError(value instanceof ApiError ? value.message : 'Kalem iptal edilemedi.');
+    },
   });
   const hold = useMutation({
     mutationFn: () => api(`/orders/${id}/hold`, { method: 'POST' }),
@@ -153,17 +255,31 @@ export default function OrderScreen() {
     onSuccess: leave,
     onError: fail,
   });
+  // Toplami 0 olan adisyon (tam indirim/ikram, sifir fiyatli urun): odeme alinmadan kapatilir.
+  const closeOrder = useMutation({
+    mutationFn: () => api(`/orders/${id}/close`, { method: 'POST' }),
+    onSuccess: leave,
+    onError: fail,
+  });
   const cancelOrder = useMutation({
     mutationFn: (reason: string) =>
       api(`/orders/${id}/cancel`, { method: 'POST', body: { reason } }),
     onSuccess: leave,
     onError: (value) => {
-      setCancelOpen(false);
-      fail(value);
+      refresh();
+      setCancelError(value instanceof ApiError ? value.message : 'Adisyon iptal edilemedi.');
     },
   });
 
   const currentOrder = order.data;
+  // Yaniti kaybolan ekleme sunucuda uygulanmissa (tazelenen adisyonda o anahtar var) anahtar
+  // birakilir: garsonun ayni urune bilerek yapacagi ikinci dokunus yeni kalem acar.
+  useEffect(() => {
+    const key = pendingAdd.current?.key;
+    if (key && currentOrder?.items.some((item: ServerItem) => item.clientOpId === key)) {
+      pendingAdd.current = null;
+    }
+  }, [currentOrder]);
   useEffect(() => {
     if (local && currentOrder?.serverId) {
       void draftDelete(id);
@@ -251,7 +367,10 @@ export default function OrderScreen() {
           />
           {cashBlocked && (
             <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <span>Kasa kapalı; bu adisyonda işlem yapılamaz.</span>
+              <span>
+                Kasa kapalı; bu adisyonda işlem yapılamaz.
+                {!hasPerm('cash.manage') && ' Yöneticinizden kasayı açmasını isteyin.'}
+              </span>
               {hasPerm('cash.manage') && (
                 <button onClick={() => nav('/cash')} className="shrink-0 font-black underline">
                   Kasaya git
@@ -398,7 +517,7 @@ export default function OrderScreen() {
             </div>
             <SyncBadge />
           </div>
-          {currentOrder?.status === 'open' && currentOrder.tableId && !local && (
+          {currentOrder?.status === 'open' && currentOrder.tableId && !local && !offline && (
             <div className="mt-3 grid grid-cols-3 gap-2">
               <SmallAction onClick={() => setTransfer('move')}>Taşı</SmallAction>
               <SmallAction onClick={() => setTransfer('merge')}>Birleştir</SmallAction>
@@ -413,14 +532,37 @@ export default function OrderScreen() {
         </header>
 
         <ul className="min-h-0 flex-1 space-y-2 overflow-auto bg-stone-50/70 p-3">
+          {!local && currentOrder?.fromSnapshot && (
+            <li
+              data-testid="order-from-snapshot"
+              className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+            >
+              Bağlantı yok: adisyonun son bilinen hali gösteriliyor. Eklediğiniz ürünler bu tablette
+              saklanır, bağlantı gelince gönderilir.
+            </li>
+          )}
+          {local && (currentOrder as { review?: unknown } | undefined)?.review !== undefined && (
+            <li
+              data-testid="draft-review"
+              className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+            >
+              Bu sipariş yönetici onayı bekliyor. Onaylanınca adisyon kendiliğinden açılır;
+              reddedilirse size bildirilir.
+            </li>
+          )}
+          <OrderProblems orderId={id} />
           {(currentOrder?.items ?? []).length === 0 && (
             <li className="flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-white text-center">
               <span className="text-sm font-bold text-ink-800">Adisyon boş</span>
               <span className="mt-1 text-xs text-stone-500">Soldan bir ürün seçerek başlayın.</span>
             </li>
           )}
-          {(currentOrder?.items ?? []).map((item) => {
+          {(currentOrder?.items ?? []).map((item: ServerItem) => {
             const pending = item.status === 'pending';
+            const cancelled = item.status === 'cancelled';
+            const shadow = isShadow(item);
+            // Baglanti yokken sunucu kalemi degistirilemez (cevrimdisi eklenenler degistirilir).
+            const locked = offline && !local && !shadow;
             return (
               <li
                 key={item.id}
@@ -429,7 +571,11 @@ export default function OrderScreen() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="block truncate text-sm font-bold text-ink-900">
+                    <span
+                      className={`block truncate text-sm font-bold ${
+                        cancelled ? 'text-stone-400 line-through' : 'text-ink-900'
+                      }`}
+                    >
                       {item.productNameSnapshot}
                     </span>
                     {(item.notes ?? []).length > 0 && (
@@ -440,13 +586,32 @@ export default function OrderScreen() {
                         Not: {(item.notes ?? []).map((n) => n.note).join('; ')}
                       </span>
                     )}
-                    {!pending && (
-                      <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-brand-700 uppercase">
-                        Mutfağa gönderildi
+                    {shadow ? (
+                      <span
+                        data-testid="item-offline"
+                        className="mt-0.5 block text-[10px] font-bold tracking-wide text-amber-700 uppercase"
+                      >
+                        {pending
+                          ? 'Bu tablette · bağlantı gelince eklenecek'
+                          : 'Bağlantı gelince mutfağa gidecek'}
                       </span>
+                    ) : cancelled ? (
+                      <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-red-600 uppercase">
+                        İptal edildi{item.voidReason ? ` · ${item.voidReason}` : ''}
+                      </span>
+                    ) : (
+                      !pending && (
+                        <span className="mt-0.5 block text-[10px] font-bold tracking-wide text-brand-700 uppercase">
+                          Mutfağa gönderildi
+                        </span>
+                      )
                     )}
                   </div>
-                  <span className="shrink-0 text-sm font-black text-ink-900">
+                  <span
+                    className={`shrink-0 text-sm font-black ${
+                      cancelled ? 'text-stone-400 line-through' : 'text-ink-900'
+                    }`}
+                  >
                     {formatKurus(item.lineTotal)}
                   </span>
                 </div>
@@ -457,13 +622,14 @@ export default function OrderScreen() {
                         label="Azalt"
                         onClick={() =>
                           item.quantity <= 1000
-                            ? removeItem.mutate(item.id)
+                            ? removeItem.mutate({ itemId: item.id, shadow })
                             : updateQty.mutate({
                                 itemId: item.id,
                                 quantity: item.quantity - 1000,
+                                shadow,
                               })
                         }
-                        disabled={busy}
+                        disabled={busy || locked}
                       >
                         −
                       </QtyButton>
@@ -476,26 +642,27 @@ export default function OrderScreen() {
                           updateQty.mutate({
                             itemId: item.id,
                             quantity: item.quantity + 1000,
+                            shadow,
                           })
                         }
-                        disabled={busy}
+                        disabled={busy || locked || item.quantity + 1000 > MAX_QUANTITY_MILLI}
                       >
                         +
                       </QtyButton>
-                      {!local && (
+                      {!local && !shadow && (
                         <button
                           data-testid="item-note-button"
                           onClick={() => setNoteItem(item)}
-                          disabled={busy}
+                          disabled={busy || locked}
                           className="ml-auto min-h-10 rounded-xl px-3 text-xs font-bold text-ink-700 hover:bg-stone-100"
                         >
                           Not
                         </button>
                       )}
                       <button
-                        onClick={() => removeItem.mutate(item.id)}
-                        disabled={busy}
-                        className={`${local ? 'ml-auto ' : ''}min-h-10 rounded-xl px-3 text-xs font-bold text-red-600 hover:bg-red-50`}
+                        onClick={() => removeItem.mutate({ itemId: item.id, shadow })}
+                        disabled={busy || locked}
+                        className={`${local || shadow ? 'ml-auto ' : ''}min-h-10 rounded-xl px-3 text-xs font-bold text-red-600 hover:bg-red-50`}
                       >
                         Sil
                       </button>
@@ -505,11 +672,14 @@ export default function OrderScreen() {
                       <span className="text-xs font-semibold text-stone-500">
                         {formatQty(item.quantity)} adet
                       </span>
-                      {canVoid && (
+                      {canVoid && !cancelled && !shadow && (
                         <button
-                          onClick={() => voidItem.mutate(item.id)}
-                          disabled={busy}
-                          className="ml-auto min-h-10 rounded-xl px-3 text-xs font-bold text-red-600 hover:bg-red-50"
+                          onClick={() => {
+                            setVoidError('');
+                            setVoidFor(item);
+                          }}
+                          disabled={busy || locked}
+                          className="ml-auto min-h-11 rounded-xl px-4 text-xs font-bold text-red-600 hover:bg-red-50"
                         >
                           İptal
                         </button>
@@ -540,6 +710,27 @@ export default function OrderScreen() {
               {error}
             </p>
           )}
+          {sentNote && (
+            <p
+              role="status"
+              data-testid="sent-toast"
+              className="mb-3 rounded-xl bg-brand-50 px-3 py-2 text-sm font-bold text-brand-800"
+            >
+              {local || offline
+                ? 'Sipariş bu tablette saklandı; bağlantı gelince mutfağa gidecek.'
+                : 'Mutfağa gönderildi ✓'}
+            </p>
+          )}
+          {isOpen && canPay && activeItems.length > 0 && (currentOrder?.grandTotal ?? 0) <= 0 && (
+            <button
+              data-testid="close-order"
+              onClick={() => closeOrder.mutate()}
+              disabled={closeOrder.isPending || hasPending}
+              className="mb-2 min-h-12 w-full rounded-2xl bg-brand-600 text-sm font-black text-white transition hover:bg-brand-700 disabled:opacity-40"
+            >
+              {hasPending ? 'Önce mutfağa gönderin' : 'Adisyonu kapat (ödeme yok)'}
+            </button>
+          )}
           {isOpen && activeItems.length === 0 && (
             <button
               data-testid="discard-order"
@@ -553,14 +744,19 @@ export default function OrderScreen() {
           <div className={`mb-2 grid gap-2 ${canVoid ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <SmallAction
               onClick={() => setDiscountOpen(true)}
-              disabled={busy || local || !currentOrder || currentOrder.status !== 'open'}
+              disabled={busy || local || offline || !currentOrder || currentOrder.status !== 'open'}
             >
               İndirim
             </SmallAction>
             <SmallAction
               onClick={() => hold.mutate()}
               disabled={
-                busy || local || hold.isPending || !currentOrder || currentOrder.status !== 'open'
+                busy ||
+                local ||
+                offline ||
+                hold.isPending ||
+                !currentOrder ||
+                currentOrder.status !== 'open'
               }
             >
               Beklet
@@ -570,6 +766,7 @@ export default function OrderScreen() {
               disabled={
                 busy ||
                 local ||
+                offline ||
                 printBill.isPending ||
                 !currentOrder ||
                 (currentOrder?.items ?? []).length === 0
@@ -579,8 +776,11 @@ export default function OrderScreen() {
             </SmallAction>
             {canVoid && (
               <SmallAction
-                onClick={() => setCancelOpen(true)}
-                disabled={!isOpen || activeItems.length === 0 || cancelOrder.isPending}
+                onClick={() => {
+                  setCancelError('');
+                  setCancelOpen(true);
+                }}
+                disabled={!isOpen || offline || activeItems.length === 0 || cancelOrder.isPending}
               >
                 İptal et
               </SmallAction>
@@ -660,16 +860,29 @@ export default function OrderScreen() {
         />
       )}
       {cancelOpen && (
-        <TextPromptModal
+        <ReasonModal
           title="Adisyonu iptal et"
           description="Adisyon kapatılır ve masa boşalır. Ödeme alınmışsa önce Kasa ekranından iade edin."
-          label="İptal nedeni"
-          suggestions={['Müşteri vazgeçti', 'Yanlış sipariş', 'Ürün kalmadı']}
-          confirmLabel="İptal et"
-          danger
+          reasons={CANCEL_REASONS}
+          confirmLabel="Adisyonu iptal et"
           busy={cancelOrder.isPending}
+          error={cancelError}
           onConfirm={(reason) => cancelOrder.mutate(reason)}
           onClose={() => setCancelOpen(false)}
+        />
+      )}
+      {voidFor && (
+        <ReasonModal
+          title="Kalemi iptal et"
+          description={`${formatQty(voidFor.quantity)} × ${voidFor.productNameSnapshot} · ${formatKurus(
+            voidFor.lineTotal,
+          )} — mutfağa gönderilmiş kalem iptal edilir ve adisyondan düşülür.`}
+          reasons={VOID_REASONS}
+          confirmLabel="Kalemi iptal et"
+          busy={voidItem.isPending}
+          error={voidError}
+          onConfirm={(reason) => voidItem.mutate({ itemId: voidFor.id, reason })}
+          onClose={() => setVoidFor(null)}
         />
       )}
       {splitOpen && currentOrder && (
@@ -697,6 +910,8 @@ function orderPlace(
   const no = `#${order.orderNo?.split('-')[1] ?? order.orderNo ?? ''}`;
   if (order.type === 'delivery') return { caption: 'Paket sipariş', title: no };
   if (order.type === 'takeaway') return { caption: 'Gel-al sipariş', title: no };
+  // Bolunerek ayrilan hesap (masasiz salon adisyonu): "Masa" degil (SAT-20).
+  if (!order.tableId && order.type === 'dine_in') return { caption: 'Ayrı hesap', title: no };
   const table = order.table ?? tables?.find((t) => t.id === order.tableId);
   const tableHallId = tables?.find((t) => t.id === order.tableId)?.hallId;
   const hall = order.table?.hall?.name ?? halls?.find((h) => h.id === tableHallId)?.name;
