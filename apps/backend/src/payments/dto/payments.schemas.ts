@@ -1,16 +1,19 @@
 import { z } from 'zod';
 import { PaymentMethod } from '@ado/shared';
+import { nonNegativeMoneyKurus, positiveMoneyKurus } from '../money-limits';
 
 // --- Odeme al (append-only) ---
 // idempotencyKey: cift-cekim onleme (Payment.idempotencyKey @unique). Para yolu -> zorunlu.
 export const recordPaymentSchema = z
   .object({
     method: z.nativeEnum(PaymentMethod),
-    amount: z.number().int().positive(), // kurus (adisyona uygulanan tutar)
-    received: z.number().int().nonnegative().optional(), // nakit verilen (para ustu icin)
+    amount: positiveMoneyKurus('Ödeme tutarı'), // kurus (adisyona uygulanan tutar)
+    received: nonNegativeMoneyKurus('Alınan nakit').optional(), // nakit verilen (para ustu icin)
     reference: z.string().nullish(), // kart/havale ref
     customerId: z.string().min(1).optional(), // veresiye (method='debt') icin zorunlu
-    allowOverpay: z.boolean().optional(), // kalandan fazla tahsilat -> kullanici onayi ile
+    // Eski istemci uyumu: artik etkisiz. Nakitte kalandan fazlasi para ustu olur,
+    // nakit disinda kalandan fazla tahsilat reddedilir (BILL_OVERPAY).
+    allowOverpay: z.boolean().optional(),
     idempotencyKey: z.string().min(1), // ULID (offline idempotency)
   })
   .refine((d) => d.method !== PaymentMethod.Debt || !!d.customerId, {

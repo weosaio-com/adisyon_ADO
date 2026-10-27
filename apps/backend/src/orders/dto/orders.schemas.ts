@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { OrderStatus, OrderType } from '@ado/shared';
+import { MAX_MONEY_KURUS, quantityMilli } from '../../payments/money-limits';
 
 /** Query string 'true'/'false' -> boolean. */
 const boolQuery = z
@@ -14,7 +15,12 @@ const clientOpId = z.string().min(1).optional();
 export const openOrderSchema = z.object({
   tableId: z.string().nullish(),
   type: z.nativeEnum(OrderType).optional(), // varsayilan: dine_in
-  guestCount: z.number().int().positive().optional(),
+  guestCount: z
+    .number()
+    .int()
+    .positive()
+    .max(1000, 'Kişi sayısı en fazla 1000 olabilir.')
+    .optional(),
   note: z.string().nullish(),
   clientOpId,
 });
@@ -23,7 +29,7 @@ export type OpenOrderDto = z.infer<typeof openOrderSchema>;
 // --- Kalem ekle (fiyat/vergi/ad SUNUCUDA snapshot alinir; istemci gondermez) ---
 export const addItemSchema = z.object({
   productId: z.string().min(1),
-  quantity: z.number().int().positive(), // milis (x1000)
+  quantity: quantityMilli(), // milis (x1000)
   note: z.string().nullish(),
   clientOpId,
 });
@@ -31,7 +37,7 @@ export type AddItemDto = z.infer<typeof addItemSchema>;
 
 // --- Kalem miktar guncelle ---
 export const updateItemSchema = z.object({
-  quantity: z.number().int().positive(),
+  quantity: quantityMilli(),
 });
 export type UpdateItemDto = z.infer<typeof updateItemSchema>;
 
@@ -42,13 +48,16 @@ export const itemNoteSchema = z.object({
 export type ItemNoteDto = z.infer<typeof itemNoteSchema>;
 
 // --- Kalem void / adisyon iptal (gerekce) ---
+// Gerekce zorunlu (bos olamaz): serviste 400 REASON_REQUIRED ile anlasilir mesaj doner.
+const reason = z.string().max(200, 'Gerekçe en fazla 200 karakter olabilir.').nullish();
+
 export const voidItemSchema = z.object({
-  reason: z.string().nullish(),
+  reason,
 });
 export type VoidItemDto = z.infer<typeof voidItemSchema>;
 
 export const cancelOrderSchema = z.object({
-  reason: z.string().nullish(),
+  reason,
 });
 export type CancelOrderDto = z.infer<typeof cancelOrderSchema>;
 
@@ -71,13 +80,31 @@ export const splitOrderSchema = z.object({
 });
 export type SplitOrderDto = z.infer<typeof splitOrderSchema>;
 
+// --- Mutfaga gonder (istege bagli: yalniz secili bekleyen kalemler) ---
+export const sendKitchenSchema = z
+  .object({
+    itemIds: z.array(z.string().min(1)).min(1).max(500).optional(),
+  })
+  .optional();
+export type SendKitchenDto = z.infer<typeof sendKitchenSchema>;
+
 // --- Adisyon-seviyesi indirim ---
 // percent: value = yuzde (1-100). amount: value = kurus.
-export const applyDiscountSchema = z.object({
-  type: z.enum(['percent', 'amount']),
-  value: z.number().int().positive(),
-  reason: z.string().nullish(),
-});
+export const applyDiscountSchema = z
+  .object({
+    type: z.enum(['percent', 'amount']),
+    value: z
+      .number()
+      .int()
+      .positive('İndirim sıfırdan büyük olmalıdır.')
+      .max(MAX_MONEY_KURUS, 'İndirim en fazla 10.000.000 TL olabilir.'),
+    reason,
+    clientOpId, // tekrar korumasi: ayni anahtarla ikinci istek ikinci indirim acmaz
+  })
+  .refine((d) => d.type !== 'percent' || d.value <= 100, {
+    message: 'Yüzde indirim en fazla 100 olabilir.',
+    path: ['value'],
+  });
 export type ApplyDiscountDto = z.infer<typeof applyDiscountSchema>;
 
 // --- Sorgu ---

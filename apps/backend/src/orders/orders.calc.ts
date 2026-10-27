@@ -33,15 +33,40 @@ export function computeItemTotals(items: TotalsInput[]): OrderTotals {
   return { subtotal, discountTotal, taxTotal, serviceCharge, coverCharge, grandTotal };
 }
 
-// Adisyon-seviyesi indirimleri (satir indirimine EK) katar. taxTotal degismez.
+// Adisyon indirimlerinin guncel tutari: yuzde indirim GUNCEL ara toplamdan yeniden
+// hesaplanir (sonradan eklenen kaleme de uygulanir, iptalde kuculur); tutar indirimi sabit.
+export function effectiveDiscountAmounts(
+  subtotal: number,
+  discounts: Array<{ type: string; value: number; amount: number }>,
+): number[] {
+  return discounts.map((d) =>
+    d.type === 'percent' ? Math.round((subtotal * d.value) / 100) : d.amount,
+  );
+}
+
+// Adisyon-seviyesi indirimleri (satir indirimine EK) katar. KDV fiyata dahil oldugundan
+// indirim KDV'yi de dusurur: indirim kalemlere net tutarlariyla orantili dagitilir ve
+// icerideki KDV indirimli tutardan satir bazinda yeniden hesaplanir (`items` verilirse).
 export function applyOrderDiscounts(
   totals: OrderTotals,
   orderDiscountAmounts: number[],
+  items?: TotalsInput[],
 ): OrderTotals {
   const extra = orderDiscountAmounts.reduce((s, a) => s + a, 0);
   const discountTotal = totals.discountTotal + extra;
   const grandTotal = totals.subtotal - discountTotal + totals.serviceCharge + totals.coverCharge;
-  return { ...totals, discountTotal, grandTotal };
+  let taxTotal = totals.taxTotal;
+  if (extra > 0 && items) {
+    const net = totals.subtotal - totals.discountTotal; // satir indirimleri dusulmus toplam
+    const factor = net > 0 ? Math.max(0, net - extra) / net : 0;
+    taxTotal = items.reduce(
+      (sum, it) =>
+        sum +
+        Math.round((it.lineTotal * factor * it.taxRatePermille) / (1000 + it.taxRatePermille)),
+      0,
+    );
+  }
+  return { ...totals, discountTotal, taxTotal, grandTotal };
 }
 
 // --- Self-check: `ts-node src/orders/orders.calc.ts` ---
@@ -73,6 +98,35 @@ if (require.main === module) {
   const merged = computeItemTotals([line, line]);
   assert.strictEqual(merged.grandTotal, a.grandTotal + b.grandTotal, 'merge geliri korur');
   assert.strictEqual(merged.taxTotal, a.taxTotal + b.taxTotal, 'merge KDV korur');
+
+  // SAT-3: adisyon indirimi icerideki KDV'yi de dusurur. 3 x 33,33 TL (%10) = 99,99 TL,
+  // KDV 9,09 TL; %50 indirim (50,00 TL) sonrasi 49,99 TL -> KDV 4,54 TL.
+  const kdvLine = [{ lineTotal: 9999, lineDiscount: 0, taxRatePermille: 100 }];
+  const half = applyOrderDiscounts(computeItemTotals(kdvLine), [5000], kdvLine);
+  assert.strictEqual(half.grandTotal, 4999, 'indirimli toplam');
+  assert.strictEqual(half.taxTotal, 454, 'indirimli KDV');
+  // Karisik oran: indirim satirlara orantili; tam indirimde KDV 0.
+  const mixed = [
+    { lineTotal: 11000, lineDiscount: 0, taxRatePermille: 100 },
+    { lineTotal: 12000, lineDiscount: 0, taxRatePermille: 200 },
+  ];
+  const mixedHalf = applyOrderDiscounts(computeItemTotals(mixed), [11500], mixed);
+  assert.strictEqual(mixedHalf.taxTotal, 500 + 1000, 'oranli dagitim (1000/2 + 2000/2)');
+  assert.strictEqual(applyOrderDiscounts(computeItemTotals(mixed), [23000], mixed).taxTotal, 0);
+  // SAT-14: yuzde indirim guncel ara toplamdan; tutar indirimi sabit.
+  assert.deepStrictEqual(
+    effectiveDiscountAmounts(20000, [
+      { type: 'percent', value: 10, amount: 1000 },
+      { type: 'amount', value: 500, amount: 500 },
+    ]),
+    [2000, 500],
+  );
+  assert.deepStrictEqual(
+    effectiveDiscountAmounts(1000, [{ type: 'percent', value: 10, amount: 2000 }]),
+    [100],
+  );
+  // Indirimsiz: KDV aynen.
+  assert.strictEqual(applyOrderDiscounts(computeItemTotals(mixed), [], mixed).taxTotal, 3000);
 
   console.log('✓ orders.calc self-check OK');
 }

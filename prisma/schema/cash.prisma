@@ -46,6 +46,7 @@ model CashTransaction {
   relatedExpenseId String?     @map("related_expense_id")
   createdBy        String      @map("created_by")
   note             String?
+  idempotencyKey   String?     @unique @map("idempotency_key") // elle hareket tekrar korumasi
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")

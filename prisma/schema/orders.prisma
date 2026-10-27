@@ -20,7 +20,7 @@ model Order {
   openedAt      DateTime        @map("opened_at")
   closedBy      String?         @map("closed_by")
   closedAt      DateTime?       @map("closed_at")
-  completedAt   DateTime?       @map("completed_at") // ilk tam odeme zamani, iade silmez
+  completedAt   DateTime?       @map("completed_at") // son tam odeme zamani; iade ile yeniden acilinca ve iptalde silinir
   guestCount    Int             @default(1) @map("guest_count")
   note          String?
   subtotal      Int             @default(0) // kurus
@@ -120,6 +120,7 @@ model OrderDiscount {
   appliedBy  String  @map("applied_by")
   reason     String?
   approvedBy String? @map("approved_by") // Waiter >%10 ise Owner
+  clientOpId String? @unique @map("client_op_id") // tekrar korumasi (cift dokunus / zaman asimi)
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
